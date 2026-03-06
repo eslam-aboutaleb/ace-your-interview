@@ -23,35 +23,59 @@ function migrateLegacySettingsStorage(): void {
 migrateLegacySettingsStorage();
 
 interface SettingsState {
+  llmSource: "personal" | "study_app";
   provider: string;
   model: string;
   temperature: number;
   maxTokens: number;
+  requireAnswerReveal: boolean;
   hydrateFromServer: (payload: {
+    llmSource: "personal" | "study_app";
     provider: string;
     model: string;
     temperature: number;
     maxTokens: number;
+    requireAnswerReveal: boolean;
   }) => void;
+  setLLMSource: (source: "personal" | "study_app") => void;
   setProvider: (p: string) => void;
   setModel: (m: string) => void;
   setTemperature: (t: number) => void;
   setMaxTokens: (t: number) => void;
+  setRequireAnswerReveal: (enabled: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
+      llmSource: "personal",
       provider: "openai",
       model: "gpt-4o-mini",
       temperature: 0.7,
       maxTokens: 0,
-      hydrateFromServer: ({ provider, model, temperature, maxTokens }) =>
-        set({ provider, model, temperature, maxTokens }),
+      requireAnswerReveal: true,
+      hydrateFromServer: ({
+        llmSource,
+        provider,
+        model,
+        temperature,
+        maxTokens,
+        requireAnswerReveal,
+      }) =>
+        set({
+          llmSource,
+          provider,
+          model,
+          temperature,
+          maxTokens,
+          requireAnswerReveal,
+        }),
+      setLLMSource: (llmSource) => set({ llmSource }),
       setProvider: (provider) => set({ provider, model: "" }),
       setModel: (model) => set({ model }),
       setTemperature: (temperature) => set({ temperature }),
       setMaxTokens: (maxTokens) => set({ maxTokens }),
+      setRequireAnswerReveal: (requireAnswerReveal) => set({ requireAnswerReveal }),
     }),
     { name: SETTINGS_STORAGE_KEY },
   ),

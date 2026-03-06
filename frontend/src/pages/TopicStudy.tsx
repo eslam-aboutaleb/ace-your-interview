@@ -572,21 +572,24 @@ export default function TopicStudy() {
                 initial="hidden"
                 animate="show"
               >
-                {questions.map((qa, idx) => (
-                  <motion.div key={qa.question_id} variants={cardVariants}>
-                    <WordHighlightChat
-                      contextQuestion={qa.question}
-                      contextAnswer={qa.answer}
-                      sessionKey={`study:${topic.id}`}
-                      topicId={topic.id}
-                      topicTitle={topic.title}
-                      topicTrack={topic.track}
-                      sectionTitle={qa.source_section || topic.sections[activeSection]?.heading}
-                      mode="study"
-                      selectionTargetSelector='[data-word-chat-target="true"]'
-                      qaKey={`${topicId}-${qa.question_id}`}
-                    >
-                      <div className="udemy-card overflow-hidden">
+                {questions.map((qa, idx) => {
+                  const isAnswerVisible =
+                    !settings.requireAnswerReveal || revealedAnswers.has(idx);
+                  return (
+                    <motion.div key={qa.question_id} variants={cardVariants}>
+                      <WordHighlightChat
+                        contextQuestion={qa.question}
+                        contextAnswer={qa.answer}
+                        sessionKey={`study:${topic.id}`}
+                        topicId={topic.id}
+                        topicTitle={topic.title}
+                        topicTrack={topic.track}
+                        sectionTitle={qa.source_section || topic.sections[activeSection]?.heading}
+                        mode="study"
+                        selectionTargetSelector='[data-word-chat-target="true"]'
+                        qaKey={`${topicId}-${qa.question_id}`}
+                      >
+                        <div className="udemy-card overflow-hidden">
                         <button
                           onClick={() => {
                             const highlighted = window.getSelection()?.toString().trim();
@@ -636,7 +639,9 @@ export default function TopicStudy() {
                               <div className="px-5 pb-5 pt-0 border-t border-udemy-border">
                                 <div className="mt-4 bg-white rounded-lg p-4 border border-udemy-border">
                                   <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
-                                    Your Attempt (Before Reveal)
+                                    {settings.requireAnswerReveal
+                                      ? "Your Attempt (Before Reveal)"
+                                      : "Your Attempt"}
                                   </h4>
                                   <textarea
                                     value={answerDrafts[idx] || ""}
@@ -671,7 +676,7 @@ export default function TopicStudy() {
                                   </div>
                                 </div>
 
-                                {!revealedAnswers.has(idx) && (
+                                {!isAnswerVisible && (
                                   <button
                                     onClick={() => handleReveal(idx)}
                                     className="btn-secondary mt-3"
@@ -680,7 +685,7 @@ export default function TopicStudy() {
                                   </button>
                                 )}
 
-                                {revealedAnswers.has(idx) && (
+                                {isAnswerVisible && (
                                   <>
                                     <div className="mt-3 bg-udemy-bg rounded-lg p-4">
                                       <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
@@ -720,7 +725,7 @@ export default function TopicStudy() {
                                   </>
                                 )}
 
-                                {revealedAnswers.has(idx) && !submittedAttempts.has(idx) && (
+                                {isAnswerVisible && !submittedAttempts.has(idx) && (
                                   <div className="mt-3 flex flex-wrap gap-2">
                                     <button
                                       onClick={() => submitAttempt(idx, true)}
@@ -744,10 +749,11 @@ export default function TopicStudy() {
                             </motion.div>
                           )}
                         </AnimatePresence>
-                      </div>
-                    </WordHighlightChat>
-                  </motion.div>
-                ))}
+                        </div>
+                      </WordHighlightChat>
+                    </motion.div>
+                  );
+                })}
 
                 <AnimatePresence>
                   {allSubmitted && (

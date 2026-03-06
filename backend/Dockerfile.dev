@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install deps
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e "." && pip install --no-cache-dir watchfiles
+
+# Copy source (overridden by volume mounts in dev)
+COPY app/ ./app/
+COPY main.py .
+COPY docs/ ./docs/
+
+EXPOSE 8001
+
+# uvicorn --reload watches for file changes
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload", "--reload-dir", "/app/app"]

@@ -18,7 +18,12 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from app.config import get_settings
 from app.schemas.models import MODEL_SUGGESTIONS, USER_SETTINGS_PROVIDER_WHITELIST
-from app.services.llm_policy import APPROVAL_REQUIRED_CODE
+from app.services.llm_assignments_store import LLMAssignmentsStore, normalise_identity
+from app.services.llm_policy import (
+    PERSONAL_CREDENTIAL_REQUIRED_CODE,
+    APPROVAL_REQUIRED_CODE,
+    STUDY_APP_NOT_ASSIGNED_CODE,
+)
 from app.services.llm_service_access import LLMServiceAccess
 
 logger = logging.getLogger(__name__)
@@ -39,13 +44,18 @@ def identity_key_for_user(user_identity: dict | None) -> str:
 class UserSettingsStore:
     """JSON-backed encrypted store for user LLM preferences and credentials."""
 
-    def __init__(self, llm_service_access: Optional[LLMServiceAccess] = None):
+    def __init__(
+        self,
+        llm_service_access: Optional[LLMServiceAccess] = None,
+        llm_assignments_store: Optional[LLMAssignmentsStore] = None,
+    ):
         settings = get_settings()
         self._path = Path(settings.user_settings_file)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._settings = settings
         self._llm_service_access = llm_service_access or LLMServiceAccess()
+        self._llm_assignments_store = llm_assignments_store or LLMAssignmentsStore()
 
         secret = settings.credentials_encryption_key.strip() or "dev-only-insecure-secret"
         digest = hashlib.sha256(secret.encode("utf-8")).digest()
@@ -84,6 +94,8 @@ class UserSettingsStore:
             "temperature": float(self._settings.default_temperature),
             "max_tokens": 0,
             "auth_mode": "api_key",
+            "llm_source": "personal",
+            "require_answer_reveal": True,
         }
 
     def _encrypt(self, value: str) -> str:
@@ -138,6 +150,10 @@ class UserSettingsStore:
         if provider != "google" and auth_mode == "account":
             auth_mode = "api_key"
 
+        llm_source = str(raw.get("llm_source", defaults.get("llm_source", "personal"))).strip().lower()
+        if llm_source not in {"personal", "study_app"}:
+            llm_source = "personal"
+
         try:
             temperature = float(raw.get("temperature", defaults["temperature"]))
         except (TypeError, ValueError):
@@ -150,12 +166,33 @@ class UserSettingsStore:
             max_tokens = int(defaults["max_tokens"])
         max_tokens = max(0, max_tokens)
 
+        raw_require_answer_reveal = raw.get(
+            "require_answer_reveal",
+            defaults.get("require_answer_reveal", True),
+        )
+        if isinstance(raw_require_answer_reveal, bool):
+            require_answer_reveal = raw_require_answer_reveal
+        elif isinstance(raw_require_answer_reveal, (int, float)):
+            require_answer_reveal = bool(raw_require_answer_reveal)
+        elif isinstance(raw_require_answer_reveal, str):
+            norm = raw_require_answer_reveal.strip().lower()
+            if norm in {"1", "true", "yes", "on"}:
+                require_answer_reveal = True
+            elif norm in {"0", "false", "no", "off"}:
+                require_answer_reveal = False
+            else:
+                require_answer_reveal = bool(defaults.get("require_answer_reveal", True))
+        else:
+            require_answer_reveal = bool(defaults.get("require_answer_reveal", True))
+
         return {
             "provider": provider,
             "model": model,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "auth_mode": auth_mode,
+            "llm_source": llm_source,
+            "require_answer_reveal": require_answer_reveal,
         }
 
     def get_user_state(self, identity_key: str) -> tuple[dict[str, Any], bool]:
@@ -345,7 +382,7 @@ class UserSettingsStore:
         )
         return next_access
 
-    async def resolve_runtime_credential(
+    async def resolve_personal_runtime_credential(
         self,
         *,
         identity_key: str,
@@ -354,7 +391,7 @@ class UserSettingsStore:
     ) -> tuple[Optional[str | dict[str, str]], str, Optional[str]]:
         p = provider.strip().lower()
         if p not in USER_SETTINGS_PROVIDERS:
-            return None, "backend", None
+            return None, "missing_personal", PERSONAL_CREDENTIAL_REQUIRED_CODE
 
         google_access_token: Optional[str] = None
         if p == "google":
@@ -369,16 +406,42 @@ class UserSettingsStore:
         if p == "google" and google_access_token:
             return {"Authorization": f"Bearer {google_access_token}"}, "user_account", None
 
+        return None, "missing_personal", PERSONAL_CREDENTIAL_REQUIRED_CODE
+
+    def is_identity_approved_for_backend_fallback(self, identity_key: str) -> bool:
+        provider, user = self._identity_parts(identity_key)
+        return self._llm_service_access.is_user_allowed(user=user, provider=provider)
+
+    def get_study_app_assignment(self, identity_key: str) -> Optional[dict[str, str]]:
+        assignment = self._llm_assignments_store.get_assignment(identity_key=identity_key)
+        if not assignment:
+            return None
+        return {
+            "provider": assignment.provider,
+            "model": assignment.model,
+            "updated_at": assignment.updated_at,
+        }
+
+    def get_study_app_provider_models(self) -> dict[str, list[str]]:
+        return self._llm_assignments_store.provider_models()
+
+    def resolve_study_app_provider_model(
+        self,
+        *,
+        identity_key: str,
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
         provider_identity, user_identity = self._identity_parts(identity_key)
         approved = self._llm_service_access.is_user_allowed(
             user=user_identity,
             provider=provider_identity,
         )
         if not approved:
-            return None, "blocked_unapproved", APPROVAL_REQUIRED_CODE
+            return None, None, APPROVAL_REQUIRED_CODE
 
-        return None, "backend", None
+        assignment = self._llm_assignments_store.get_assignment(identity_key=identity_key)
+        if assignment is None:
+            return None, None, STUDY_APP_NOT_ASSIGNED_CODE
+        return assignment.provider, assignment.model, None
 
-    def is_identity_approved_for_backend_fallback(self, identity_key: str) -> bool:
-        provider, user = self._identity_parts(identity_key)
-        return self._llm_service_access.is_user_allowed(user=user, provider=provider)
+    def get_identity_key(self, provider: str, identifier: str) -> str:
+        return normalise_identity(provider, identifier)

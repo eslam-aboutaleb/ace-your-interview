@@ -24,7 +24,13 @@ from app.routers import (
     user_settings,
 )
 from app.services.doc_parser import DocParser
-from app.services.llm_policy import LLMServiceApprovalRequiredError
+from app.services.llm_assignments_store import LLMAssignmentsStore
+from app.services.llm_policy import (
+    LLMServiceApprovalRequiredError,
+    PersonalCredentialRequiredError,
+    StudyAppLLMNotAssignedError,
+    policy_error_detail,
+)
 from app.services.llm_service_access import LLMServiceAccess
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
@@ -36,6 +42,7 @@ _llm_client: LLMClient | None = None
 _learning_store: LearningStore | None = None
 _user_settings_store: UserSettingsStore | None = None
 _llm_service_access: LLMServiceAccess | None = None
+_llm_assignments_store: LLMAssignmentsStore | None = None
 
 
 def _load_dotenv():
@@ -63,7 +70,7 @@ _load_dotenv()
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle."""
-    global _llm_client, _learning_store, _user_settings_store, _llm_service_access
+    global _llm_client, _learning_store, _user_settings_store, _llm_service_access, _llm_assignments_store
 
     settings = get_settings()
     logging.basicConfig(level=logging.INFO)
@@ -75,7 +82,11 @@ async def lifespan(application: FastAPI):
 
     # Initialise shared services
     _llm_service_access = LLMServiceAccess()
-    _user_settings_store = UserSettingsStore(llm_service_access=_llm_service_access)
+    _llm_assignments_store = LLMAssignmentsStore()
+    _user_settings_store = UserSettingsStore(
+        llm_service_access=_llm_service_access,
+        llm_assignments_store=_llm_assignments_store,
+    )
     _llm_client = LLMClient(user_settings_store=_user_settings_store)
     _learning_store = LearningStore(settings.learning_db_path)
     parser = DocParser(settings.docs_path)
@@ -86,6 +97,7 @@ async def lifespan(application: FastAPI):
     llm_settings.init(_llm_client)
     user_settings.init(_user_settings_store)
     auth.init_llm_service_access(_llm_service_access)
+    auth.init_llm_assignments_store(_llm_assignments_store)
     chat.init(_llm_client)
     learning.init(_learning_store)
     interview_sessions.init(
@@ -143,12 +155,33 @@ def create_app() -> FastAPI:
         exc: LLMServiceApprovalRequiredError,
     ):
         return JSONResponse(
-            status_code=403,
+            status_code=exc.status_code,
             content={
-                "detail": {
-                    "code": exc.code,
-                    "message": exc.message,
-                }
+                "detail": policy_error_detail(exc),
+            },
+        )
+
+    @application.exception_handler(StudyAppLLMNotAssignedError)
+    async def _handle_study_app_not_assigned(
+        _request: Request,
+        exc: StudyAppLLMNotAssignedError,
+    ):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": policy_error_detail(exc),
+            },
+        )
+
+    @application.exception_handler(PersonalCredentialRequiredError)
+    async def _handle_personal_credential_required(
+        _request: Request,
+        exc: PersonalCredentialRequiredError,
+    ):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": policy_error_detail(exc),
             },
         )
 

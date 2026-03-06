@@ -89,6 +89,7 @@ class UserSettingsRouterTests(unittest.TestCase):
         self.assertEqual(get_res.status_code, 200)
         payload = get_res.json()
         self.assertFalse(payload["has_saved_preferences"])
+        self.assertTrue(payload["preferences"]["require_answer_reveal"])
 
         pref_res = self.client.put(
             "/api/user-settings/preferences",
@@ -98,9 +99,11 @@ class UserSettingsRouterTests(unittest.TestCase):
                 "temperature": 0.6,
                 "max_tokens": 256,
                 "auth_mode": "api_key",
+                "require_answer_reveal": False,
             },
         )
         self.assertEqual(pref_res.status_code, 200)
+        self.assertFalse(pref_res.json()["require_answer_reveal"])
 
         save_key_res = self.client.put(
             "/api/user-settings/api-key/openai",
@@ -121,6 +124,10 @@ class UserSettingsRouterTests(unittest.TestCase):
         self.assertEqual(delete_key_res.status_code, 200)
         providers2 = {p["provider"]: p for p in delete_key_res.json()["providers"]}
         self.assertFalse(providers2["openai"]["api_key_connected"])
+
+        after = self.client.get("/api/user-settings")
+        self.assertEqual(after.status_code, 200)
+        self.assertFalse(after.json()["preferences"]["require_answer_reveal"])
 
     def test_google_callback_stores_tokens(self):
         from unittest.mock import patch
