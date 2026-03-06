@@ -7,10 +7,11 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    app_name: str = "Polymarket Study Hub API"
+    app_name: str = "Ace Your Interview API"
     app_version: str = "2.0.0"
     host: str = "0.0.0.0"
     port: int = 8001
+    environment: str = "development"
 
     # Docs path
     docs_path: str = "docs"
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     learning_db_path: str = "/tmp/study_hub_learning.db"
     enable_v2_generation: bool = True
     enable_adaptive_learning: bool = True
+    enable_mock_interview_v1: bool = False
 
     # CORS
     cors_origins: str = "http://localhost:5174,http://localhost:5173,http://127.0.0.1:5174"
@@ -38,6 +40,10 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     allowed_github_users: str = ""
     allowed_google_emails: str = ""
+    admin_users: str = ""
+    credentials_encryption_key: str = ""
+    user_settings_file: str = "user_llm_settings.json"
+    llm_service_users_file: str = "llm_service_users.json"
 
     model_config = {"env_prefix": "STUDY_", "env_file": ".env", "extra": "ignore"}
 

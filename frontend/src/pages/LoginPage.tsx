@@ -23,8 +23,8 @@ export default function LoginPage() {
         <div className="udemy-card p-8 text-center">
           <GraduationCap className="w-16 h-16 text-udemy-purple-light mx-auto mb-4" />
           <h1 className="text-2xl font-bold mb-2">
-            Polymarket{" "}
-            <span className="text-udemy-purple-light">Study Hub</span>
+            Ace Your{" "}
+            <span className="text-udemy-purple-light">Interview</span>
           </h1>
           <p className="text-udemy-text-muted mb-8">Sign in to continue</p>
 

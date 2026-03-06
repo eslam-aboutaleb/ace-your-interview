@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🎓 Polymarket Study Hub — Starting..."
+echo "🎓 Ace Your Interview — Starting..."
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

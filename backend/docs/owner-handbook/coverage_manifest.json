@@ -1,0 +1,292 @@
+{
+  "version": "v1",
+  "target_total_sections": 1154,
+  "topics": {
+    "01-backend-fundamentals-and-http": {
+      "target_sections": 48,
+      "coverage_clusters": [
+        "HTTP Semantics",
+        "Request Lifecycle",
+        "Status Codes and Errors",
+        "Headers and Metadata",
+        "Idempotency and Retries",
+        "Validation Boundaries",
+        "Timeouts and Cancellation",
+        "Observability Basics"
+      ]
+    },
+    "02-backend-api-design-and-contracts": {
+      "target_sections": 48,
+      "coverage_clusters": [
+        "API Contract Design",
+        "Versioning and Compatibility",
+        "Resource Modeling",
+        "Error Taxonomy",
+        "Pagination and Filtering",
+        "Rate Limiting",
+        "Idempotent Mutations",
+        "API Governance"
+      ]
+    },
+    "03-backend-data-modeling-and-persistence": {
+      "target_sections": 48,
+      "coverage_clusters": [
+        "Relational Modeling",
+        "Indexing Strategy",
+        "Transaction Boundaries",
+        "NoSQL Patterns",
+        "Caching and Invalidation",
+        "Data Migrations",
+        "Data Integrity",
+        "Query Optimization"
+      ]
+    },
+    "04-backend-auth-security-observability": {
+      "target_sections": 48,
+      "coverage_clusters": [
+        "Authentication Flows",
+        "Authorization Models",
+        "Secret Management",
+        "OWASP Threats",
+        "Audit and Compliance",
+        "Logging and Tracing",
+        "Incident Response",
+        "Secure SDLC"
+      ]
+    },
+    "05-backend-testing-performance-concurrency": {
+      "target_sections": 48,
+      "coverage_clusters": [
+        "Test Pyramid",
+        "Contract Testing",
+        "Load and Stress Testing",
+        "Profiling and Bottlenecks",
+        "Concurrency Models",
+        "Race Conditions",
+        "Resilience Testing",
+        "Performance Budgets"
+      ]
+    },
+    "06-frontend-core-architecture": {
+      "target_sections": 46,
+      "coverage_clusters": [
+        "Rendering Pipeline",
+        "Component Architecture",
+        "State Ownership",
+        "Routing and Navigation",
+        "Form Architecture",
+        "Design Tokens",
+        "Accessibility Foundations",
+        "Build Tooling"
+      ]
+    },
+    "07-frontend-state-data-fetching": {
+      "target_sections": 46,
+      "coverage_clusters": [
+        "Local vs Remote State",
+        "Query Caching",
+        "Optimistic Updates",
+        "Revalidation Strategies",
+        "Error Recovery UX",
+        "API Normalization",
+        "Data Synchronization",
+        "Offline-first Patterns"
+      ]
+    },
+    "08-frontend-performance-accessibility": {
+      "target_sections": 46,
+      "coverage_clusters": [
+        "Core Web Vitals",
+        "Bundle Optimization",
+        "Rendering Performance",
+        "Network Optimization",
+        "Accessibility Semantics",
+        "Keyboard Navigation",
+        "Screen Reader Support",
+        "Frontend Observability"
+      ]
+    },
+    "09-frontend-testing-and-ui-systems": {
+      "target_sections": 46,
+      "coverage_clusters": [
+        "Unit and Component Testing",
+        "Integration Testing",
+        "End-to-End Testing",
+        "Visual Regression",
+        "Design System Architecture",
+        "Component API Design",
+        "Theming and Tokens",
+        "UI Quality Gates"
+      ]
+    },
+    "10-system-design-foundations": {
+      "target_sections": 60,
+      "coverage_clusters": [
+        "Requirement Clarification",
+        "Capacity Estimation",
+        "Data Flow Modeling",
+        "API Gateway Strategy",
+        "Storage Selection",
+        "Caching Strategy",
+        "Queue and Async Processing",
+        "Tradeoff Communication"
+      ]
+    },
+    "11-system-design-scaling-and-reliability": {
+      "target_sections": 60,
+      "coverage_clusters": [
+        "Horizontal Scaling",
+        "Load Balancing",
+        "Sharding and Partitioning",
+        "Replication Topologies",
+        "Fault Tolerance",
+        "SLO and Error Budgets",
+        "Disaster Recovery",
+        "Reliability Reviews"
+      ]
+    },
+    "12-system-design-data-consistency-and-tradeoffs": {
+      "target_sections": 60,
+      "coverage_clusters": [
+        "Consistency Models",
+        "Transactions and Sagas",
+        "Eventual Consistency",
+        "Conflict Resolution",
+        "Distributed Locking",
+        "Consensus Concepts",
+        "Read/Write Tradeoffs",
+        "Data Correctness Testing"
+      ]
+    },
+    "13-ai-stack-llm-and-prompting": {
+      "target_sections": 52,
+      "coverage_clusters": [
+        "Tokenization and Context Windows",
+        "Prompt Design Patterns",
+        "Structured Output",
+        "Tool Calling Basics",
+        "Hallucination Mitigation",
+        "Evaluation Rubrics",
+        "Safety Constraints",
+        "Production Prompt Ops"
+      ]
+    },
+    "14-ai-stack-rag-and-evaluation": {
+      "target_sections": 52,
+      "coverage_clusters": [
+        "Document Ingestion",
+        "Chunking and Embeddings",
+        "Retrieval Strategies",
+        "Reranking",
+        "Context Assembly",
+        "Grounded Generation",
+        "Offline Evaluation",
+        "Online Monitoring"
+      ]
+    },
+    "15-ai-stack-agents-tools-and-guardrails": {
+      "target_sections": 52,
+      "coverage_clusters": [
+        "Agent Planning",
+        "Tool Interface Design",
+        "Workflow Orchestration",
+        "Multi-step Reasoning Control",
+        "Permissioning and Sandboxing",
+        "Policy Guardrails",
+        "Human-in-the-loop",
+        "Failure Recovery"
+      ]
+    },
+    "16-ai-stack-serving-monitoring-and-cost": {
+      "target_sections": 52,
+      "coverage_clusters": [
+        "Inference Serving Architectures",
+        "Model Routing",
+        "Latency Optimization",
+        "Throughput Management",
+        "Cost Controls",
+        "Observability for AI",
+        "Incident Handling",
+        "FinOps for AI"
+      ]
+    },
+    "17-infrastructure-docker-deep-dive": {
+      "target_sections": 58,
+      "coverage_clusters": [
+        "Image Construction",
+        "Layer Caching",
+        "Multi-stage Builds",
+        "Runtime Security",
+        "Networking",
+        "Volumes and Persistence",
+        "Compose Workflows",
+        "Troubleshooting Containers"
+      ]
+    },
+    "18-infrastructure-terraform-infrastructure-as-code": {
+      "target_sections": 58,
+      "coverage_clusters": [
+        "Module Design",
+        "State Management",
+        "Plan and Apply Workflows",
+        "Drift Detection",
+        "Policy as Code",
+        "Secrets in IaC",
+        "Multi-environment Strategy",
+        "Terraform Testing"
+      ]
+    },
+    "19-infrastructure-kubernetes-orchestration": {
+      "target_sections": 58,
+      "coverage_clusters": [
+        "Cluster Architecture",
+        "Workload Controllers",
+        "Service Discovery",
+        "Config and Secrets",
+        "Autoscaling",
+        "Observability and Logging",
+        "Security Hardening",
+        "Kubernetes Operations"
+      ]
+    },
+    "20-cloud-aws-associate-exam-panel": {
+      "target_sections": 56,
+      "coverage_clusters": [
+        "IAM and Security",
+        "EC2 and Compute",
+        "Storage Services",
+        "Networking and VPC",
+        "Databases and Analytics",
+        "Serverless",
+        "Monitoring and Cost",
+        "Exam Strategy Labs"
+      ]
+    },
+    "21-cloud-gcp-associate-exam-panel": {
+      "target_sections": 56,
+      "coverage_clusters": [
+        "IAM and Organization Policy",
+        "Compute and Containers",
+        "Storage and Databases",
+        "Networking",
+        "Data and Analytics",
+        "Serverless on GCP",
+        "Operations Suite",
+        "Exam Strategy Labs"
+      ]
+    },
+    "22-cloud-azure-associate-exam-panel": {
+      "target_sections": 56,
+      "coverage_clusters": [
+        "Azure Identity and Governance",
+        "Compute Options",
+        "Storage and Data Services",
+        "Networking",
+        "Integration and Messaging",
+        "Security and Compliance",
+        "Monitoring and Cost",
+        "Exam Strategy Labs"
+      ]
+    }
+  }
+}

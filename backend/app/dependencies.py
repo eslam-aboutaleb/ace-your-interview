@@ -1,6 +1,6 @@
 """Shared FastAPI dependencies."""
 
-from fastapi import Cookie, HTTPException, Request
+from fastapi import Cookie, Depends, HTTPException, Request
 
 from app.config import get_settings
 from app.services.auth import decode_jwt_token
@@ -15,6 +15,26 @@ def _is_local_frontend_config() -> bool:
     frontend = (get_settings().frontend_url or "").lower()
     return frontend.startswith("http://localhost") or frontend.startswith(
         "http://127.0.0.1"
+    )
+
+
+def _normalise_identity(provider: str, user: str) -> tuple[str, str]:
+    return (provider or "").strip().lower(), (user or "").strip().lower()
+
+
+def is_admin_identity(user: str, provider: str) -> bool:
+    settings = get_settings()
+    p_norm, u_norm = _normalise_identity(provider, user)
+    if not u_norm:
+        return False
+
+    entries = [x.strip().lower() for x in settings.admin_users.split(",") if x.strip()]
+    if not entries:
+        return False
+
+    return (
+        u_norm in entries
+        or f"{p_norm}:{u_norm}" in entries
     )
 
 
@@ -42,3 +62,9 @@ async def require_auth(request: Request, session: str = Cookie(default=None)) ->
         return {"user": payload["sub"], "provider": payload["provider"]}
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+
+async def require_admin(user: dict = Depends(require_auth)) -> dict:
+    if not is_admin_identity(user=user.get("user", ""), provider=user.get("provider", "")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user

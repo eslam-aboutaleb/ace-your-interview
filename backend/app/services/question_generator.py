@@ -23,6 +23,7 @@ from app.schemas.models import (
     QuizQuestionV2,
 )
 from app.services.llm_client import LLMClient
+from app.services.llm_policy import raise_if_policy_blocked_result
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ _MAX_DOC_CONTEXT = 45000
 _MAX_TOPIC_CONTEXT = 9000
 _MAX_ATTEMPTS = 5
 _VALID_DIFFICULTIES = {"easy", "medium", "hard"}
+_VALID_LEVELS = {"junior", "mid", "senior"}
 
 
 def _question_id(topic_id: str, question: str) -> str:
@@ -45,14 +47,21 @@ def _clamp_content(doc_content: str) -> str:
     return doc_content[:_MAX_DOC_CONTEXT]
 
 
+def _normalise_level(level: Optional[str]) -> str:
+    lv = (level or "mid").strip().lower()
+    return lv if lv in _VALID_LEVELS else "mid"
+
+
 def _build_prompt(
     topic_title: str,
     doc_content: str,
     count: int = 5,
     difficulty: Optional[str] = None,
+    level: Optional[str] = None,
     section_title: Optional[str] = None,
     section_content: Optional[str] = None,
 ) -> str:
+    target_level = _normalise_level(level)
     diff_clause = ""
     if difficulty:
         diff_clause = f' All questions should be "{difficulty}" difficulty.'
@@ -67,6 +76,7 @@ def _build_prompt(
     return f"""You are an expert technical interviewer and educator.
 
 Given documentation about {scope}, generate exactly {count} interview-style questions with detailed educational answers.{diff_clause}
+Target candidate level: "{target_level}".
 
 Return ONLY valid JSON in this shape:
 [
@@ -78,7 +88,8 @@ Return ONLY valid JSON in this shape:
     "source_section": "exact section heading",
     "source_quote": "short direct quote from docs",
     "misconception_trap": "common mistake this question targets",
-    "reasoning_summary": "1-2 sentence reasoning path to answer"
+    "reasoning_summary": "1-2 sentence reasoning path to answer",
+    "target_level": "junior|mid|senior"
   }}
 ]
 
@@ -86,8 +97,25 @@ Rules:
 - Questions must be standalone and non-duplicative.
 - Questions must cover conceptual + practical angles.
 - Answers must be grounded in the provided documentation.
+- Format answers as markdown, but keep structure adaptive:
+  - default to clear prose paragraphs for normal explanations,
+  - use bullets only when listing steps/checklists/categories,
+  - use headings only when the answer naturally has sections,
+  - use tables only for direct comparisons/category matrices.
+- If you use a table, output valid GFM table syntax:
+  - one row per line,
+  - include a separator row (e.g. `| --- | --- |`).
+- You may include fenced code blocks when code clarifies an implementation detail.
+- You may include fenced Mermaid diagrams when architecture or flows are better shown visually.
+- If you include fences, always use explicit language tags (for example: ```python, ```mermaid).
+- Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.
 - source_quote must be factual text from provided docs.
-- No markdown, no commentary, no code fences.
+- target_level must match "{target_level}" exactly.
+- Complexity must match target_level:
+  - junior: fundamentals, definitions, and straightforward tradeoffs.
+  - mid: implementation details, constraints, and moderate tradeoffs.
+  - senior: architecture, scaling, risk, and deep tradeoff decisions.
+- Keep markdown compact and practical.
 
 Documentation:
 {content}"""
@@ -98,7 +126,9 @@ def _build_quiz_prompt(
     count: int = 10,
     question_types: list[str] | None = None,
     difficulty: Optional[str] = None,
+    level: Optional[str] = None,
 ) -> str:
+    target_level = _normalise_level(level)
     types = question_types or ["mcq", "true_false"]
     diff_clause = ""
     if difficulty:
@@ -118,6 +148,7 @@ def _build_quiz_prompt(
     return f"""You are an expert technical quiz creator.
 
 Create exactly {count} quiz questions from the documentation below.{diff_clause}
+Target candidate level: "{target_level}".
 {type_instructions}
 
 Return ONLY valid JSON:
@@ -131,7 +162,8 @@ Return ONLY valid JSON:
     "difficulty": "easy|medium|hard",
     "topic_id": "one of provided topic ids",
     "source_quote": "short direct quote from docs",
-    "reasoning_summary": "1-2 sentence why answer is correct"
+    "reasoning_summary": "1-2 sentence why answer is correct",
+    "target_level": "junior|mid|senior"
   }}
 ]
 
@@ -140,7 +172,24 @@ Rules:
 - correct_answer must match one choice label.
 - Avoid trick ambiguity; one clearly correct answer.
 - Distribute questions across topics as evenly as possible.
-- No markdown, no commentary, no code fences.
+- Format explanations as markdown, but keep structure adaptive:
+  - default to clear prose paragraphs for normal explanations,
+  - use bullets only when listing steps/checklists/categories,
+  - use headings only when the explanation naturally has sections,
+  - use tables only for direct comparisons/category matrices.
+- If you use a table, output valid GFM table syntax:
+  - one row per line,
+  - include a separator row (e.g. `| --- | --- |`).
+- You may include fenced code blocks when code clarifies an implementation detail.
+- You may include fenced Mermaid diagrams when architecture or flows are better shown visually.
+- If you include fences, always use explicit language tags (for example: ```yaml, ```mermaid).
+- Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.
+- target_level must match "{target_level}" exactly.
+- Complexity must match target_level:
+  - junior: direct recall and simple application.
+  - mid: applied reasoning with concrete constraints.
+  - senior: architecture-level reasoning and tradeoff depth.
+- Keep markdown compact and practical.
 
 Documentation:
 {docs_text[:_MAX_DOC_CONTEXT]}"""
@@ -205,7 +254,12 @@ def _parse_questions_json(raw: str) -> list[dict]:
     return []
 
 
-def _validate_question_item(item: dict[str, Any], topic_id: str, difficulty: Optional[str]) -> tuple[bool, str]:
+def _validate_question_item(
+    item: dict[str, Any],
+    topic_id: str,
+    difficulty: Optional[str],
+    level: Optional[str],
+) -> tuple[bool, str]:
     required = [
         "question",
         "answer",
@@ -214,6 +268,7 @@ def _validate_question_item(item: dict[str, Any], topic_id: str, difficulty: Opt
         "source_quote",
         "misconception_trap",
         "reasoning_summary",
+        "target_level",
     ]
     for key in required:
         if not isinstance(item.get(key), str) or not item.get(key).strip():
@@ -228,6 +283,11 @@ def _validate_question_item(item: dict[str, Any], topic_id: str, difficulty: Opt
         return False, "question_too_short"
     if len(item["answer"].strip()) < 60:
         return False, "answer_too_short"
+    target_level = str(item.get("target_level", "")).strip().lower()
+    if target_level not in _VALID_LEVELS:
+        return False, "invalid_target_level"
+    if _normalise_level(level) != target_level:
+        return False, "level_mismatch"
     item["topic_id"] = topic_id
     item["difficulty"] = diff
     return True, ""
@@ -238,6 +298,7 @@ def _validate_quiz_item(
     allowed_topics: set[str],
     allowed_types: set[str],
     difficulty: Optional[str],
+    level: Optional[str],
 ) -> tuple[bool, str]:
     required = [
         "question",
@@ -248,6 +309,7 @@ def _validate_quiz_item(
         "topic_id",
         "source_quote",
         "reasoning_summary",
+        "target_level",
     ]
     for key in required:
         if key not in item:
@@ -261,6 +323,7 @@ def _validate_quiz_item(
     topic_id = str(item.get("topic_id", "")).strip()
     source_quote = item.get("source_quote")
     reasoning_summary = item.get("reasoning_summary")
+    target_level = str(item.get("target_level", "")).strip().lower()
 
     if not isinstance(q_text, str) or len(q_text.strip()) < 8:
         return False, "invalid_question"
@@ -276,6 +339,10 @@ def _validate_quiz_item(
         return False, "invalid_source_quote"
     if not isinstance(reasoning_summary, str) or len(reasoning_summary.strip()) < 8:
         return False, "invalid_reasoning_summary"
+    if target_level not in _VALID_LEVELS:
+        return False, "invalid_target_level"
+    if _normalise_level(level) != target_level:
+        return False, "level_mismatch"
 
     if not isinstance(choices, list):
         return False, "invalid_choices_type"
@@ -324,6 +391,7 @@ async def _collect_with_retries(
     llm: LLMClient,
     base_prompt: str,
     llm_config: Optional[LLMConfigRequest],
+    user_identity: Optional[dict] = None,
     target_count: int,
     validator: Callable[[dict[str, Any]], tuple[bool, str]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -337,7 +405,12 @@ async def _collect_with_retries(
     last_error = ""
 
     for attempt in range(_MAX_ATTEMPTS):
-        result = await llm.completion(prompt, llm_config)
+        result = await llm.completion(
+            prompt,
+            llm_config,
+            user_identity=user_identity,
+        )
+        raise_if_policy_blocked_result(result)
         metadata = result.get("metadata", {})
         if not result.get("success"):
             last_error = result.get("error", "unknown_error")
@@ -427,7 +500,9 @@ class QuestionGenerator:
         doc_content: str,
         count: int = 5,
         difficulty: Optional[str] = None,
+        level: Optional[str] = None,
         llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
     ) -> GenerateQuestionsResponse:
@@ -437,7 +512,9 @@ class QuestionGenerator:
             doc_content=doc_content,
             count=count,
             difficulty=difficulty,
+            level=level,
             llm_config=llm_config,
+            user_identity=user_identity,
             section_title=section_title,
             section_content=section_content,
         )
@@ -468,7 +545,9 @@ class QuestionGenerator:
         doc_content: str,
         count: int = 5,
         difficulty: Optional[str] = None,
+        level: Optional[str] = None,
         llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
     ) -> GenerateQuestionsV2Response:
@@ -477,15 +556,17 @@ class QuestionGenerator:
             doc_content=doc_content,
             count=count,
             difficulty=difficulty,
+            level=level,
             section_title=section_title,
             section_content=section_content,
         )
 
-        validator = lambda item: _validate_question_item(item, topic_id, difficulty)
+        validator = lambda item: _validate_question_item(item, topic_id, difficulty, level)
         raw_items, stats = await _collect_with_retries(
             llm=self.llm,
             base_prompt=prompt,
             llm_config=llm_config,
+            user_identity=user_identity,
             target_count=count,
             validator=validator,
         )
@@ -523,14 +604,18 @@ class QuestionGenerator:
         count: int = 10,
         question_types: list[str] | None = None,
         difficulty: Optional[str] = None,
+        level: Optional[str] = None,
         llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
     ) -> GenerateQuizResponse:
         v2 = await self.generate_quiz_v2(
             topics_content=topics_content,
             count=count,
             question_types=question_types,
             difficulty=difficulty,
+            level=level,
             llm_config=llm_config,
+            user_identity=user_identity,
         )
         legacy_questions = [
             QuizQuestion(
@@ -557,17 +642,26 @@ class QuestionGenerator:
         count: int = 10,
         question_types: list[str] | None = None,
         difficulty: Optional[str] = None,
+        level: Optional[str] = None,
         llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
     ) -> GenerateQuizV2Response:
-        prompt = _build_quiz_prompt(topics_content, count, question_types, difficulty)
+        prompt = _build_quiz_prompt(topics_content, count, question_types, difficulty, level)
         allowed_topics = {str(tc["id"]) for tc in topics_content}
         allowed_types = set(question_types or ["mcq", "true_false"])
-        validator = lambda item: _validate_quiz_item(item, allowed_topics, allowed_types, difficulty)
+        validator = lambda item: _validate_quiz_item(
+            item,
+            allowed_topics,
+            allowed_types,
+            difficulty,
+            level,
+        )
 
         raw_items, stats = await _collect_with_retries(
             llm=self.llm,
             base_prompt=prompt,
             llm_config=llm_config,
+            user_identity=user_identity,
             target_count=count,
             validator=validator,
         )
@@ -602,4 +696,3 @@ class QuestionGenerator:
             retries_used=stats.get("retries_used", 0),
             malformed_items_dropped=stats.get("malformed_items_dropped", 0),
         )
-

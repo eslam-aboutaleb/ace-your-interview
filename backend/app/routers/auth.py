@@ -11,14 +11,28 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.dependencies import require_auth
+from app.dependencies import is_admin_identity, require_admin, require_auth
 from app.services import auth as auth_service
+from app.services.llm_service_access import LLMServiceAccess
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 _TEN_YEARS = 10 * 365 * 24 * 60 * 60
+_LLM_SERVICE_ACCESS: LLMServiceAccess | None = None
+
+
+def init_llm_service_access(store: LLMServiceAccess):
+    global _LLM_SERVICE_ACCESS
+    _LLM_SERVICE_ACCESS = store
+
+
+def _get_llm_service_access() -> LLMServiceAccess:
+    global _LLM_SERVICE_ACCESS
+    if _LLM_SERVICE_ACCESS is None:
+        _LLM_SERVICE_ACCESS = LLMServiceAccess()
+    return _LLM_SERVICE_ACCESS
 
 
 def _cookie_kwargs() -> dict:
@@ -145,7 +159,13 @@ async def google_callback(request: Request, code: str, state: str = ""):
 
 @router.get("/me")
 async def me(user: dict = Depends(require_auth)):
-    return user
+    return {
+        **user,
+        "is_admin": is_admin_identity(
+            user=user.get("user", ""),
+            provider=user.get("provider", ""),
+        ),
+    }
 
 
 @router.post("/logout")
@@ -164,17 +184,47 @@ class AllowedUserBody(BaseModel):
 
 
 @router.get("/allowed-users")
-async def list_allowed_users(_user: dict = Depends(require_auth)):
+async def list_allowed_users(_user: dict = Depends(require_admin)):
     return auth_service.get_allowed_users()
 
 
 @router.post("/allowed-users")
-async def add_user(body: AllowedUserBody, _user: dict = Depends(require_auth)):
+async def add_user(body: AllowedUserBody, _user: dict = Depends(require_admin)):
     return auth_service.add_allowed_user(body.provider, body.identifier)
 
 
 @router.delete("/allowed-users/{provider}/{identifier:path}")
 async def remove_user(
-    provider: str, identifier: str, _user: dict = Depends(require_auth)
+    provider: str, identifier: str, _user: dict = Depends(require_admin)
 ):
     return auth_service.remove_allowed_user(provider, identifier)
+
+
+# ── LLM-service allowlist management ────────────────────────
+
+
+class LLMServiceUserBody(BaseModel):
+    provider: str
+    identifier: str
+
+
+@router.get("/llm-service-users")
+async def list_llm_service_users(_user: dict = Depends(require_admin)):
+    return _get_llm_service_access().list_users()
+
+
+@router.post("/llm-service-users")
+async def add_llm_service_user(
+    body: LLMServiceUserBody,
+    _user: dict = Depends(require_admin),
+):
+    return _get_llm_service_access().add_user(body.provider, body.identifier)
+
+
+@router.delete("/llm-service-users/{provider}/{identifier:path}")
+async def remove_llm_service_user(
+    provider: str,
+    identifier: str,
+    _user: dict = Depends(require_admin),
+):
+    return _get_llm_service_access().remove_user(provider, identifier)

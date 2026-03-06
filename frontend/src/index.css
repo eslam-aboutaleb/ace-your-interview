@@ -47,6 +47,32 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-udemy-text-muted;
   }
+
+  .friendly-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #6b7280 #e5e7eb;
+    scrollbar-gutter: stable;
+  }
+  .friendly-scrollbar::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  .friendly-scrollbar::-webkit-scrollbar-track {
+    background: #e5e7eb;
+    border-radius: 9999px;
+  }
+  .friendly-scrollbar::-webkit-scrollbar-thumb {
+    background: #6b7280;
+    border-radius: 9999px;
+    border: 3px solid #e5e7eb;
+    min-height: 28px;
+  }
+  .friendly-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #4b5563;
+  }
+  .friendly-scrollbar::-webkit-scrollbar-thumb:active {
+    background: #374151;
+  }
 }
 
 @layer components {
@@ -121,13 +147,19 @@
   @apply mb-3 pl-6;
 }
 .markdown-content li {
-  @apply mb-1;
+  @apply mb-1 leading-relaxed;
 }
 .markdown-content ul li {
   @apply list-disc;
 }
 .markdown-content ol li {
   @apply list-decimal;
+}
+.markdown-content strong {
+  @apply font-bold text-udemy-text;
+}
+.markdown-content em {
+  @apply not-italic font-semibold bg-amber-100/70 px-1 rounded;
 }
 .markdown-content code {
   @apply bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-udemy-purple;
@@ -138,11 +170,50 @@
 .markdown-content pre code {
   @apply bg-transparent text-gray-100 px-0 py-0;
 }
+.code-panel {
+  @apply border border-udemy-border rounded-lg overflow-hidden mb-4 bg-[#0f172a] text-gray-100;
+}
+.code-panel-header {
+  @apply flex items-center justify-between px-3 py-2 bg-[#111827] border-b border-[#1f2937];
+}
+.code-panel-language {
+  @apply text-[11px] uppercase tracking-wide font-semibold text-gray-300;
+}
+.code-panel-copy {
+  @apply text-[11px] font-semibold text-gray-200 bg-[#1f2937] border border-[#374151] rounded px-2 py-1 hover:bg-[#374151] transition-colors;
+}
+.code-panel-body {
+  @apply overflow-x-auto;
+}
+.code-panel-body pre {
+  margin-bottom: 0 !important;
+}
+.diagram-panel {
+  @apply border border-udemy-border rounded-lg bg-white p-3 mb-4;
+}
+.diagram-scroll {
+  @apply overflow-x-auto;
+}
+.diagram-scroll svg {
+  @apply min-w-[560px] w-full h-auto;
+}
+.diagram-fallback {
+  @apply mb-4;
+}
+.diagram-fallback-title {
+  @apply text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1 mb-2;
+}
+.diagram-loading {
+  @apply text-xs text-udemy-text-muted;
+}
 .markdown-content blockquote {
   @apply border-l-4 border-udemy-purple pl-4 italic text-udemy-text-muted mb-3;
 }
+.markdown-table-wrap {
+  @apply w-full overflow-x-auto mb-4;
+}
 .markdown-content table {
-  @apply w-full border-collapse mb-4;
+  @apply w-full min-w-[520px] border-collapse;
 }
 .markdown-content th {
   @apply border border-udemy-border bg-udemy-bg px-3 py-2 text-left font-semibold;
@@ -152,4 +223,35 @@
 }
 .markdown-content a {
   @apply text-udemy-purple underline hover:text-udemy-purple-dark;
+}
+
+.markdown-content-compact h1 {
+  @apply text-lg mt-3 mb-2;
+}
+.markdown-content-compact h2 {
+  @apply text-base mt-3 mb-2;
+}
+.markdown-content-compact h3 {
+  @apply text-sm mt-2 mb-1;
+}
+.markdown-content-compact p,
+.markdown-content-compact ul,
+.markdown-content-compact ol {
+  @apply mb-2;
+}
+.markdown-content-compact table {
+  @apply min-w-[380px] text-xs;
+}
+.markdown-content-compact .code-panel-header {
+  @apply px-2 py-1.5;
+}
+.markdown-content-compact .code-panel-language,
+.markdown-content-compact .code-panel-copy {
+  @apply text-[10px];
+}
+.markdown-content-compact .diagram-panel {
+  @apply p-2;
+}
+.markdown-content-compact .diagram-scroll svg {
+  @apply min-w-[420px];
 }

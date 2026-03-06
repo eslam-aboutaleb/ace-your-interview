@@ -15,7 +15,6 @@ import {
   ChevronDown,
   AlertTriangle,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
 import {
   scaleInVariants,
   pageVariants,
@@ -34,7 +33,11 @@ import {
 import { useSettingsStore } from "@/store/settingsStore";
 import { useProgressStore } from "@/store/progressStore";
 import DifficultyBadge from "@/components/common/DifficultyBadge";
+import WordHighlightChat from "@/components/common/WordHighlightChat";
+import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import type {
+  InterviewLevel,
+  LearningTrack,
   TopicSummary,
   QuizQuestionType,
   QuizQuestionV2,
@@ -42,6 +45,13 @@ import type {
 } from "@/types";
 
 type QuizState = "setup" | "playing" | "results";
+
+const TRACK_LABELS: Record<LearningTrack, string> = {
+  backend: "Backend",
+  frontend: "Frontend",
+  system_design: "System Design",
+  ai_stack: "AI Stack",
+};
 
 export default function QuizMode() {
   const { topicId } = useParams<{ topicId: string }>();
@@ -58,6 +68,7 @@ export default function QuizMode() {
     new Set(["mcq", "true_false"]),
   );
   const [difficulty, setDifficulty] = useState("");
+  const [level, setLevel] = useState<InterviewLevel>("mid");
   const [generating, setGenerating] = useState(false);
   const [loadingTopics, setLoadingTopics] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
@@ -89,6 +100,19 @@ export default function QuizMode() {
   const { recordAttempt, setMastery } = useProgressStore();
 
   const current = questions[currentIdx];
+  const topicsById = useMemo(
+    () => new Map(topics.map((topic) => [topic.id, topic])),
+    [topics],
+  );
+  const currentTopic = current ? topicsById.get(current.topic_id) : undefined;
+  const currentContextAnswer = current
+    ? [
+        current.explanation,
+        current.source_quote ? `Source quote: ${current.source_quote}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    : "";
   const total = questions.length;
   const correctCount = useMemo(
     () => Object.values(answers).filter((a) => a.correct).length,
@@ -150,6 +174,7 @@ export default function QuizMode() {
         count: questionCount,
         question_types: Array.from(questionTypes),
         difficulty: difficulty || undefined,
+        level,
         llm_config: {
           provider: settings.provider,
           model: settings.model,
@@ -211,7 +236,7 @@ export default function QuizMode() {
     } finally {
       setGenerating(false);
     }
-  }, [selectedTopics, questionCount, questionTypes, difficulty, settings]);
+  }, [selectedTopics, questionCount, questionTypes, difficulty, level, settings]);
 
   const handleSubmitAnswer = async () => {
     if (!selectedAnswer || !current) return;
@@ -307,7 +332,7 @@ export default function QuizMode() {
                 Quiz Mode
               </h1>
               <p className="text-gray-400 mt-2">
-                Adaptive quiz with attempt tracking and weak-area feedback
+                Adaptive interview quiz with attempt tracking and weak-area feedback
               </p>
             </div>
           </div>
@@ -361,9 +386,10 @@ export default function QuizMode() {
                               <p className="text-sm font-medium line-clamp-1">
                                 {t.title}
                               </p>
-                              <p className="text-xs text-udemy-text-muted line-clamp-1">
-                                {t.section_count} sections
-                              </p>
+                              <div className="text-xs text-udemy-text-muted line-clamp-1">
+                                {t.section_count} sections ·{" "}
+                                {TRACK_LABELS[t.track] || t.track}
+                              </div>
                             </div>
                           </button>
                         ))}
@@ -436,6 +462,21 @@ export default function QuizMode() {
                       <option value="easy">Easy</option>
                       <option value="medium">Medium</option>
                       <option value="hard">Hard</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Interview Level
+                    </label>
+                    <select
+                      value={level}
+                      onChange={(e) => setLevel(e.target.value as InterviewLevel)}
+                      className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
+                    >
+                      <option value="junior">Junior</option>
+                      <option value="mid">Mid</option>
+                      <option value="senior">Senior</option>
                     </select>
                   </div>
 
@@ -531,111 +572,132 @@ export default function QuizMode() {
                     </span>
                   </div>
 
-                  <h2 className="text-lg md:text-xl font-bold leading-relaxed mb-6 mt-4">
-                    {current.question}
-                  </h2>
+                  <WordHighlightChat
+                    contextQuestion={current.question}
+                    contextAnswer={currentContextAnswer}
+                    sessionKey={`quiz:${current.topic_id || "unknown"}`}
+                    topicId={current.topic_id}
+                    topicTitle={currentTopic?.title || current.topic_id}
+                    topicTrack={currentTopic?.track || ""}
+                    mode="quiz"
+                    selectionTargetSelector='[data-word-chat-target="true"]'
+                    qaKey={`quiz:${current.question_id}`}
+                  >
+                    <h2
+                      data-word-chat-target="true"
+                      className="text-lg md:text-xl font-bold leading-relaxed mb-6 mt-4"
+                    >
+                      {current.question}
+                    </h2>
 
-                  <div className="space-y-3 mb-6">
-                    {current.choices.map((choice) => {
-                      const isSelected = selectedAnswer === choice.label;
-                      const isCorrect =
-                        answered && choice.label === current.correct_answer;
-                      const isWrong =
-                        answered &&
-                        isSelected &&
-                        choice.label !== current.correct_answer;
+                    <div className="space-y-3 mb-6">
+                      {current.choices.map((choice) => {
+                        const isSelected = selectedAnswer === choice.label;
+                        const isCorrect =
+                          answered && choice.label === current.correct_answer;
+                        const isWrong =
+                          answered &&
+                          isSelected &&
+                          choice.label !== current.correct_answer;
 
-                      return (
-                        <button
-                          key={choice.label}
-                          onClick={() => {
-                            if (!answered) setSelectedAnswer(choice.label);
-                          }}
-                          disabled={answered}
-                          className={`w-full p-4 rounded-lg border-2 text-left transition-all flex items-start gap-3 ${
-                            isCorrect
-                              ? "border-green-500 bg-green-50"
-                              : isWrong
-                                ? "border-red-500 bg-red-50"
-                                : isSelected
-                                  ? "border-udemy-purple bg-udemy-purple/5"
-                                  : "border-udemy-border hover:border-gray-400"
-                          } ${answered ? "cursor-default" : "cursor-pointer"}`}
-                        >
-                          <span
-                            className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors ${
+                        return (
+                          <button
+                            key={choice.label}
+                            onClick={() => {
+                              if (!answered) setSelectedAnswer(choice.label);
+                            }}
+                            disabled={answered}
+                            className={`w-full p-4 rounded-lg border-2 text-left transition-all flex items-start gap-3 ${
                               isCorrect
-                                ? "bg-green-500 border-green-500 text-white"
+                                ? "border-green-500 bg-green-50"
                                 : isWrong
-                                  ? "bg-red-500 border-red-500 text-white"
+                                  ? "border-red-500 bg-red-50"
                                   : isSelected
-                                    ? "bg-udemy-purple border-udemy-purple text-white"
-                                    : "border-gray-300 text-gray-500"
+                                    ? "border-udemy-purple bg-udemy-purple/5"
+                                    : "border-udemy-border hover:border-gray-400"
+                            } ${answered ? "cursor-default" : "cursor-pointer"}`}
+                          >
+                            <span
+                              className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors ${
+                                isCorrect
+                                  ? "bg-green-500 border-green-500 text-white"
+                                  : isWrong
+                                    ? "bg-red-500 border-red-500 text-white"
+                                    : isSelected
+                                      ? "bg-udemy-purple border-udemy-purple text-white"
+                                      : "border-gray-300 text-gray-500"
+                              }`}
+                            >
+                              {isCorrect ? (
+                                <CheckCircle2 className="w-4 h-4" />
+                              ) : isWrong ? (
+                                <XCircle className="w-4 h-4" />
+                              ) : (
+                                choice.label
+                              )}
+                            </span>
+                            <span className="text-[15px] leading-relaxed pt-1">
+                              {choice.text}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {!answered && (
+                      <div className="mb-5">
+                        <label className="text-xs font-medium text-udemy-text-muted block mb-1">
+                          Confidence: {answerConfidence}/5
+                        </label>
+                        <input
+                          type="range"
+                          min={1}
+                          max={5}
+                          step={1}
+                          value={answerConfidence}
+                          onChange={(e) => setAnswerConfidence(Number(e.target.value))}
+                          className="w-full accent-udemy-purple"
+                        />
+                      </div>
+                    )}
+
+                    <AnimatePresence>
+                      {answered && current.explanation && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="overflow-hidden mb-6"
+                        >
+                          <div
+                            className={`p-4 rounded-lg border-l-4 ${
+                              answers[currentIdx]?.correct
+                                ? "bg-green-50 border-green-500"
+                                : "bg-amber-50 border-amber-500"
                             }`}
                           >
-                            {isCorrect ? (
-                              <CheckCircle2 className="w-4 h-4" />
-                            ) : isWrong ? (
-                              <XCircle className="w-4 h-4" />
-                            ) : (
-                              choice.label
+                            <h4 className="text-xs font-bold uppercase text-udemy-text-muted mb-1">
+                              Explanation
+                            </h4>
+                            <div data-word-chat-target="true">
+                              <MarkdownRenderer
+                                content={current.explanation}
+                                className="text-[14px]"
+                              />
+                            </div>
+                            {current.source_quote && (
+                              <p
+                                data-word-chat-target="true"
+                                className="text-xs text-udemy-text-muted mt-2 italic"
+                              >
+                                Source: &ldquo;{current.source_quote}&rdquo;
+                              </p>
                             )}
-                          </span>
-                          <span className="text-[15px] leading-relaxed pt-1">
-                            {choice.text}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {!answered && (
-                    <div className="mb-5">
-                      <label className="text-xs font-medium text-udemy-text-muted block mb-1">
-                        Confidence: {answerConfidence}/5
-                      </label>
-                      <input
-                        type="range"
-                        min={1}
-                        max={5}
-                        step={1}
-                        value={answerConfidence}
-                        onChange={(e) => setAnswerConfidence(Number(e.target.value))}
-                        className="w-full accent-udemy-purple"
-                      />
-                    </div>
-                  )}
-
-                  <AnimatePresence>
-                    {answered && current.explanation && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden mb-6"
-                      >
-                        <div
-                          className={`p-4 rounded-lg border-l-4 ${
-                            answers[currentIdx]?.correct
-                              ? "bg-green-50 border-green-500"
-                              : "bg-amber-50 border-amber-500"
-                          }`}
-                        >
-                          <h4 className="text-xs font-bold uppercase text-udemy-text-muted mb-1">
-                            Explanation
-                          </h4>
-                          <div className="markdown-content text-[14px] leading-relaxed">
-                            <ReactMarkdown>{current.explanation}</ReactMarkdown>
                           </div>
-                          {current.source_quote && (
-                            <p className="text-xs text-udemy-text-muted mt-2 italic">
-                              Source: &ldquo;{current.source_quote}&rdquo;
-                            </p>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </WordHighlightChat>
 
                   <div className="flex items-center justify-between">
                     {!answered ? (
@@ -798,94 +860,127 @@ export default function QuizMode() {
                 {questions.map((q, idx) => {
                   const ans = answers[idx];
                   const isCorrect = ans?.correct;
+                  const reviewTopic = topicsById.get(q.topic_id);
+                  const reviewContextAnswer = [
+                    q.explanation,
+                    q.source_quote ? `Source quote: ${q.source_quote}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join("\n\n");
                   return (
                     <motion.div
                       key={q.question_id}
                       variants={cardVariants}
                       initial="hidden"
                       animate="show"
-                      className="udemy-card overflow-hidden"
                     >
-                      <button
-                        onClick={() =>
-                          setExpandedReview(expandedReview === idx ? null : idx)
-                        }
-                        className="w-full p-4 text-left flex items-start gap-3 hover:bg-gray-50 transition-colors"
+                      <WordHighlightChat
+                        contextQuestion={q.question}
+                        contextAnswer={reviewContextAnswer}
+                        sessionKey={`quiz:${q.topic_id || "unknown"}`}
+                        topicId={q.topic_id}
+                        topicTitle={reviewTopic?.title || q.topic_id}
+                        topicTrack={reviewTopic?.track || ""}
+                        mode="quiz"
+                        selectionTargetSelector='[data-word-chat-target="true"]'
+                        qaKey={`quiz-review:${q.question_id}`}
                       >
-                        <span
-                          className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold text-white ${
-                            isCorrect ? "bg-green-500" : "bg-red-500"
-                          }`}
-                        >
-                          {idx + 1}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium line-clamp-2">{q.question}</p>
-                          <div className="flex items-center gap-2 mt-1">
+                        <div className="udemy-card overflow-hidden">
+                          <button
+                            onClick={() => {
+                              const highlighted = window.getSelection()?.toString().trim();
+                              if (highlighted) return;
+                              setExpandedReview(expandedReview === idx ? null : idx);
+                            }}
+                            className="w-full p-4 text-left flex items-start gap-3 hover:bg-gray-50 transition-colors"
+                          >
                             <span
-                              className={`text-xs font-bold ${
-                                isCorrect ? "text-green-600" : "text-red-500"
+                              className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold text-white ${
+                                isCorrect ? "bg-green-500" : "bg-red-500"
                               }`}
                             >
-                              {isCorrect ? "Correct" : "Incorrect"}
+                              {idx + 1}
                             </span>
-                            <span className="text-xs text-udemy-text-muted">
-                              Your answer: {ans?.selected}
-                              {!isCorrect && ` · Correct: ${q.correct_answer}`}
-                            </span>
-                          </div>
-                        </div>
-                        <motion.div
-                          animate={{ rotate: expandedReview === idx ? 180 : 0 }}
-                          className="flex-shrink-0 mt-1"
-                        >
-                          <ChevronDown className="w-5 h-5 text-udemy-text-muted" />
-                        </motion.div>
-                      </button>
-                      <AnimatePresence>
-                        {expandedReview === idx && (
-                          <motion.div
-                            variants={expandVariants}
-                            initial="collapsed"
-                            animate="expanded"
-                            exit="collapsed"
-                            className="overflow-hidden"
-                          >
-                            <div className="px-4 pb-4 border-t border-udemy-border pt-3">
-                              <div className="space-y-2 mb-3">
-                                {q.choices.map((c) => (
-                                  <div
-                                    key={c.label}
-                                    className={`text-sm px-3 py-2 rounded-lg flex items-center gap-2 ${
-                                      c.label === q.correct_answer
-                                        ? "bg-green-50 text-green-800 font-medium"
-                                        : c.label === ans?.selected && !ans?.correct
-                                          ? "bg-red-50 text-red-800"
-                                          : "text-gray-600"
-                                    }`}
-                                  >
-                                    <span className="font-bold">{c.label}.</span>
-                                    <span>{c.text}</span>
-                                  </div>
-                                ))}
+                            <div className="flex-1 min-w-0">
+                              <p
+                                data-word-chat-target="true"
+                                className="text-sm font-medium line-clamp-2"
+                              >
+                                {q.question}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span
+                                  className={`text-xs font-bold ${
+                                    isCorrect ? "text-green-600" : "text-red-500"
+                                  }`}
+                                >
+                                  {isCorrect ? "Correct" : "Incorrect"}
+                                </span>
+                                <span className="text-xs text-udemy-text-muted">
+                                  Your answer: {ans?.selected}
+                                  {!isCorrect && ` · Correct: ${q.correct_answer}`}
+                                </span>
                               </div>
-                              {q.explanation && (
-                                <div className="bg-udemy-bg rounded-lg p-3">
-                                  <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
-                                    Explanation
-                                  </h4>
-                                  <div className="markdown-content text-[13px] leading-relaxed">
-                                    <ReactMarkdown>{q.explanation}</ReactMarkdown>
-                                  </div>
-                                  <p className="text-xs text-udemy-text-muted mt-2 italic">
-                                    Source: &ldquo;{q.source_quote}&rdquo;
-                                  </p>
-                                </div>
-                              )}
                             </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                            <motion.div
+                              animate={{ rotate: expandedReview === idx ? 180 : 0 }}
+                              className="flex-shrink-0 mt-1"
+                            >
+                              <ChevronDown className="w-5 h-5 text-udemy-text-muted" />
+                            </motion.div>
+                          </button>
+                          <AnimatePresence>
+                            {expandedReview === idx && (
+                              <motion.div
+                                variants={expandVariants}
+                                initial="collapsed"
+                                animate="expanded"
+                                exit="collapsed"
+                                className="overflow-hidden"
+                              >
+                                <div className="px-4 pb-4 border-t border-udemy-border pt-3">
+                                  <div className="space-y-2 mb-3">
+                                    {q.choices.map((c) => (
+                                      <div
+                                        key={c.label}
+                                        className={`text-sm px-3 py-2 rounded-lg flex items-center gap-2 ${
+                                          c.label === q.correct_answer
+                                            ? "bg-green-50 text-green-800 font-medium"
+                                            : c.label === ans?.selected && !ans?.correct
+                                              ? "bg-red-50 text-red-800"
+                                              : "text-gray-600"
+                                        }`}
+                                      >
+                                        <span className="font-bold">{c.label}.</span>
+                                        <span>{c.text}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  {q.explanation && (
+                                    <div className="bg-udemy-bg rounded-lg p-3">
+                                      <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
+                                        Explanation
+                                      </h4>
+                                      <div data-word-chat-target="true">
+                                        <MarkdownRenderer
+                                          content={q.explanation}
+                                          className="text-[13px]"
+                                        />
+                                      </div>
+                                      <p
+                                        data-word-chat-target="true"
+                                        className="text-xs text-udemy-text-muted mt-2 italic"
+                                      >
+                                        Source: &ldquo;{q.source_quote}&rdquo;
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </WordHighlightChat>
                     </motion.div>
                   );
                 })}
@@ -897,4 +992,3 @@ export default function QuizMode() {
     </motion.div>
   );
 }
-

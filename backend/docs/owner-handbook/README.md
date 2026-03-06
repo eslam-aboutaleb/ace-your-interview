@@ -1,60 +1,43 @@
-# Polymarket Ownership Handbook
+# Ace Your Interview Handbook
 
-This handbook is for a junior engineer becoming responsible for this repository.
-It is written as a maintainership path: understand architecture, trace flows, change code safely, and operate/debug confidently.
+This handbook is the source curriculum for **Ace Your Interview**.
 
-## Who This Is For
-- New or junior fullstack engineers onboarding to this codebase
-- Engineers taking ownership of day-to-day fixes and feature delivery
-- Engineers preparing to handle incidents, hotfixes, and safe schema/API changes
+## Learning Tracks
+- Backend
+- Frontend
+- System Design
+- AI Stack
 
-## How To Use This Handbook
-1. Read in order once.
-2. During real tasks, jump to the relevant module (routing, migrations, auth, AI services, etc.).
-3. Use the playbooks before making non-trivial code changes.
-4. Use the 30-day plan as your onboarding execution checklist.
+## How To Study
+1. Pick a track and a target level (`junior`, `mid`, `senior`).
+2. Read the topic sections in order.
+3. Generate interview questions and attempt answers before reveal.
+4. Use quiz mode and revisit weak areas from adaptive feedback.
+5. Ask follow-up questions and request code/diagram explanations when needed.
 
-## Suggested Reading Order
-1. [01-system-map.md](./01-system-map.md)
-2. [02-tech-stack.md](./02-tech-stack.md)
-3. [03-backend-architecture.md](./03-backend-architecture.md)
-4. [04-frontend-architecture.md](./04-frontend-architecture.md)
-5. [05-ai-services-and-grpc.md](./05-ai-services-and-grpc.md)
-6. [06-data-model-and-migrations.md](./06-data-model-and-migrations.md)
-7. [07-auth-security-and-risk-controls.md](./07-auth-security-and-risk-controls.md)
-8. [08-design-patterns-in-this-codebase.md](./08-design-patterns-in-this-codebase.md)
-9. [09-endpoint-and-service-navigation.md](./09-endpoint-and-service-navigation.md)
-10. [10-debugging-testing-and-operations.md](./10-debugging-testing-and-operations.md)
-11. [11-change-playbooks.md](./11-change-playbooks.md)
-12. [12-30-day-ownership-plan.md](./12-30-day-ownership-plan.md)
-13. [13-glossary.md](./13-glossary.md)
+## Topic Sequence
+1. Backend fundamentals and HTTP
+2. Backend API design and contracts
+3. Backend data modeling and persistence
+4. Backend auth, security, and observability
+5. Backend testing, performance, and concurrency
+6. Frontend core architecture
+7. Frontend state and data fetching
+8. Frontend performance and accessibility
+9. Frontend testing and UI systems
+10. System design foundations
+11. System design scaling and reliability
+12. System design consistency and tradeoffs
+13. AI stack LLM and prompting
+14. AI stack RAG and evaluation
+15. AI stack agents, tools, and guardrails
+16. AI stack serving, monitoring, and cost
+17. Infrastructure Docker deep dive
+18. Infrastructure Terraform and IaC
+19. Infrastructure Kubernetes orchestration
+20. Cloud AWS associate exam panel
+21. Cloud GCP associate exam panel
+22. Cloud Azure associate exam panel
 
-## If You Only Have 1 Hour
-1. Read [01-system-map.md](./01-system-map.md) to understand moving parts.
-2. Read [03-backend-architecture.md](./03-backend-architecture.md) and [04-frontend-architecture.md](./04-frontend-architecture.md) for navigation.
-3. Skim [09-endpoint-and-service-navigation.md](./09-endpoint-and-service-navigation.md) to know where to edit.
-4. Skim [10-debugging-testing-and-operations.md](./10-debugging-testing-and-operations.md) before running or changing anything.
-
-## Cross-Reference Index
-- Architecture map: [01-system-map.md](./01-system-map.md)
-- Tech catalog: [02-tech-stack.md](./02-tech-stack.md)
-- Backend deep dive: [03-backend-architecture.md](./03-backend-architecture.md)
-- Frontend deep dive: [04-frontend-architecture.md](./04-frontend-architecture.md)
-- AI/gRPC/MCP: [05-ai-services-and-grpc.md](./05-ai-services-and-grpc.md)
-- Data model + Alembic: [06-data-model-and-migrations.md](./06-data-model-and-migrations.md)
-- Auth + security + risk: [07-auth-security-and-risk-controls.md](./07-auth-security-and-risk-controls.md)
-- Design patterns: [08-design-patterns-in-this-codebase.md](./08-design-patterns-in-this-codebase.md)
-- Endpoint/service map: [09-endpoint-and-service-navigation.md](./09-endpoint-and-service-navigation.md)
-- Debug/ops/tests: [10-debugging-testing-and-operations.md](./10-debugging-testing-and-operations.md)
-- Change playbooks: [11-change-playbooks.md](./11-change-playbooks.md)
-- 30-day path: [12-30-day-ownership-plan.md](./12-30-day-ownership-plan.md)
-- Glossary: [13-glossary.md](./13-glossary.md)
-
-## Scope and Non-Scope
-- Scope: maintainership learning, code navigation, safe change process.
-- Non-scope: replacing existing project docs at repo root.
-
-For setup commands and product-level intro docs, also see:
-- `README.md`
-- `QUICKSTART.md`
-- `AUTH_GUIDE.md`
+## Interview Prep Principle
+Use active recall: answer first, then compare with the model answer and note gaps. Ask for diagrams and code walkthroughs when a concept is complex.

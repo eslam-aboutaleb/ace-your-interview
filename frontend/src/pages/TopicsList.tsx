@@ -1,38 +1,95 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, useCallback } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { BookOpen, Search, ChevronRight, Filter } from "lucide-react";
+import { BookOpen, Search, ChevronRight, Filter, Loader2 } from "lucide-react";
 import {
   pageVariants,
   pageTransition,
   containerVariants,
   cardVariants,
 } from "@/utils/animations";
-import { fetchTopics } from "@/services/api";
+import { createCustomTopic, fetchTopics } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
-import type { TopicSummary } from "@/types";
+import type { InterviewLevel, LearningTrack, TopicSummary } from "@/types";
+
+const TRACK_LABELS: Record<LearningTrack, string> = {
+  backend: "Backend",
+  frontend: "Frontend",
+  system_design: "System Design",
+  ai_stack: "AI Stack",
+};
+
+const LEVEL_LABELS: Record<InterviewLevel, string> = {
+  junior: "Junior",
+  mid: "Mid",
+  senior: "Senior",
+};
 
 export default function TopicsList() {
+  const navigate = useNavigate();
   const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [track, setTrack] = useState<LearningTrack | "">("");
+  const [level, setLevel] = useState<InterviewLevel | "">("");
+  const [customTopic, setCustomTopic] = useState("");
+  const [creatingCustom, setCreatingCustom] = useState(false);
+  const [customError, setCustomError] = useState("");
+  const settings = useSettingsStore();
   const completedTopics = useProgressStore((s) => s.completedTopics);
   const getTopicProgress = useProgressStore((s) => s.getTopicProgress);
 
-  useEffect(() => {
-    fetchTopics()
-      .then(setTopics)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+  const loadTopics = useCallback(async () => {
+    setLoading(true);
+    try {
+      const loaded = await fetchTopics({
+        track: track || undefined,
+        level: level || undefined,
+        q: search.trim() || undefined,
+      });
+      setTopics(loaded);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [search, track, level]);
 
-  const filtered = topics.filter(
-    (t) =>
-      t.title.toLowerCase().includes(search.toLowerCase()) ||
-      t.description.toLowerCase().includes(search.toLowerCase()),
-  );
+  useEffect(() => {
+    loadTopics();
+  }, [loadTopics]);
+
+  const handleCreateCustomTopic = async () => {
+    const topic = customTopic.trim();
+    if (topic.length < 2) {
+      setCustomError("Please enter at least 2 characters for the custom topic.");
+      return;
+    }
+    setCreatingCustom(true);
+    setCustomError("");
+    try {
+      const created = await createCustomTopic({
+        topic,
+        llm_config: {
+          provider: settings.provider,
+          model: settings.model,
+          temperature: settings.temperature,
+          max_tokens: settings.maxTokens,
+        },
+      });
+      await loadTopics();
+      setCustomTopic("");
+      navigate(`/topics/${created.id}`);
+    } catch (err) {
+      console.error(err);
+      setCustomError("Could not generate the custom topic roadmap. Please try again.");
+    } finally {
+      setCreatingCustom(false);
+    }
+  };
 
   return (
     <motion.div
@@ -46,7 +103,7 @@ export default function TopicsList() {
         <div className="max-w-[1340px] mx-auto px-6 py-8">
           <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
             <BookOpen className="w-7 h-7 text-udemy-purple-light" />
-            All Topics
+            Interview Topics
           </h1>
           <p className="text-gray-400 mt-2">
             {topics.length} topics &middot; {completedTopics.length} completed
@@ -65,11 +122,62 @@ export default function TopicsList() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full border border-udemy-border rounded-lg pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-udemy-purple transition-colors"
           />
-          {search && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-udemy-text-muted flex items-center gap-1">
-              <Filter className="w-3.5 h-3.5" />
-              {filtered.length} results
-            </span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-udemy-text-muted flex items-center gap-1">
+            <Filter className="w-3.5 h-3.5" />
+            {topics.length} results
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+          <select
+            value={track}
+            onChange={(e) => setTrack(e.target.value as LearningTrack | "")}
+            className="border border-udemy-border rounded-lg px-3 py-2.5 text-sm"
+          >
+            <option value="">All tracks</option>
+            <option value="backend">Backend</option>
+            <option value="frontend">Frontend</option>
+            <option value="system_design">System Design</option>
+            <option value="ai_stack">AI Stack</option>
+          </select>
+          <select
+            value={level}
+            onChange={(e) => setLevel(e.target.value as InterviewLevel | "")}
+            className="border border-udemy-border rounded-lg px-3 py-2.5 text-sm"
+          >
+            <option value="">All levels</option>
+            <option value="junior">Junior</option>
+            <option value="mid">Mid</option>
+            <option value="senior">Senior</option>
+          </select>
+        </div>
+
+        <div className="udemy-card p-4 mb-6">
+          <h2 className="text-sm font-bold mb-2">Create Custom Topic</h2>
+          <p className="text-xs text-udemy-text-muted mb-3">
+            Enter any topic to generate a deep roadmap with 100+ subtopics.
+          </p>
+          <div className="flex flex-col md:flex-row gap-3">
+            <input
+              type="text"
+              value={customTopic}
+              onChange={(e) => setCustomTopic(e.target.value)}
+              placeholder="Enter custom topic (e.g. Java, Kafka, Spring Boot)"
+              className="flex-1 border border-udemy-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-udemy-purple"
+            />
+            <button
+              onClick={handleCreateCustomTopic}
+              disabled={creatingCustom}
+              className="btn-primary min-w-[220px] disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+            >
+              {creatingCustom && <Loader2 className="w-4 h-4 animate-spin" />}
+              {creatingCustom ? "Analyzing..." : "Analyze & Build Roadmap"}
+            </button>
+          </div>
+          {customError && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1 mt-3">
+              {customError}
+            </p>
           )}
         </div>
 
@@ -82,7 +190,7 @@ export default function TopicsList() {
             initial="hidden"
             animate="show"
           >
-            {filtered.map((topic, idx) => {
+            {topics.map((topic, idx) => {
               const progress = getTopicProgress(topic.id);
               const isComplete = completedTopics.includes(topic.id);
               return (
@@ -111,6 +219,16 @@ export default function TopicsList() {
                         <p className="text-sm text-udemy-text-muted line-clamp-1 mt-0.5">
                           {topic.description}
                         </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="text-[11px] font-semibold rounded-full bg-udemy-purple/10 text-udemy-purple px-2 py-0.5">
+                            {TRACK_LABELS[topic.track] || topic.track || "Topic"}
+                          </span>
+                          <span className="text-[11px] text-udemy-text-muted">
+                            {(topic.levels || [])
+                              .map((lv) => LEVEL_LABELS[lv] || lv)
+                              .join(" / ")}
+                          </span>
+                        </div>
                         <div className="flex items-center gap-4 mt-2">
                           <span className="text-xs text-udemy-text-muted">
                             {topic.section_count} sections

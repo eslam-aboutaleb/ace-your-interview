@@ -19,6 +19,27 @@ class LLMProviderEnum(str, Enum):
     GITHUB = "github"
 
 
+class TrackEnum(str, Enum):
+    BACKEND = "backend"
+    FRONTEND = "frontend"
+    SYSTEM_DESIGN = "system_design"
+    AI_STACK = "ai_stack"
+
+
+class LevelEnum(str, Enum):
+    JUNIOR = "junior"
+    MID = "mid"
+    SENIOR = "senior"
+
+
+class InterviewTypeEnum(str, Enum):
+    BEHAVIORAL = "behavioral"
+    TECHNICAL = "technical"
+    SYSTEM_DESIGN = "system_design"
+    AI_FUNDAMENTALS = "ai_fundamentals"
+    MIXED = "mixed"
+
+
 # Maps REST enum string → proto int
 PROVIDER_TO_PROTO: dict[str, int] = {
     "default": 0,
@@ -43,6 +64,7 @@ MODEL_SUGGESTIONS: dict[str, list[str]] = {
     "ollama": ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
     "github": ["gpt-4o-mini", "gpt-4o"],
 }
+USER_SETTINGS_PROVIDER_WHITELIST = ["google", "openai", "anthropic", "groq"]
 
 
 # ── Request / Response Models ───────────────────────────────
@@ -57,6 +79,7 @@ class GenerateQuestionsRequest(BaseModel):
     topic_id: str
     count: int = Field(default=5, ge=1, le=100)
     difficulty: Optional[str] = Field(default=None, pattern="^(easy|medium|hard)$")
+    level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
     llm_config: Optional[LLMConfigRequest] = None
     section_title: Optional[str] = None
     section_content: Optional[str] = None
@@ -103,6 +126,8 @@ class TopicSummary(BaseModel):
     id: str
     title: str
     description: str = ""
+    track: str = ""
+    levels: list[str] = Field(default_factory=list)
     section_count: int = 0
     estimated_questions: int = 0
 
@@ -111,8 +136,16 @@ class TopicDetail(BaseModel):
     id: str
     title: str
     description: str = ""
+    track: str = ""
+    levels: list[str] = Field(default_factory=list)
     sections: list[dict[str, str]]  # [{heading, content}]
     raw_content: str = ""
+
+
+class CreateCustomTopicRequest(BaseModel):
+    topic: str = Field(..., min_length=2, max_length=120)
+    target_sections: int = Field(default=120, ge=100, le=150)
+    llm_config: Optional[LLMConfigRequest] = None
 
 
 class ProviderStatus(BaseModel):
@@ -133,6 +166,43 @@ class HealthStatus(BaseModel):
     cli_agent_version: str = ""
 
 
+class UserAuthModeEnum(str, Enum):
+    API_KEY = "api_key"
+    ACCOUNT = "account"
+
+
+class UserPreferences(BaseModel):
+    provider: str = Field(default="openai", pattern="^(google|openai|anthropic|groq)$")
+    model: str = ""
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=0, ge=0)
+    auth_mode: UserAuthModeEnum = UserAuthModeEnum.API_KEY
+
+
+class UserPreferencesUpdateRequest(UserPreferences):
+    pass
+
+
+class UserApiKeyUpdateRequest(BaseModel):
+    api_key: str = Field(..., min_length=1, max_length=500)
+
+
+class ProviderConnectionStatus(BaseModel):
+    provider: str
+    models: list[str] = []
+    supports_account_connect: bool = False
+    api_key_connected: bool = False
+    account_connected: bool = False
+    using_backend_fallback: bool = False
+    backend_fallback_eligible: bool = False
+
+
+class UserSettingsResponse(BaseModel):
+    has_saved_preferences: bool = False
+    preferences: UserPreferences
+    providers: list[ProviderConnectionStatus] = []
+
+
 # ── Chat Follow-Up Models ────────────────────────────────────
 class ChatMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
@@ -143,6 +213,11 @@ class ChatFollowUpRequest(BaseModel):
     word: str
     context_question: str = ""
     context_answer: str = ""
+    topic_id: str = ""
+    topic_title: str = ""
+    topic_track: str = ""
+    section_title: str = ""
+    mode: str = ""
     user_message: str
     history: list[ChatMessage] = []
     llm_config: Optional[LLMConfigRequest] = None
@@ -180,6 +255,7 @@ class GenerateQuizRequest(BaseModel):
     count: int = Field(default=10, ge=1, le=100)
     question_types: list[QuizQuestionType] = [QuizQuestionType.MCQ, QuizQuestionType.TRUE_FALSE]
     difficulty: Optional[str] = Field(default=None, pattern="^(easy|medium|hard)$")
+    level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
     llm_config: Optional[LLMConfigRequest] = None
 
 
@@ -272,6 +348,126 @@ class TopicMasteryItem(BaseModel):
 
 class TopicMasteryResponse(BaseModel):
     topics: list[TopicMasteryItem]
+
+
+# ── Mock Interview Models ────────────────────────────────────
+class RubricScore(BaseModel):
+    technical_accuracy: int = Field(default=3, ge=0, le=5)
+    reasoning_depth: int = Field(default=3, ge=0, le=5)
+    communication_clarity: int = Field(default=3, ge=0, le=5)
+    completeness: int = Field(default=3, ge=0, le=5)
+    confidence_signal: int = Field(default=3, ge=0, le=5)
+    overall: int = Field(default=60, ge=0, le=100)
+
+
+class RubricAverages(BaseModel):
+    technical_accuracy: float = 0.0
+    reasoning_depth: float = 0.0
+    communication_clarity: float = 0.0
+    completeness: float = 0.0
+    confidence_signal: float = 0.0
+    overall: float = 0.0
+
+
+class InterviewSession(BaseModel):
+    session_id: str
+    track: TrackEnum
+    level: LevelEnum
+    interview_type: InterviewTypeEnum
+    turn_count: int
+    turns_completed: int
+    status: str
+    target_role: str = ""
+    focus_areas: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    current_question: str = ""
+    report_ready: bool = False
+
+
+class InterviewTurn(BaseModel):
+    session_id: str
+    turn_index: int
+    question: str
+    user_answer: str = ""
+    rubric: RubricScore
+    strengths: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
+    follow_up_note: str = ""
+    response_time_ms: int = 0
+    created_at: str
+
+
+class InterviewReport(BaseModel):
+    session_id: str
+    overall_score: float
+    readiness_label: str
+    completed_turns: int
+    rubric_averages: RubricAverages
+    weak_competencies: list[str] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    recommended_topic_ids: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    summary: str = ""
+    created_at: str
+    updated_at: str
+
+
+class CreateInterviewSessionRequest(BaseModel):
+    track: TrackEnum
+    level: LevelEnum = LevelEnum.MID
+    interview_type: InterviewTypeEnum = InterviewTypeEnum.MIXED
+    turn_count: int = Field(default=5, ge=1, le=20)
+    target_role: str = Field(default="", max_length=200)
+    job_description_text: str = Field(default="", max_length=20000)
+    resume_summary_text: str = Field(default="", max_length=20000)
+    focus_areas: list[str] = Field(default_factory=list, max_length=30)
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class SubmitInterviewAnswerRequest(BaseModel):
+    user_answer: str = Field(..., min_length=1, max_length=20000)
+    response_time_ms: int = Field(default=0, ge=0)
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class NextInterviewQuestionRequest(BaseModel):
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class InterviewSessionResponse(BaseModel):
+    session: InterviewSession
+    turns: list[InterviewTurn] = Field(default_factory=list)
+
+
+class InterviewTurnResponse(BaseModel):
+    session: InterviewSession
+    turn: InterviewTurn
+    report_ready: bool = False
+
+
+class InterviewQuestionResponse(BaseModel):
+    session_id: str
+    turn_index: int
+    question: str
+    competency_focus: str = ""
+    expected_signals: list[str] = Field(default_factory=list)
+
+
+class InterviewReportResponse(BaseModel):
+    session: InterviewSession
+    report: InterviewReport
+
+
+class InterviewSessionsListResponse(BaseModel):
+    sessions: list[InterviewSession] = Field(default_factory=list)
+    total: int = 0
+
+
+class InterviewStatsResponse(BaseModel):
+    total_sessions: int = 0
+    completed_sessions: int = 0
+    interview_readiness_score: float = 0.0
 
 
 # ── Ollama Models ────────────────────────────────────────────

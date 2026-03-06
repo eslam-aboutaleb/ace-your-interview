@@ -7,6 +7,7 @@ import {
   TrendingUp,
   Sparkles,
   ChevronRight,
+  MessageSquare,
 } from "lucide-react";
 import {
   containerVariants,
@@ -14,37 +15,63 @@ import {
   pageVariants,
   pageTransition,
 } from "@/utils/animations";
-import { fetchTopicMastery, fetchTopics } from "@/services/api";
+import { fetchInterviewStats, fetchTopicMastery, fetchTopics } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
 import type { TopicSummary } from "@/types";
 
 const TOPIC_ICONS: Record<string, string> = {
-  "01-system-map": "🗺️",
-  "02-tech-stack": "⚙️",
-  "03-backend-architecture": "🏗️",
-  "04-frontend-architecture": "🖥️",
-  "05-ai-services-and-grpc": "🤖",
-  "06-data-model-and-migrations": "🗄️",
-  "07-auth-security-and-risk-controls": "🔐",
-  "08-design-patterns-in-this-codebase": "🧩",
-  "09-endpoint-and-service-navigation": "🧭",
-  "10-debugging-testing-and-operations": "🐛",
-  "11-change-playbooks": "📋",
-  "12-30-day-ownership-plan": "📅",
-  "13-glossary": "📖",
-  README: "📘",
+  "01-backend-fundamentals-and-http": "🌐",
+  "02-backend-api-design-and-contracts": "🧾",
+  "03-backend-data-modeling-and-persistence": "🗄️",
+  "04-backend-auth-security-observability": "🔐",
+  "05-backend-testing-performance-concurrency": "⚡",
+  "06-frontend-core-architecture": "🧱",
+  "07-frontend-state-data-fetching": "🔄",
+  "08-frontend-performance-accessibility": "♿",
+  "09-frontend-testing-and-ui-systems": "🧪",
+  "10-system-design-foundations": "🏛️",
+  "11-system-design-scaling-and-reliability": "📈",
+  "12-system-design-data-consistency-and-tradeoffs": "⚖️",
+  "13-ai-stack-llm-and-prompting": "🧠",
+  "14-ai-stack-rag-and-evaluation": "📚",
+  "15-ai-stack-agents-tools-and-guardrails": "🛡️",
+  "16-ai-stack-serving-monitoring-and-cost": "💸",
+  "17-infrastructure-docker-deep-dive": "🐳",
+  "18-infrastructure-terraform-infrastructure-as-code": "🏗️",
+  "19-infrastructure-kubernetes-orchestration": "☸️",
+  "20-cloud-aws-associate-exam-panel": "☁️",
+  "21-cloud-gcp-associate-exam-panel": "🌍",
+  "22-cloud-azure-associate-exam-panel": "🔷",
+};
+
+const TRACK_LABELS: Record<string, string> = {
+  backend: "Backend",
+  frontend: "Frontend",
+  system_design: "System Design",
+  ai_stack: "AI Stack",
 };
 
 export default function Dashboard() {
   const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [interviewStats, setInterviewStats] = useState({
+    total_sessions: 0,
+    completed_sessions: 0,
+    interview_readiness_score: 0,
+  });
   const completedTopics = useProgressStore((s) => s.completedTopics);
   const totalProgress = useProgressStore((s) => s.totalProgress);
   const getTopicProgress = useProgressStore((s) => s.getTopicProgress);
   const setTopicCount = useProgressStore((s) => s.setTopicCount);
   const setMastery = useProgressStore((s) => s.setMastery);
+  const curriculumNoticePending = useProgressStore(
+    (s) => s.curriculumNoticePending,
+  );
+  const dismissCurriculumNotice = useProgressStore(
+    (s) => s.dismissCurriculumNotice,
+  );
 
   useEffect(() => {
     fetchTopics()
@@ -60,6 +87,11 @@ export default function Dashboard() {
       })
       .catch(() => {
         // ignore mastery bootstrap failures
+      });
+    fetchInterviewStats()
+      .then(setInterviewStats)
+      .catch(() => {
+        // ignore mock interview stats failures (feature flag may be off)
       });
   }, [setTopicCount, setMastery]);
 
@@ -83,11 +115,12 @@ export default function Dashboard() {
             transition={{ delay: 0.1 }}
           >
             <h1 className="text-3xl md:text-4xl font-bold mb-3">
-              Polymarket System Study
+              Ace Your Interview
             </h1>
             <p className="text-gray-300 text-lg max-w-2xl mb-6">
-              Master every aspect of the Polymarket trading platform through
-              AI-powered interview questions and deep-dive study sessions.
+              Practice backend, frontend, system design (including
+              infrastructure/cloud), and AI stack interview topics with adaptive
+              questions and quizzes.
             </p>
           </motion.div>
 
@@ -116,11 +149,35 @@ export default function Dashboard() {
             <Stat
               icon={<Sparkles className="w-5 h-5" />}
               label="AI-Powered"
-              value="Live"
+              value="Enabled"
+            />
+            <Stat
+              icon={<MessageSquare className="w-5 h-5" />}
+              label="Mock Interviews"
+              value={`${interviewStats.completed_sessions}`}
+            />
+            <Stat
+              icon={<TrendingUp className="w-5 h-5" />}
+              label="Readiness"
+              value={`${Math.round(interviewStats.interview_readiness_score)}%`}
             />
           </motion.div>
         </div>
       </div>
+
+      {curriculumNoticePending && (
+        <div className="max-w-[1340px] mx-auto px-6 pt-4">
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-3">
+            <span>Curriculum updated; progress restarted.</span>
+            <button
+              onClick={dismissCurriculumNotice}
+              className="font-semibold underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Overall progress */}
       <div className="max-w-[1340px] mx-auto px-6 -mt-3">
@@ -140,7 +197,7 @@ export default function Dashboard() {
       {/* Course grid */}
       <div className="max-w-[1340px] mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold">Study Topics</h2>
+          <h2 className="text-xl font-bold">Interview Topics</h2>
           <span className="text-sm text-udemy-text-muted">
             {topics.length} topics &middot; {completedCount} completed
           </span>
@@ -188,6 +245,12 @@ export default function Dashboard() {
                           {topic.description ||
                             "Explore this topic through interview questions."}
                         </p>
+
+                        <div className="mb-3">
+                          <span className="inline-flex items-center rounded-full bg-udemy-purple/10 px-2 py-1 text-[11px] font-semibold text-udemy-purple">
+                            {TRACK_LABELS[topic.track] || topic.track || "Topic"}
+                          </span>
+                        </div>
 
                         {/* Progress bar */}
                         <ProgressBar percent={tp} className="mb-3" />
