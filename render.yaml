@@ -23,5 +23,5 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-    rootDir: study-app/backend
+    rootDir: backend
     healthCheckPath: /health
