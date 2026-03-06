@@ -14,11 +14,13 @@ from app.config import get_settings
 from app.dependencies import require_auth
 from app.schemas.models import (
     ProviderConnectionStatus,
+    StudyAppAssignment,
     UserApiKeyUpdateRequest,
     UserPreferences,
     UserPreferencesUpdateRequest,
     UserSettingsResponse,
 )
+from app.services.llm_policy import APPROVAL_REQUIRED_CODE, APPROVAL_REQUIRED_MESSAGE
 from app.services.user_settings_store import UserSettingsStore, identity_key_for_user
 
 router = APIRouter(prefix="/api/user-settings", tags=["user-settings"])
@@ -64,6 +66,12 @@ def _build_response(identity_key: str, store: UserSettingsStore) -> UserSettings
     prefs_dict, has_saved = store.get_user_state(identity_key)
     prefs = UserPreferences(**prefs_dict)
     backend_fallback_approved = store.is_identity_approved_for_backend_fallback(identity_key)
+    study_app_assignment_raw = store.get_study_app_assignment(identity_key)
+    study_app_assignment = (
+        StudyAppAssignment(**study_app_assignment_raw)
+        if study_app_assignment_raw
+        else None
+    )
 
     providers: list[ProviderConnectionStatus] = []
     for provider, models in store.provider_models().items():
@@ -72,10 +80,14 @@ def _build_response(identity_key: str, store: UserSettingsStore) -> UserSettings
         has_personal_credential = api_key_connected or account_connected
         backend_fallback_eligible = (
             _backend_provider_configured(provider)
-            and not has_personal_credential
             and backend_fallback_approved
         )
-        using_backend_fallback = backend_fallback_eligible
+        using_backend_fallback = (
+            prefs.llm_source.value == "study_app"
+            and backend_fallback_eligible
+            and bool(study_app_assignment)
+            and study_app_assignment.provider == provider
+        )
         providers.append(
             ProviderConnectionStatus(
                 provider=provider,
@@ -92,6 +104,8 @@ def _build_response(identity_key: str, store: UserSettingsStore) -> UserSettings
         has_saved_preferences=has_saved,
         preferences=prefs,
         providers=providers,
+        study_app_available=backend_fallback_approved,
+        study_app_assignment=study_app_assignment,
     )
 
 
@@ -107,6 +121,18 @@ async def update_preferences(
     body: UserPreferencesUpdateRequest,
     user: dict = Depends(require_auth),
 ):
+    if body.llm_source.value == "study_app":
+        identity_key = identity_key_for_user(user)
+        store = _ensure_store()
+        if not store.is_identity_approved_for_backend_fallback(identity_key):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": APPROVAL_REQUIRED_CODE,
+                    "message": APPROVAL_REQUIRED_MESSAGE,
+                },
+            )
+
     if body.auth_mode.value == "account" and body.provider != "google":
         raise HTTPException(
             status_code=422,
@@ -155,7 +181,7 @@ async def connect_google(user: dict = Depends(require_auth)):
             "client_id": settings.google_client_id,
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "scope": "https://www.googleapis.com/auth/generative-language",
+            "scope": "https://www.googleapis.com/auth/cloud-platform",
             "access_type": "offline",
             "prompt": "consent",
             "state": state,
