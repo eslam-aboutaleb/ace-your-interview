@@ -12,7 +12,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.dependencies import require_auth
-from app.routers import auth, chat, learning, llm_settings, questions, topics
+from app.routers import (
+    auth,
+    chat,
+    interview_sessions,
+    learning,
+    llm_settings,
+    questions,
+    topics,
+)
 from app.services.doc_parser import DocParser
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
@@ -60,10 +68,17 @@ async def lifespan(application: FastAPI):
     parser = DocParser(settings.docs_path)
 
     # Wire routers to shared instances
-    questions.init(_llm_client, parser)
+    questions.init(_llm_client, parser, _learning_store)
+    topics.init(parser, _llm_client, _learning_store)
     llm_settings.init(_llm_client)
     chat.init(_llm_client)
     learning.init(_learning_store)
+    interview_sessions.init(
+        _llm_client,
+        parser,
+        _learning_store,
+        settings.learning_db_path,
+    )
 
     logger.info("Loaded %d topics from %s", len(parser.list_topics()), settings.docs_path)
 
@@ -81,11 +96,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS
-    origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    # CORS – merge explicit origins + frontend_url so cookies work
+    origins = {o.strip() for o in settings.cors_origins.split(",") if o.strip()}
+    if settings.frontend_url:
+        origins.add(settings.frontend_url.rstrip("/"))
+    origins.discard("")
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=origins,
+        allow_origins=sorted(origins),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -101,6 +119,7 @@ def create_app() -> FastAPI:
     application.include_router(llm_settings.router, dependencies=auth_dep)
     application.include_router(chat.router, dependencies=auth_dep)
     application.include_router(learning.router)
+    application.include_router(interview_sessions.router, dependencies=auth_dep)
 
     @application.get("/health")
     async def root_health():
