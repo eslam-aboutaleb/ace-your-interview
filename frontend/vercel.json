@@ -6,6 +6,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://study-app-backend-cn5k.onrender.com/api/:path*"
+    },
+    {
+      "source": "/((?!assets|pwa-|maskable-|apple-touch|manifest|registerSW|sw\\.js).*)",
+      "destination": "/index.html"
     }
   ]
 }
