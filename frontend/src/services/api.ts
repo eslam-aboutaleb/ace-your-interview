@@ -1,7 +1,10 @@
 import axios from "axios";
 import type {
+  LearningTrack,
+  InterviewLevel,
   TopicSummary,
   TopicDetail,
+  CreateCustomTopicRequest,
   GenerateQuestionsRequest,
   GenerateQuestionsResponse,
   GenerateQuestionsV2Response,
@@ -19,6 +22,17 @@ import type {
   ReviewQueueResponse,
   WeakAreasResponse,
   TopicMasteryResponse,
+  CreateInterviewSessionRequest,
+  SubmitInterviewAnswerRequest,
+  NextInterviewQuestionRequest,
+  InterviewSessionResponse,
+  InterviewTurnResponse,
+  InterviewQuestionResponse,
+  InterviewReportResponse,
+  InterviewSessionsListResponse,
+  InterviewStatsResponse,
+  UserSettingsResponse,
+  UserPreferences,
 } from "@/types";
 
 const api = axios.create({
@@ -27,6 +41,18 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
   withCredentials: true,
 });
+
+function _isApprovalRequired403(error: any): boolean {
+  if (error?.response?.status !== 403) return false;
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "object" && detail?.code === "llm_service_approval_required") {
+    return true;
+  }
+  if (typeof detail === "string" && detail.includes("llm_service_approval_required")) {
+    return true;
+  }
+  return false;
+}
 
 // Redirect to /login on 401
 api.interceptors.response.use(
@@ -44,18 +70,39 @@ api.interceptors.response.use(
     ) {
       window.location.href = "/login";
     }
+    if (
+      _isApprovalRequired403(error) &&
+      !window.location.pathname.startsWith("/user-settings")
+    ) {
+      window.location.href = "/user-settings?policy=llm_service_approval_required";
+    }
     return Promise.reject(error);
   },
 );
 
 // ── Topics ──────────────────────────────────────────────────
-export async function fetchTopics(): Promise<TopicSummary[]> {
-  const { data } = await api.get<TopicSummary[]>("/topics");
+export interface FetchTopicsParams {
+  track?: LearningTrack;
+  level?: InterviewLevel;
+  q?: string;
+}
+
+export async function fetchTopics(
+  params?: FetchTopicsParams,
+): Promise<TopicSummary[]> {
+  const { data } = await api.get<TopicSummary[]>("/topics", { params });
   return data;
 }
 
 export async function fetchTopic(topicId: string): Promise<TopicDetail> {
   const { data } = await api.get<TopicDetail>(`/topics/${topicId}`);
+  return data;
+}
+
+export async function createCustomTopic(
+  req: CreateCustomTopicRequest,
+): Promise<TopicDetail> {
+  const { data } = await api.post<TopicDetail>("/topics/custom", req);
   return data;
 }
 
@@ -144,6 +191,75 @@ export async function fetchTopicMastery(
   return data;
 }
 
+// ── Mock Interview ──────────────────────────────────────────
+export async function createInterviewSession(
+  req: CreateInterviewSessionRequest,
+): Promise<InterviewSessionResponse> {
+  const { data } = await api.post<InterviewSessionResponse>(
+    "/interview-sessions",
+    req,
+  );
+  return data;
+}
+
+export async function fetchInterviewSessions(
+  limit = 20,
+  offset = 0,
+): Promise<InterviewSessionsListResponse> {
+  const { data } = await api.get<InterviewSessionsListResponse>(
+    "/interview-sessions",
+    { params: { limit, offset } },
+  );
+  return data;
+}
+
+export async function fetchInterviewSession(
+  sessionId: string,
+): Promise<InterviewSessionResponse> {
+  const { data } = await api.get<InterviewSessionResponse>(
+    `/interview-sessions/${sessionId}`,
+  );
+  return data;
+}
+
+export async function submitInterviewAnswer(
+  sessionId: string,
+  req: SubmitInterviewAnswerRequest,
+): Promise<InterviewTurnResponse> {
+  const { data } = await api.post<InterviewTurnResponse>(
+    `/interview-sessions/${sessionId}/answer`,
+    req,
+  );
+  return data;
+}
+
+export async function generateNextInterviewQuestion(
+  sessionId: string,
+  req: NextInterviewQuestionRequest,
+): Promise<InterviewQuestionResponse> {
+  const { data } = await api.post<InterviewQuestionResponse>(
+    `/interview-sessions/${sessionId}/next-question`,
+    req,
+  );
+  return data;
+}
+
+export async function fetchInterviewReport(
+  sessionId: string,
+): Promise<InterviewReportResponse> {
+  const { data } = await api.get<InterviewReportResponse>(
+    `/interview-sessions/${sessionId}/report`,
+  );
+  return data;
+}
+
+export async function fetchInterviewStats(): Promise<InterviewStatsResponse> {
+  const { data } = await api.get<InterviewStatsResponse>(
+    "/interview-sessions/stats",
+  );
+  return data;
+}
+
 // ── LLM Providers ───────────────────────────────────────────
 export async function fetchProviders(): Promise<LLMProvidersResponse> {
   const { data } = await api.get<LLMProvidersResponse>("/llm/providers");
@@ -172,6 +288,10 @@ export interface AllowedUsers {
   google_emails: string[];
 }
 
+export interface LLMServiceUsers {
+  users: string[];
+}
+
 export async function fetchAllowedUsers(): Promise<AllowedUsers> {
   const { data } = await api.get<AllowedUsers>("/auth/allowed-users");
   return data;
@@ -194,6 +314,80 @@ export async function removeAllowedUser(
 ): Promise<AllowedUsers> {
   const { data } = await api.delete<AllowedUsers>(
     `/auth/allowed-users/${provider}/${encodeURIComponent(identifier)}`,
+  );
+  return data;
+}
+
+export async function fetchLLMServiceUsers(): Promise<LLMServiceUsers> {
+  const { data } = await api.get<LLMServiceUsers>("/auth/llm-service-users");
+  return data;
+}
+
+export async function addLLMServiceUser(
+  provider: string,
+  identifier: string,
+): Promise<LLMServiceUsers> {
+  const { data } = await api.post<LLMServiceUsers>("/auth/llm-service-users", {
+    provider,
+    identifier,
+  });
+  return data;
+}
+
+export async function removeLLMServiceUser(
+  provider: string,
+  identifier: string,
+): Promise<LLMServiceUsers> {
+  const { data } = await api.delete<LLMServiceUsers>(
+    `/auth/llm-service-users/${provider}/${encodeURIComponent(identifier)}`,
+  );
+  return data;
+}
+
+// ── User Settings ──────────────────────────────────────────
+export async function fetchUserSettings(): Promise<UserSettingsResponse> {
+  const { data } = await api.get<UserSettingsResponse>("/user-settings");
+  return data;
+}
+
+export async function updateUserPreferences(
+  payload: UserPreferences,
+): Promise<UserPreferences> {
+  const { data } = await api.put<UserPreferences>(
+    "/user-settings/preferences",
+    payload,
+  );
+  return data;
+}
+
+export async function saveUserApiKey(
+  provider: string,
+  apiKey: string,
+): Promise<UserSettingsResponse> {
+  const { data } = await api.put<UserSettingsResponse>(
+    `/user-settings/api-key/${provider}`,
+    { api_key: apiKey },
+  );
+  return data;
+}
+
+export async function deleteUserApiKey(
+  provider: string,
+): Promise<UserSettingsResponse> {
+  const { data } = await api.delete<UserSettingsResponse>(
+    `/user-settings/api-key/${provider}`,
+  );
+  return data;
+}
+
+export function connectGeminiAccount(): string {
+  const base = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+  return `${base}/user-settings/google/connect`;
+}
+
+export async function disconnectGeminiAccount(): Promise<UserSettingsResponse> {
+  const { data } = await api.post<UserSettingsResponse>(
+    "/user-settings/google/disconnect",
   );
   return data;
 }

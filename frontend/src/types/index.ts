@@ -1,9 +1,24 @@
 /* ── API types matching the backend schemas ──────────────── */
 
+export type LearningTrack =
+  | "backend"
+  | "frontend"
+  | "system_design"
+  | "ai_stack";
+export type InterviewLevel = "junior" | "mid" | "senior";
+export type InterviewType =
+  | "behavioral"
+  | "technical"
+  | "system_design"
+  | "ai_fundamentals"
+  | "mixed";
+
 export interface TopicSummary {
   id: string;
   title: string;
   description: string;
+  track: LearningTrack;
+  levels: InterviewLevel[];
   section_count: number;
   estimated_questions: number;
 }
@@ -17,8 +32,16 @@ export interface TopicDetail {
   id: string;
   title: string;
   description: string;
+  track: LearningTrack;
+  levels: InterviewLevel[];
   sections: TopicSection[];
   raw_content: string;
+}
+
+export interface CreateCustomTopicRequest {
+  topic: string;
+  target_sections?: number;
+  llm_config?: LLMConfig;
 }
 
 export interface QuestionAnswer {
@@ -51,6 +74,7 @@ export interface GenerateQuestionsRequest {
   topic_id: string;
   count: number;
   difficulty?: string;
+  level?: InterviewLevel | null;
   llm_config?: LLMConfig;
   section_title?: string;
   section_content?: string;
@@ -92,6 +116,33 @@ export interface HealthStatus {
   cli_agent_version: string;
 }
 
+export type UserAuthMode = "api_key" | "account";
+export type UserSettingsProvider = "google" | "openai" | "anthropic" | "groq";
+
+export interface UserPreferences {
+  provider: UserSettingsProvider;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  auth_mode: UserAuthMode;
+}
+
+export interface ProviderConnectionStatus {
+  provider: UserSettingsProvider;
+  models: string[];
+  supports_account_connect: boolean;
+  api_key_connected: boolean;
+  account_connected: boolean;
+  using_backend_fallback: boolean;
+  backend_fallback_eligible: boolean;
+}
+
+export interface UserSettingsResponse {
+  has_saved_preferences: boolean;
+  preferences: UserPreferences;
+  providers: ProviderConnectionStatus[];
+}
+
 /* ── Chat Follow-Up Types ────────────────────────────────── */
 
 export interface ChatMessage {
@@ -103,6 +154,11 @@ export interface ChatFollowUpRequest {
   word: string;
   context_question: string;
   context_answer: string;
+  topic_id?: string;
+  topic_title?: string;
+  topic_track?: string;
+  section_title?: string;
+  mode?: "study" | "quiz";
   user_message: string;
   history: ChatMessage[];
   llm_config?: LLMConfig;
@@ -151,6 +207,7 @@ export interface GenerateQuizRequest {
   count: number;
   question_types: QuizQuestionType[];
   difficulty?: string;
+  level?: InterviewLevel | null;
   llm_config?: LLMConfig;
 }
 
@@ -227,6 +284,127 @@ export interface TopicMasteryItem {
 
 export interface TopicMasteryResponse {
   topics: TopicMasteryItem[];
+}
+
+/* ── Mock Interview Types ────────────────────────────────── */
+
+export interface InterviewRubricScore {
+  technical_accuracy: number;
+  reasoning_depth: number;
+  communication_clarity: number;
+  completeness: number;
+  confidence_signal: number;
+  overall: number;
+}
+
+export interface InterviewRubricAverages {
+  technical_accuracy: number;
+  reasoning_depth: number;
+  communication_clarity: number;
+  completeness: number;
+  confidence_signal: number;
+  overall: number;
+}
+
+export interface InterviewSession {
+  session_id: string;
+  track: LearningTrack;
+  level: InterviewLevel;
+  interview_type: InterviewType;
+  turn_count: number;
+  turns_completed: number;
+  status: "active" | "completed";
+  target_role: string;
+  focus_areas: string[];
+  created_at: string;
+  updated_at: string;
+  current_question: string;
+  report_ready: boolean;
+}
+
+export interface InterviewTurn {
+  session_id: string;
+  turn_index: number;
+  question: string;
+  user_answer: string;
+  rubric: InterviewRubricScore;
+  strengths: string[];
+  improvements: string[];
+  follow_up_note: string;
+  response_time_ms: number;
+  created_at: string;
+}
+
+export interface InterviewReport {
+  session_id: string;
+  overall_score: number;
+  readiness_label: string;
+  completed_turns: number;
+  rubric_averages: InterviewRubricAverages;
+  weak_competencies: string[];
+  strengths: string[];
+  recommended_topic_ids: string[];
+  next_steps: string[];
+  summary: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateInterviewSessionRequest {
+  track: LearningTrack;
+  level: InterviewLevel;
+  interview_type: InterviewType;
+  turn_count: number;
+  target_role: string;
+  job_description_text: string;
+  resume_summary_text: string;
+  focus_areas: string[];
+  llm_config?: LLMConfig;
+}
+
+export interface SubmitInterviewAnswerRequest {
+  user_answer: string;
+  response_time_ms: number;
+  llm_config?: LLMConfig;
+}
+
+export interface NextInterviewQuestionRequest {
+  llm_config?: LLMConfig;
+}
+
+export interface InterviewSessionResponse {
+  session: InterviewSession;
+  turns: InterviewTurn[];
+}
+
+export interface InterviewTurnResponse {
+  session: InterviewSession;
+  turn: InterviewTurn;
+  report_ready: boolean;
+}
+
+export interface InterviewQuestionResponse {
+  session_id: string;
+  turn_index: number;
+  question: string;
+  competency_focus: string;
+  expected_signals: string[];
+}
+
+export interface InterviewReportResponse {
+  session: InterviewSession;
+  report: InterviewReport;
+}
+
+export interface InterviewSessionsListResponse {
+  sessions: InterviewSession[];
+  total: number;
+}
+
+export interface InterviewStatsResponse {
+  total_sessions: number;
+  completed_sessions: number;
+  interview_readiness_score: number;
 }
 
 /* ── Ollama Types ────────────────────────────────────────── */

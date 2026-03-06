@@ -1,140 +1,135 @@
-# Polymarket Study Hub
+# Ace Your Interview
 
-AI-powered study application that generates interview questions from the Polymarket system documentation.
+Adaptive interview-prep app for Backend, Frontend, System Design (including infrastructure/cloud), and AI Stack topics.
+
+## What Changed
+- Replaced project-specific handbook with a generic interview curriculum (`22` core topics + handbook overview).
+- Added explicit candidate levels: `junior`, `mid`, `senior`.
+- Added topic metadata and filtering by `track`, `level`, and query text.
+- Rebranded frontend, backend app name, and handbook copy to **Ace Your Interview**.
+- Added curriculum version reset (`v3_interview_core_infra_cloud_diagrams`) so legacy local progress is reset once.
+- Added markdown rendering support for Mermaid diagrams and fenced code panels across study, quiz, chat, and interview report surfaces.
 
 ## Features
+- Level-aware question and quiz generation.
+- Strict v2 grounded generation (`source_quote`, `source_section`, validation and retries).
+- Adaptive learning endpoints for attempts, review queue, weak areas, and mastery.
+- Track/level filters in topics list.
+- Configurable provider/model in settings.
+- Personalized mock interview sessions with rubric feedback and report.
+- Infrastructure and cloud exam panels (Docker, Terraform, Kubernetes, AWS, GCP, Azure) under the `system_design` track.
 
-- **13 Study Topics** — parsed from the owner-handbook docs covering system architecture, backend, frontend, AI services, data models, security, design patterns, and more
-- **LLM-Generated Q&A** — real-time interview question generation via gRPC connection to `llm-chain` or `cli-agent`
-- **Configurable LLM** — switch between OpenAI, Anthropic, Google, Groq, Ollama, or GitHub Models at any time
-- **Quiz Mode** — flash-card style study with self-scoring and a completion ring
-- **Udemy-Themed UI** — purple accent, card layout, progress tracking, smooth Framer Motion animations
-- **Progress Persistence** — localStorage tracks completed topics and answered questions
+## Regenerate Handbook Curriculum
+The static handbook can be regenerated to maintain deep topic coverage (`>=1000` sections total across 22 built-in topics).
 
-## Prerequisites
-
-At least one of the gRPC LLM backends must be running:
-
+Generate/update handbook files:
 ```bash
-# From the project root
-docker compose up -d llm-chain    # port 50051
-# OR
-docker compose up -d cli-agent    # port 50052
+cd study-app/backend
+PYTHONPATH=. uv run python scripts/generate_owner_handbook.py --llm-mode auto
+```
+
+Required provider setup:
+- Configure provider credentials in environment (for example `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `GOOGLE_API_KEY`).
+- Ensure `STUDY_DEFAULT_PROVIDER` / `STUDY_DEFAULT_MODEL` map to an available provider/model when using `--llm-mode auto` or `--llm-mode always`.
+- Use deterministic generation when no credentials are available:
+```bash
+PYTHONPATH=. uv run python scripts/generate_owner_handbook.py --llm-mode never
+```
+
+Validate handbook depth and per-topic section counts before commit:
+```bash
+cd study-app/backend
+PYTHONPATH=. uv run python scripts/generate_owner_handbook.py --check-only
+PYTHONPATH=. uv run python -m unittest -q tests.test_doc_parser tests.test_owner_handbook_depth
 ```
 
 ## Quick Start
-
-### Option 1: Docker Compose (recommended)
-
+### Docker
 ```bash
 cd study-app
 docker compose up --build
 ```
-
 - Frontend: http://localhost:5174
 - Backend API: http://localhost:8001
 
-### Option 2: Local development
-
-**Backend:**
-
+### Local
+Backend:
 ```bash
 cd study-app/backend
-
-# Create venv & install
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e "."
-
-# Compile proto stubs
-mkdir -p app/generated
-python -m grpc_tools.protoc \
-  -I./proto \
-  --python_out=./app/generated \
-  --grpc_python_out=./app/generated \
-  proto/analysis.proto
-
-# Fix import path
-sed -i '' 's/^import analysis_pb2/from app.generated import analysis_pb2/' \
-  app/generated/analysis_pb2_grpc.py
-
-touch app/generated/__init__.py
-
-# Set env vars for local gRPC
-export STUDY_GRPC_LLM_CHAIN_HOST=localhost
-export STUDY_GRPC_CLI_AGENT_HOST=localhost
-export STUDY_DOCS_PATH=docs
-
-# Run
 uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-**Frontend:**
-
+Frontend:
 ```bash
 cd study-app/frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:5174
-
 ## API Endpoints
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/topics` | List topics (supports `track`, `level`, `q`) |
+| GET | `/api/topics/{id}` | Topic details |
+| POST | `/api/questions/generate` | Legacy question generation |
+| POST | `/api/questions/generate-v2` | Strict grounded question generation |
+| POST | `/api/questions/quiz/generate` | Legacy quiz generation |
+| POST | `/api/questions/quiz/generate-v2` | Strict grounded quiz generation |
+| POST | `/api/learning/attempts` | Record attempt event |
+| GET | `/api/learning/review-queue` | Due review items |
+| GET | `/api/learning/weak-areas` | Weak topic summary |
+| GET | `/api/learning/mastery` | Mastery by topic |
+| POST | `/api/interview-sessions` | Create mock interview session |
+| GET | `/api/interview-sessions` | List interview sessions |
+| GET | `/api/interview-sessions/stats` | Interview summary metrics |
+| GET | `/api/interview-sessions/{id}` | Interview session state + turns |
+| POST | `/api/interview-sessions/{id}/answer` | Submit interview answer + rubric |
+| POST | `/api/interview-sessions/{id}/next-question` | Generate next interview question |
+| GET | `/api/interview-sessions/{id}/report` | Interview report |
+| GET | `/api/llm/providers` | Provider availability |
+| GET | `/api/llm/health` | Backend health |
+| GET | `/api/user-settings` | User LLM settings + credential status |
+| PUT | `/api/user-settings/preferences` | Save user provider/model/mode |
+| PUT | `/api/user-settings/api-key/{provider}` | Save user API key |
+| DELETE | `/api/user-settings/api-key/{provider}` | Delete user API key |
+| GET | `/api/user-settings/google/connect` | Start Gemini OAuth connect |
+| GET | `/api/user-settings/google/callback` | Gemini OAuth callback |
+| POST | `/api/user-settings/google/disconnect` | Disconnect Gemini account |
+| GET | `/health` | Service health |
 
-| Method | Path                      | Description                    |
-| ------ | ------------------------- | ------------------------------ |
-| GET    | `/api/topics`             | List all study topics          |
-| GET    | `/api/topics/{id}`        | Get topic detail with sections |
-| POST   | `/api/questions/generate` | Generate interview Q&A via LLM |
-| POST   | `/api/questions/generate-v2` | Generate grounded Q&A (strict schema) |
-| POST   | `/api/questions/quiz/generate` | Generate quiz questions (legacy) |
-| POST   | `/api/questions/quiz/generate-v2` | Generate grounded quiz (strict schema) |
-| POST   | `/api/learning/attempts` | Record study/quiz attempt for adaptive scheduling |
-| GET    | `/api/learning/review-queue` | Get due review items |
-| GET    | `/api/learning/weak-areas` | Get weakest topics summary |
-| GET    | `/api/learning/mastery` | Get topic mastery scores |
-| GET    | `/api/llm/providers`      | List available LLM providers   |
-| GET    | `/api/llm/health`         | Check gRPC backend health      |
-| GET    | `/health`                 | App health check               |
-
-## LLM Configuration
-
-From the Settings page in the UI, you can:
-
-1. **Select a provider** — OpenAI, Anthropic, Google Gemini, Groq, Ollama, or GitHub Models
-2. **Choose a model** — model list updates per provider
-3. **Adjust temperature** — 0 (precise) to 1.5 (creative)
-4. **Check health** — verify gRPC connectivity to the LLM backends
-
-Providers route to the correct backend automatically:
-
-- OpenAI / Anthropic / Google / Groq / Ollama → `llm-chain` (port 50051)
-- GitHub Models → `cli-agent` (port 50052)
-
-## Localhost Auth Bypass (Dev)
-
-For local-only development, you can bypass login while still keeping auth enabled elsewhere:
-
+## Auth for Local Development
+If you want localhost-only bypass while preserving auth for deployment:
 ```bash
 STUDY_DEV_AUTH_BYPASS_LOCALHOST=true
 ```
-
-When enabled, requests coming from `localhost` / `127.0.0.1` are treated as an authenticated local dev user.
-
-For deployment, keep this disabled:
-
+For deployment, keep it disabled:
 ```bash
 STUDY_DEV_AUTH_BYPASS_LOCALHOST=false
 ```
 
-## Architecture
+## Admin and User Settings
+- `/user-settings`: available to all authenticated users for personal LLM settings.
+- `/settings`: admin-only page for allowed users and platform checks.
 
+Configure admins via:
+```bash
+STUDY_ADMIN_USERS=google:admin@example.com,ops@example.com
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-│   Frontend   │────▶│   Backend    │────▶│   llm-chain      │
-│  React+Vite  │     │   FastAPI    │     │   (gRPC:50051)   │
-│  :5174       │     │   :8001      │     └──────────────────┘
-└──────────────┘     │              │     ┌──────────────────┐
-                     │  reads docs/ │────▶│   cli-agent      │
-                     │              │     │   (gRPC:50052)   │
-                     └──────────────┘     └──────────────────┘
+
+Configure encrypted user credential storage:
+```bash
+STUDY_ENVIRONMENT=development
+STUDY_CREDENTIALS_ENCRYPTION_KEY=change-me
+STUDY_USER_SETTINGS_FILE=user_llm_settings.json
 ```
+
+When `STUDY_ENVIRONMENT` is not `development`, `STUDY_CREDENTIALS_ENCRYPTION_KEY` is required at startup.
+
+## Mock Interview Feature Flag
+Mock interview endpoints are gated by:
+```bash
+STUDY_ENABLE_MOCK_INTERVIEW_V1=true
+```
+Default is `false`.

@@ -1,5 +1,5 @@
 {
-  "name": "polymarket-study-hub",
+  "name": "ace-your-interview",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -12,11 +12,13 @@
     "axios": "^1.6.0",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.300.0",
+    "mermaid": "^11.12.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^9.0.0",
     "react-router-dom": "^6.20.0",
     "react-syntax-highlighter": "^15.5.0",
+    "remark-gfm": "^4.0.1",
     "zustand": "^4.4.0"
   },
   "devDependencies": {

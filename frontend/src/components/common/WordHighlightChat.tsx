@@ -3,26 +3,50 @@ import {
   useRef,
   useCallback,
   useEffect,
+  useMemo,
   type ReactNode,
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MessageCircle, Send, X, Loader2, Sparkles } from "lucide-react";
-import ReactMarkdown from "react-markdown";
 import { chatFollowUp } from "@/services/api";
+import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
 import type { ChatMessage } from "@/types";
 
 interface Props {
   contextQuestion: string;
   contextAnswer: string;
-  /** Unique key to reset chat when Q&A changes */
+  sessionKey: string;
+  topicId?: string;
+  topicTitle?: string;
+  topicTrack?: string;
+  sectionTitle?: string;
+  mode?: "study" | "quiz";
+  selectionTargetSelector?: string;
+  /** Unique key to reset transient UI state when Q&A changes */
   qaKey: string;
   children: ReactNode;
+}
+
+const DEFAULT_SELECTION_SELECTOR = '[data-word-chat-target="true"]';
+const messageCacheBySession = new Map<string, ChatMessage[]>();
+
+function getNodeElement(node: Node | null): Element | null {
+  if (!node) return null;
+  if (node.nodeType === Node.ELEMENT_NODE) return node as Element;
+  return node.parentElement;
 }
 
 export default function WordHighlightChat({
   contextQuestion,
   contextAnswer,
+  sessionKey,
+  topicId = "",
+  topicTitle = "",
+  topicTrack = "",
+  sectionTitle = "",
+  mode,
+  selectionTargetSelector = DEFAULT_SELECTION_SELECTOR,
   qaKey,
   children,
 }: Props) {
@@ -33,31 +57,74 @@ export default function WordHighlightChat({
   } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatWord, setChatWord] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    () => messageCacheBySession.get(sessionKey) || [],
+  );
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore();
 
-  // Reset chat when Q&A changes
+  const targetSelector = useMemo(
+    () => selectionTargetSelector || DEFAULT_SELECTION_SELECTOR,
+    [selectionTargetSelector],
+  );
+
+  // Reset transient state when question changes; history persists by sessionKey.
   useEffect(() => {
-    setMessages([]);
     setChatOpen(false);
     setChatWord("");
     setSelectedText("");
     setTooltipPos(null);
+    setInput("");
   }, [qaKey]);
 
-  // Scroll to bottom on new messages
+  // Restore per-topic chat thread when session key changes.
+  useEffect(() => {
+    setMessages(messageCacheBySession.get(sessionKey) || []);
+    setChatOpen(false);
+    setChatWord("");
+    setSelectedText("");
+    setTooltipPos(null);
+    setInput("");
+  }, [sessionKey]);
+
+  // Persist thread by topic session key.
+  useEffect(() => {
+    messageCacheBySession.set(sessionKey, messages);
+  }, [sessionKey, messages]);
+
+  // Scroll to bottom on new messages.
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const isSelectionInTarget = useCallback(
+    (selection: Selection, container: HTMLDivElement) => {
+      const anchorNode = selection.anchorNode;
+      const focusNode = selection.focusNode;
+      if (!anchorNode || !focusNode) return false;
+      if (!container.contains(anchorNode) || !container.contains(focusNode)) {
+        return false;
+      }
+
+      const anchorElement = getNodeElement(anchorNode);
+      const focusElement = getNodeElement(focusNode);
+      if (!anchorElement || !focusElement) return false;
+
+      return (
+        !!anchorElement.closest(targetSelector) &&
+        !!focusElement.closest(targetSelector)
+      );
+    },
+    [targetSelector],
+  );
+
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-      // Small delay to allow click on tooltip
+      // Small delay to allow clicking the tooltip without flicker.
       setTimeout(() => {
         if (!chatOpen) {
           setTooltipPos(null);
@@ -68,36 +135,48 @@ export default function WordHighlightChat({
     }
 
     const text = selection.toString().trim();
-    if (text.length < 2 || text.length > 200) return;
+    if (text.length < 2 || text.length > 200) {
+      setTooltipPos(null);
+      setSelectedText("");
+      return;
+    }
 
-    // Check selection is within our container
     const container = containerRef.current;
     if (!container) return;
-    const anchorNode = selection.anchorNode;
-    if (!anchorNode || !container.contains(anchorNode)) return;
+
+    if (!isSelectionInTarget(selection, container)) {
+      setTooltipPos(null);
+      setSelectedText("");
+      return;
+    }
 
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
     const containerRect = container.getBoundingClientRect();
+    if (!rect.width && !rect.height) {
+      setTooltipPos(null);
+      setSelectedText("");
+      return;
+    }
 
     setSelectedText(text);
     setTooltipPos({
       x: rect.left - containerRect.left + rect.width / 2,
       y: rect.top - containerRect.top - 8,
     });
-  }, [chatOpen]);
+  }, [chatOpen, isSelectionInTarget]);
 
   const openChat = () => {
+    if (!selectedText) return;
+    setMessages(messageCacheBySession.get(sessionKey) || []);
     setChatWord(selectedText);
     setChatOpen(true);
     setTooltipPos(null);
-    // Preserve previous messages — session persists across highlighted words
     setInput(`What does "${selectedText}" mean in this context?`);
   };
 
   const closeChat = () => {
     setChatOpen(false);
-    // Keep messages + chatWord so reopening continues the session
     setInput("");
   };
 
@@ -106,7 +185,8 @@ export default function WordHighlightChat({
     if (!msg || sending) return;
 
     const userMsg: ChatMessage = { role: "user", content: msg };
-    const newMessages = [...messages, userMsg];
+    const sessionMessages = messageCacheBySession.get(sessionKey) || messages;
+    const newMessages = [...sessionMessages, userMsg];
     setMessages(newMessages);
     setInput("");
     setSending(true);
@@ -116,6 +196,11 @@ export default function WordHighlightChat({
         word: chatWord,
         context_question: contextQuestion,
         context_answer: contextAnswer,
+        topic_id: topicId,
+        topic_title: topicTitle,
+        topic_track: topicTrack,
+        section_title: sectionTitle,
+        mode,
         user_message: msg,
         history: newMessages,
         llm_config: {
@@ -125,10 +210,7 @@ export default function WordHighlightChat({
           max_tokens: settings.maxTokens,
         },
       });
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: res.reply },
-      ]);
+      setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
     } catch (err) {
       console.error(err);
       setMessages((prev) => [
@@ -152,10 +234,8 @@ export default function WordHighlightChat({
 
   return (
     <div ref={containerRef} className="relative" onMouseUp={handleMouseUp}>
-      {/* Render the wrapped content */}
       {children}
 
-      {/* Tooltip trigger */}
       <AnimatePresence>
         {tooltipPos && !chatOpen && (
           <motion.button
@@ -177,7 +257,6 @@ export default function WordHighlightChat({
         )}
       </AnimatePresence>
 
-      {/* Chat panel */}
       <AnimatePresence>
         {chatOpen && (
           <motion.div
@@ -185,12 +264,11 @@ export default function WordHighlightChat({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
-            className="absolute right-0 top-0 z-50 w-[380px] max-h-[480px] bg-white rounded-xl shadow-2xl border border-udemy-border flex flex-col overflow-hidden"
+            className="absolute right-0 top-0 z-50 w-[380px] h-[480px] max-h-[75vh] bg-white rounded-xl shadow-2xl border border-udemy-border flex flex-col overflow-hidden"
             style={{ maxWidth: "calc(100vw - 2rem)" }}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-udemy-purple text-white">
-              <div className="flex items-center gap-2 min-w-0">
+            <div className="relative sticky top-0 z-10 flex items-center px-4 py-3 pr-11 bg-udemy-purple text-white">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
                 <Sparkles className="w-4 h-4 flex-shrink-0" />
                 <span className="text-sm font-medium truncate">
                   &ldquo;{chatWord}&rdquo;
@@ -198,14 +276,14 @@ export default function WordHighlightChat({
               </div>
               <button
                 onClick={closeChat}
-                className="p-1 hover:bg-white/20 rounded transition-colors flex-shrink-0"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-white/20 rounded transition-colors"
+                aria-label="Close chat"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-[120px] max-h-[320px]">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
               {messages.length === 0 && (
                 <p className="text-xs text-udemy-text-muted text-center py-4">
                   Ask anything about &ldquo;{chatWord}&rdquo; in this context.
@@ -227,9 +305,7 @@ export default function WordHighlightChat({
                     }`}
                   >
                     {m.role === "assistant" ? (
-                      <div className="markdown-content prose prose-xs max-w-none [&>p]:m-0">
-                        <ReactMarkdown>{m.content}</ReactMarkdown>
-                      </div>
+                      <MarkdownRenderer content={m.content} compact className="text-[13px]" />
                     ) : (
                       m.content
                     )}
@@ -246,7 +322,6 @@ export default function WordHighlightChat({
               <div ref={chatEndRef} />
             </div>
 
-            {/* Input */}
             <div className="border-t border-udemy-border px-3 py-2">
               <div className="flex items-center gap-2">
                 <input

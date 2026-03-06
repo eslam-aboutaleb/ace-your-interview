@@ -9,7 +9,7 @@ export default function Layout() {
         <Outlet />
       </main>
       <footer className="bg-udemy-dark text-gray-400 text-center py-6 text-sm">
-        <p>Polymarket Study Hub &mdash; Learn the system inside and out</p>
+        <p>Ace Your Interview &mdash; Practice the skills that get offers</p>
       </footer>
     </div>
   );

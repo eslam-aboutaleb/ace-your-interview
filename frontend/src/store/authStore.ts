@@ -3,6 +3,7 @@ import { create } from "zustand";
 interface AuthUser {
   user: string;
   provider: string;
+  is_admin: boolean;
 }
 
 interface AuthState {

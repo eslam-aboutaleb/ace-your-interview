@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import threading
@@ -81,6 +82,30 @@ class LearningStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_progress_topic
                 ON question_progress(user_id, topic_id)
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS custom_topics (
+                    user_id TEXT NOT NULL,
+                    topic_id TEXT NOT NULL,
+                    source_topic TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    track TEXT NOT NULL,
+                    levels_json TEXT NOT NULL,
+                    sections_json TEXT NOT NULL,
+                    raw_content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, topic_id)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_custom_topics_user_updated
+                ON custom_topics(user_id, updated_at DESC)
                 """
             )
 
@@ -300,3 +325,164 @@ class LearningStore:
             ]
         }
 
+    def upsert_custom_topic(
+        self,
+        *,
+        user_id: str,
+        topic_id: str,
+        source_topic: str,
+        title: str,
+        description: str,
+        track: str,
+        levels: list[str],
+        sections: list[dict[str, str]],
+        raw_content: str,
+    ) -> dict:
+        now_iso = _to_iso(_utc_now())
+        levels_json = json.dumps(levels, ensure_ascii=True)
+        sections_json = json.dumps(sections, ensure_ascii=True)
+        with self._lock:
+            with self._conn:
+                existing = self._conn.execute(
+                    """
+                    SELECT created_at
+                    FROM custom_topics
+                    WHERE user_id = ? AND topic_id = ?
+                    """,
+                    (user_id, topic_id),
+                ).fetchone()
+                created_at = str(existing["created_at"]) if existing else now_iso
+                self._conn.execute(
+                    """
+                    INSERT INTO custom_topics(
+                        user_id, topic_id, source_topic, title, description, track,
+                        levels_json, sections_json, raw_content, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, topic_id) DO UPDATE SET
+                        source_topic = excluded.source_topic,
+                        title = excluded.title,
+                        description = excluded.description,
+                        track = excluded.track,
+                        levels_json = excluded.levels_json,
+                        sections_json = excluded.sections_json,
+                        raw_content = excluded.raw_content,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        user_id,
+                        topic_id,
+                        source_topic,
+                        title,
+                        description,
+                        track,
+                        levels_json,
+                        sections_json,
+                        raw_content,
+                        created_at,
+                        now_iso,
+                    ),
+                )
+        return {
+            "id": topic_id,
+            "title": title,
+            "description": description,
+            "track": track,
+            "levels": levels,
+            "sections": sections,
+            "raw_content": raw_content,
+            "source_topic": source_topic,
+            "created_at": created_at,
+            "updated_at": now_iso,
+        }
+
+    @staticmethod
+    def _loads_json_list(value: str) -> list:
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+
+    def _custom_topic_row_to_detail(self, row: sqlite3.Row) -> dict:
+        levels = [str(v) for v in self._loads_json_list(str(row["levels_json"]))]
+        sections_raw = self._loads_json_list(str(row["sections_json"]))
+        sections: list[dict[str, str]] = []
+        for item in sections_raw:
+            if not isinstance(item, dict):
+                continue
+            heading = str(item.get("heading", "")).strip()
+            content = str(item.get("content", "")).strip()
+            if not heading:
+                continue
+            sections.append({"heading": heading, "content": content})
+        return {
+            "id": str(row["topic_id"]),
+            "title": str(row["title"]),
+            "description": str(row["description"]),
+            "track": str(row["track"]),
+            "levels": levels,
+            "sections": sections,
+            "raw_content": str(row["raw_content"]),
+            "source_topic": str(row["source_topic"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def list_custom_topics(
+        self,
+        *,
+        user_id: str,
+        track: str | None = None,
+        level: str | None = None,
+        q: str | None = None,
+    ) -> list[dict]:
+        query = (q or "").strip().lower()
+        rows = self._conn.execute(
+            """
+            SELECT
+                user_id, topic_id, source_topic, title, description, track,
+                levels_json, sections_json, raw_content, created_at, updated_at
+            FROM custom_topics
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, topic_id ASC
+            """,
+            (user_id,),
+        ).fetchall()
+
+        out: list[dict] = []
+        for row in rows:
+            detail = self._custom_topic_row_to_detail(row)
+            if track and detail["track"] != track:
+                continue
+            if level and level not in detail["levels"]:
+                continue
+            if query and query not in f"{detail['title']} {detail['description']}".lower():
+                continue
+            out.append(
+                {
+                    "id": detail["id"],
+                    "title": detail["title"],
+                    "description": detail["description"],
+                    "track": detail["track"],
+                    "levels": detail["levels"],
+                    "section_count": len(detail["sections"]),
+                    "estimated_questions": max(3, len(detail["sections"]) * 2),
+                }
+            )
+        return out
+
+    def get_custom_topic(self, *, user_id: str, topic_id: str) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT
+                user_id, topic_id, source_topic, title, description, track,
+                levels_json, sections_json, raw_content, created_at, updated_at
+            FROM custom_topics
+            WHERE user_id = ? AND topic_id = ?
+            LIMIT 1
+            """,
+            (user_id, topic_id),
+        ).fetchone()
+        if not row:
+            return None
+        return self._custom_topic_row_to_detail(row)

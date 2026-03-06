@@ -10,6 +10,10 @@ from typing import Optional
 from app.config import get_settings
 from app.schemas.models import TopicDetail, TopicSummary
 
+_VALID_TRACKS = {"backend", "frontend", "system_design", "ai_stack"}
+_VALID_LEVELS = {"junior", "mid", "senior"}
+_DEFAULT_LEVELS = ["junior", "mid", "senior"]
+
 
 class DocParser:
     """Reads and caches all owner-handbook .md files."""
@@ -21,14 +25,30 @@ class DocParser:
         self._load()
 
     # ── public API ──────────────────────────────────────────
-    def list_topics(self) -> list[TopicSummary]:
+    def list_topics(
+        self,
+        track: Optional[str] = None,
+        level: Optional[str] = None,
+        q: Optional[str] = None,
+    ) -> list[TopicSummary]:
+        track_filter = self._normalise_track(track)
+        level_filter = self._normalise_level(level)
+        query = (q or "").strip().lower()
         summaries: list[TopicSummary] = []
         for tid, td in sorted(self._topics.items()):
+            if track_filter and td.track != track_filter:
+                continue
+            if level_filter and level_filter not in td.levels:
+                continue
+            if query and query not in f"{td.title} {td.description}".lower():
+                continue
             summaries.append(
                 TopicSummary(
                     id=tid,
                     title=td.title,
                     description=td.description,
+                    track=td.track,
+                    levels=td.levels,
                     section_count=len(td.sections),
                     estimated_questions=max(3, len(td.sections) * 2),
                 )
@@ -72,24 +92,82 @@ class DocParser:
         for fname in sorted(os.listdir(handbook_dir)):
             if not fname.endswith(".md"):
                 continue
+            if fname.lower() == "readme.md":
+                continue
             fpath = os.path.join(handbook_dir, fname)
             topic_id = fname.replace(".md", "")
             raw = self._read_file(fpath)
-            title = self._extract_title(raw, fname)
-            description = self._extract_description(raw)
-            sections = self._extract_sections(raw)
+            metadata, content = self._extract_frontmatter(raw)
+            title = self._extract_title(content, fname)
+            description = self._extract_description(content)
+            sections = self._extract_sections(content)
+            track = self._normalise_track(metadata.get("track")) or self._infer_track(
+                topic_id, title
+            )
+            levels = self._normalise_levels(metadata.get("levels"))
             self._topics[topic_id] = TopicDetail(
                 id=topic_id,
                 title=title,
                 description=description,
+                track=track or "",
+                levels=levels,
                 sections=sections,
-                raw_content=raw,
+                raw_content=content,
             )
 
     @staticmethod
     def _read_file(path: str) -> str:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
+
+    @staticmethod
+    def _extract_frontmatter(content: str) -> tuple[dict[str, str | list[str]], str]:
+        """Parse simple YAML frontmatter if present."""
+        if not content.startswith("---"):
+            return {}, content
+
+        match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", content, flags=re.DOTALL)
+        if not match:
+            return {}, content
+
+        meta_raw = match.group(1)
+        body = match.group(2)
+        metadata: dict[str, str | list[str]] = {}
+        levels: list[str] = []
+        in_levels_list = False
+
+        for line in meta_raw.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            if in_levels_list:
+                if stripped.startswith("-"):
+                    levels.append(stripped[1:].strip())
+                    continue
+                in_levels_list = False
+
+            if ":" not in stripped:
+                continue
+            key, value = stripped.split(":", 1)
+            key = key.strip().lower()
+            value = value.strip()
+
+            if key == "levels":
+                if not value:
+                    in_levels_list = True
+                    continue
+                if value.startswith("[") and value.endswith("]"):
+                    items = [v.strip() for v in value[1:-1].split(",")]
+                    levels.extend([i for i in items if i])
+                else:
+                    levels.extend([v.strip() for v in value.split(",") if v.strip()])
+            else:
+                metadata[key] = value
+
+        if levels:
+            metadata["levels"] = levels
+        return metadata, body
 
     @staticmethod
     def _extract_title(content: str, fallback: str) -> str:
@@ -130,4 +208,49 @@ class DocParser:
             sections.append({"heading": heading, "content": body[:12000]})
             i += 3
 
+        if not sections:
+            snippet = content.strip()
+            if snippet:
+                sections.append({"heading": "Overview", "content": snippet[:12000]})
         return sections
+
+    @staticmethod
+    def _normalise_track(track: Optional[str]) -> str:
+        if not track:
+            return ""
+        t = track.strip().lower().replace("-", "_").replace(" ", "_")
+        return t if t in _VALID_TRACKS else ""
+
+    @staticmethod
+    def _normalise_level(level: Optional[str]) -> str:
+        if not level:
+            return ""
+        l = level.strip().lower()
+        return l if l in _VALID_LEVELS else ""
+
+    def _normalise_levels(self, levels_meta: object) -> list[str]:
+        if isinstance(levels_meta, str):
+            raw_levels = [levels_meta]
+        elif isinstance(levels_meta, list):
+            raw_levels = [str(v) for v in levels_meta]
+        else:
+            raw_levels = []
+
+        normalised: list[str] = []
+        for item in raw_levels:
+            l = self._normalise_level(item)
+            if l and l not in normalised:
+                normalised.append(l)
+        return normalised or list(_DEFAULT_LEVELS)
+
+    def _infer_track(self, topic_id: str, title: str) -> str:
+        text = f"{topic_id} {title}".lower()
+        if "system design" in text or "system_design" in text:
+            return "system_design"
+        if "ai" in text or "llm" in text or "rag" in text or "agent" in text:
+            return "ai_stack"
+        if "frontend" in text or "ui" in text:
+            return "frontend"
+        if "backend" in text or "api" in text or "http" in text:
+            return "backend"
+        return "backend"

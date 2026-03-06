@@ -7,8 +7,9 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.dependencies import require_auth
@@ -20,15 +21,21 @@ from app.routers import (
     llm_settings,
     questions,
     topics,
+    user_settings,
 )
 from app.services.doc_parser import DocParser
+from app.services.llm_policy import LLMServiceApprovalRequiredError
+from app.services.llm_service_access import LLMServiceAccess
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
+from app.services.user_settings_store import UserSettingsStore
 
 logger = logging.getLogger(__name__)
 
 _llm_client: LLMClient | None = None
 _learning_store: LearningStore | None = None
+_user_settings_store: UserSettingsStore | None = None
+_llm_service_access: LLMServiceAccess | None = None
 
 
 def _load_dotenv():
@@ -56,14 +63,20 @@ _load_dotenv()
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle."""
-    global _llm_client, _learning_store
+    global _llm_client, _learning_store, _user_settings_store, _llm_service_access
 
     settings = get_settings()
     logging.basicConfig(level=logging.INFO)
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
+    if settings.environment.strip().lower() != "development" and not settings.credentials_encryption_key.strip():
+        raise RuntimeError(
+            "STUDY_CREDENTIALS_ENCRYPTION_KEY must be set when STUDY_ENVIRONMENT is not development"
+        )
 
     # Initialise shared services
-    _llm_client = LLMClient()
+    _llm_service_access = LLMServiceAccess()
+    _user_settings_store = UserSettingsStore(llm_service_access=_llm_service_access)
+    _llm_client = LLMClient(user_settings_store=_user_settings_store)
     _learning_store = LearningStore(settings.learning_db_path)
     parser = DocParser(settings.docs_path)
 
@@ -71,6 +84,8 @@ async def lifespan(application: FastAPI):
     questions.init(_llm_client, parser, _learning_store)
     topics.init(parser, _llm_client, _learning_store)
     llm_settings.init(_llm_client)
+    user_settings.init(_user_settings_store)
+    auth.init_llm_service_access(_llm_service_access)
     chat.init(_llm_client)
     learning.init(_learning_store)
     interview_sessions.init(
@@ -117,9 +132,25 @@ def create_app() -> FastAPI:
     application.include_router(topics.router)
     application.include_router(questions.router, dependencies=auth_dep)
     application.include_router(llm_settings.router, dependencies=auth_dep)
+    application.include_router(user_settings.router, dependencies=auth_dep)
     application.include_router(chat.router, dependencies=auth_dep)
     application.include_router(learning.router)
     application.include_router(interview_sessions.router, dependencies=auth_dep)
+
+    @application.exception_handler(LLMServiceApprovalRequiredError)
+    async def _handle_llm_service_access_denied(
+        _request: Request,
+        exc: LLMServiceApprovalRequiredError,
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": {
+                    "code": exc.code,
+                    "message": exc.message,
+                }
+            },
+        )
 
     @application.get("/health")
     async def root_health():

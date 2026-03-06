@@ -14,9 +14,9 @@ export default defineConfig({
         "pwa-64x64.png",
       ],
       manifest: {
-        name: "Polymarket Study Hub",
-        short_name: "Study Hub",
-        description: "Your personal study companion",
+        name: "Ace Your Interview",
+        short_name: "Ace Interview",
+        description: "Adaptive interview prep for backend, frontend, system design, and AI stacks",
         theme_color: "#1c1d1f",
         background_color: "#1c1d1f",
         display: "standalone",

@@ -6,7 +6,9 @@ import {
   BarChart3,
   GraduationCap,
   ListChecks,
+  MessageSquare,
   LogOut,
+  User,
 } from "lucide-react";
 import { useProgressStore } from "@/store/progressStore";
 import { useAuthStore } from "@/store/authStore";
@@ -26,19 +28,16 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-50 bg-udemy-dark text-white shadow-lg">
       <div className="max-w-[1340px] mx-auto px-6 h-16 flex items-center justify-between">
-        {/* Logo */}
         <Link
           to="/"
           className="flex items-center gap-2.5 hover:opacity-90 transition-opacity"
         >
           <GraduationCap className="w-8 h-8 text-udemy-purple-light" />
           <span className="text-lg font-bold tracking-tight">
-            Polymarket{" "}
-            <span className="text-udemy-purple-light">Study Hub</span>
+            Ace Your <span className="text-udemy-purple-light">Interview</span>
           </span>
         </Link>
 
-        {/* Nav links */}
         <nav className="hidden md:flex items-center gap-1">
           <NavLink
             to="/"
@@ -59,14 +58,27 @@ export default function Header() {
             active={location.pathname.startsWith("/quiz")}
           />
           <NavLink
-            to="/settings"
-            label="Settings"
-            icon={<Settings className="w-4 h-4" />}
-            active={location.pathname === "/settings"}
+            to="/interview"
+            label="Interview"
+            icon={<MessageSquare className="w-4 h-4" />}
+            active={location.pathname.startsWith("/interview")}
           />
+          <NavLink
+            to="/user-settings"
+            label="User Settings"
+            icon={<User className="w-4 h-4" />}
+            active={location.pathname === "/user-settings"}
+          />
+          {user?.is_admin && (
+            <NavLink
+              to="/settings"
+              label="Settings"
+              icon={<Settings className="w-4 h-4" />}
+              active={location.pathname === "/settings"}
+            />
+          )}
         </nav>
 
-        {/* Progress ring + user + logout */}
         <div className="flex items-center gap-3">
           {user && (
             <span className="hidden md:inline text-xs text-gray-400 truncate max-w-[140px]">
@@ -111,7 +123,6 @@ export default function Header() {
             <LogOut className="w-4 h-4 text-gray-400 hover:text-white" />
           </button>
 
-          {/* Mobile menu */}
           <div className="md:hidden flex items-center gap-2">
             <Link to="/" className="p-2 hover:bg-white/10 rounded">
               <BarChart3 className="w-5 h-5" />
@@ -122,9 +133,17 @@ export default function Header() {
             <Link to="/quiz" className="p-2 hover:bg-white/10 rounded">
               <ListChecks className="w-5 h-5" />
             </Link>
-            <Link to="/settings" className="p-2 hover:bg-white/10 rounded">
-              <Settings className="w-5 h-5" />
+            <Link to="/interview" className="p-2 hover:bg-white/10 rounded">
+              <MessageSquare className="w-5 h-5" />
             </Link>
+            <Link to="/user-settings" className="p-2 hover:bg-white/10 rounded">
+              <User className="w-5 h-5" />
+            </Link>
+            {user?.is_admin && (
+              <Link to="/settings" className="p-2 hover:bg-white/10 rounded">
+                <Settings className="w-5 h-5" />
+              </Link>
+            )}
           </div>
         </div>
       </div>
