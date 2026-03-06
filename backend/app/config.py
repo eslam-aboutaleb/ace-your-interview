@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     credentials_encryption_key: str = ""
     user_settings_file: str = "user_llm_settings.json"
     llm_service_users_file: str = "llm_service_users.json"
+    llm_assignments_file: str = "llm_assignments.json"
 
     model_config = {"env_prefix": "STUDY_", "env_file": ".env", "extra": "ignore"}
 

@@ -62,7 +62,7 @@ export default function WordHighlightChat({
   );
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore();
 
@@ -97,7 +97,12 @@ export default function WordHighlightChat({
 
   // Scroll to bottom on new messages.
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = messagesScrollRef.current;
+    if (!container) return;
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages]);
 
   const isSelectionInTarget = useCallback(
@@ -121,16 +126,13 @@ export default function WordHighlightChat({
     [targetSelector],
   );
 
-  const handleMouseUp = useCallback(() => {
+  const updateSelection = useCallback(() => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-      // Small delay to allow clicking the tooltip without flicker.
-      setTimeout(() => {
-        if (!chatOpen) {
-          setTooltipPos(null);
-          setSelectedText("");
-        }
-      }, 200);
+      if (!chatOpen) {
+        setTooltipPos(null);
+        setSelectedText("");
+      }
       return;
     }
 
@@ -160,11 +162,19 @@ export default function WordHighlightChat({
     }
 
     setSelectedText(text);
+    const x = rect.left - containerRect.left + rect.width / 2;
+    const clampedX = Math.min(Math.max(x, 28), Math.max(containerRect.width - 28, 28));
+    const y = rect.top - containerRect.top - 8;
     setTooltipPos({
-      x: rect.left - containerRect.left + rect.width / 2,
-      y: rect.top - containerRect.top - 8,
+      x: clampedX,
+      y: Math.max(y, 16),
     });
   }, [chatOpen, isSelectionInTarget]);
+
+  const handleSelectionEnd = useCallback(() => {
+    // Let the browser finish native selection updates on touch devices.
+    setTimeout(updateSelection, 0);
+  }, [updateSelection]);
 
   const openChat = () => {
     if (!selectedText) return;
@@ -233,7 +243,13 @@ export default function WordHighlightChat({
   };
 
   return (
-    <div ref={containerRef} className="relative" onMouseUp={handleMouseUp}>
+    <div
+      ref={containerRef}
+      className="relative"
+      onMouseUp={handleSelectionEnd}
+      onTouchEnd={handleSelectionEnd}
+      onPointerUp={handleSelectionEnd}
+    >
       {children}
 
       <AnimatePresence>
@@ -244,7 +260,7 @@ export default function WordHighlightChat({
             exit={{ opacity: 0, y: 5, scale: 0.9 }}
             transition={{ duration: 0.15 }}
             onClick={openChat}
-            className="absolute z-50 flex items-center gap-1.5 bg-udemy-purple text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg hover:bg-udemy-purple/90 transition-colors whitespace-nowrap"
+            className="absolute z-50 flex items-center gap-1.5 bg-udemy-purple text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg hover:bg-udemy-purple/90 transition-colors whitespace-nowrap max-sm:px-3 max-sm:py-2"
             style={{
               left: tooltipPos.x,
               top: tooltipPos.y,
@@ -264,7 +280,7 @@ export default function WordHighlightChat({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
-            className="absolute right-0 top-0 z-50 w-[380px] h-[480px] max-h-[75vh] bg-white rounded-xl shadow-2xl border border-udemy-border flex flex-col overflow-hidden"
+            className="absolute right-0 top-0 z-50 w-[380px] h-[480px] max-h-[75vh] bg-white rounded-xl shadow-2xl border border-udemy-border flex flex-col overflow-hidden max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:h-[62vh] max-sm:max-h-[72vh] max-sm:w-auto"
             style={{ maxWidth: "calc(100vw - 2rem)" }}
           >
             <div className="relative sticky top-0 z-10 flex items-center px-4 py-3 pr-11 bg-udemy-purple text-white">
@@ -283,7 +299,10 @@ export default function WordHighlightChat({
               </button>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
+            <div
+              ref={messagesScrollRef}
+              className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3"
+            >
               {messages.length === 0 && (
                 <p className="text-xs text-udemy-text-muted text-center py-4">
                   Ask anything about &ldquo;{chatWord}&rdquo; in this context.
@@ -319,7 +338,6 @@ export default function WordHighlightChat({
                   </div>
                 </div>
               )}
-              <div ref={chatEndRef} />
             </div>
 
             <div className="border-t border-udemy-border px-3 py-2">

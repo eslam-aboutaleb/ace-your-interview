@@ -27,11 +27,24 @@
   html {
     /* Prevent pull-to-refresh and bounce on iOS standalone */
     overscroll-behavior-y: contain;
+    overscroll-behavior-x: none;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   body {
     @apply bg-udemy-bg text-udemy-text;
     padding-bottom: var(--sab);
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   /* Custom scrollbar */

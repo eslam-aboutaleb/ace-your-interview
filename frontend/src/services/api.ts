@@ -31,6 +31,9 @@ import type {
   InterviewReportResponse,
   InterviewSessionsListResponse,
   InterviewStatsResponse,
+  LLMAssignmentsUsersResponse,
+  LLMAssignmentUserItem,
+  LLMMyAssignmentResponse,
   UserSettingsResponse,
   UserPreferences,
 } from "@/types";
@@ -43,15 +46,38 @@ const api = axios.create({
 });
 
 function _isApprovalRequired403(error: any): boolean {
-  if (error?.response?.status !== 403) return false;
+  if (error?.response?.status !== 403 && error?.response?.status !== 400) return false;
   const detail = error?.response?.data?.detail;
-  if (typeof detail === "object" && detail?.code === "llm_service_approval_required") {
+  if (
+    typeof detail === "object" &&
+    ["llm_service_approval_required", "study_app_llm_not_assigned", "personal_credential_required"].includes(detail?.code)
+  ) {
     return true;
   }
-  if (typeof detail === "string" && detail.includes("llm_service_approval_required")) {
+  if (
+    typeof detail === "string" &&
+    (
+      detail.includes("llm_service_approval_required")
+      || detail.includes("study_app_llm_not_assigned")
+      || detail.includes("personal_credential_required")
+    )
+  ) {
     return true;
   }
   return false;
+}
+
+function _policyCode(error: any): string {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "object" && typeof detail?.code === "string") {
+    return detail.code;
+  }
+  if (typeof detail === "string") {
+    if (detail.includes("llm_service_approval_required")) return "llm_service_approval_required";
+    if (detail.includes("study_app_llm_not_assigned")) return "study_app_llm_not_assigned";
+    if (detail.includes("personal_credential_required")) return "personal_credential_required";
+  }
+  return "";
 }
 
 // Redirect to /login on 401
@@ -74,7 +100,8 @@ api.interceptors.response.use(
       _isApprovalRequired403(error) &&
       !window.location.pathname.startsWith("/user-settings")
     ) {
-      window.location.href = "/user-settings?policy=llm_service_approval_required";
+      const code = _policyCode(error) || "llm_service_approval_required";
+      window.location.href = `/user-settings?policy=${encodeURIComponent(code)}`;
     }
     return Promise.reject(error);
   },
@@ -341,6 +368,50 @@ export async function removeLLMServiceUser(
   const { data } = await api.delete<LLMServiceUsers>(
     `/auth/llm-service-users/${provider}/${encodeURIComponent(identifier)}`,
   );
+  return data;
+}
+
+export async function fetchLLMAssignmentUsers(): Promise<LLMAssignmentsUsersResponse> {
+  const { data } = await api.get<LLMAssignmentsUsersResponse>("/auth/llm-assignments/users");
+  return data;
+}
+
+export async function saveLLMAssignmentForUser(
+  loginProvider: "google" | "github",
+  identifier: string,
+  provider: string,
+  model: string,
+): Promise<LLMAssignmentUserItem> {
+  const { data } = await api.put<LLMAssignmentUserItem>(
+    `/auth/llm-assignments/${loginProvider}/${encodeURIComponent(identifier)}`,
+    { provider, model },
+  );
+  return data;
+}
+
+export async function deleteLLMAssignmentForUser(
+  loginProvider: "google" | "github",
+  identifier: string,
+): Promise<LLMAssignmentUserItem> {
+  const { data } = await api.delete<LLMAssignmentUserItem>(
+    `/auth/llm-assignments/${loginProvider}/${encodeURIComponent(identifier)}`,
+  );
+  return data;
+}
+
+export async function fetchMyLLMAssignment(): Promise<LLMMyAssignmentResponse> {
+  const { data } = await api.get<LLMMyAssignmentResponse>("/auth/llm-assignments/me");
+  return data;
+}
+
+export async function saveMyLLMAssignment(
+  provider: string,
+  model: string,
+): Promise<LLMMyAssignmentResponse> {
+  const { data } = await api.put<LLMMyAssignmentResponse>("/auth/llm-assignments/me", {
+    provider,
+    model,
+  });
   return data;
 }
 

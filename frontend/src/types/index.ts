@@ -117,6 +117,7 @@ export interface HealthStatus {
 }
 
 export type UserAuthMode = "api_key" | "account";
+export type UserLLMSource = "personal" | "study_app";
 export type UserSettingsProvider = "google" | "openai" | "anthropic" | "groq";
 
 export interface UserPreferences {
@@ -125,6 +126,8 @@ export interface UserPreferences {
   temperature: number;
   max_tokens: number;
   auth_mode: UserAuthMode;
+  llm_source: UserLLMSource;
+  require_answer_reveal: boolean;
 }
 
 export interface ProviderConnectionStatus {
@@ -141,6 +144,36 @@ export interface UserSettingsResponse {
   has_saved_preferences: boolean;
   preferences: UserPreferences;
   providers: ProviderConnectionStatus[];
+  study_app_available: boolean;
+  study_app_assignment: StudyAppAssignment | null;
+}
+
+export interface StudyAppAssignment {
+  provider: UserSettingsProvider;
+  model: string;
+  updated_at: string;
+}
+
+export interface LLMAssignmentUserItem {
+  login_provider: "google" | "github";
+  identifier: string;
+  identity_key: string;
+  is_backend_approved: boolean;
+  assignment: StudyAppAssignment | null;
+}
+
+export interface LLMAssignmentsUsersResponse {
+  users: LLMAssignmentUserItem[];
+  provider_models: Record<UserSettingsProvider, string[]>;
+}
+
+export interface LLMMyAssignmentResponse {
+  login_provider: "google" | "github";
+  identifier: string;
+  identity_key: string;
+  is_backend_approved: boolean;
+  assignment: StudyAppAssignment | null;
+  provider_models: Record<UserSettingsProvider, string[]>;
 }
 
 /* ── Chat Follow-Up Types ────────────────────────────────── */

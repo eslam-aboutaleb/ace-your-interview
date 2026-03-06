@@ -22,10 +22,12 @@ function ProtectedRoute() {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const hydratedRef = useRef(false);
   const hydrateFromServer = useSettingsStore((s) => s.hydrateFromServer);
+  const localLLMSource = useSettingsStore((s) => s.llmSource);
   const localProvider = useSettingsStore((s) => s.provider);
   const localModel = useSettingsStore((s) => s.model);
   const localTemperature = useSettingsStore((s) => s.temperature);
   const localMaxTokens = useSettingsStore((s) => s.maxTokens);
+  const localRequireAnswerReveal = useSettingsStore((s) => s.requireAnswerReveal);
 
   useEffect(() => {
     checkAuth();
@@ -58,16 +60,20 @@ function ProtectedRoute() {
             temperature: localTemperature,
             max_tokens: localMaxTokens,
             auth_mode: provider === "google" ? "api_key" : "api_key",
+            llm_source: localLLMSource,
+            require_answer_reveal: localRequireAnswerReveal,
           };
           prefs = await updateUserPreferences(seedPayload);
         }
 
         if (!active) return;
         hydrateFromServer({
+          llmSource: prefs.llm_source,
           provider: prefs.provider,
           model: prefs.model,
           temperature: prefs.temperature,
           maxTokens: prefs.max_tokens,
+          requireAnswerReveal: prefs.require_answer_reveal,
         });
       } catch (e) {
         console.error(e);
@@ -84,9 +90,11 @@ function ProtectedRoute() {
     isAuthenticated,
     isLoading,
     localProvider,
+    localLLMSource,
     localModel,
     localTemperature,
     localMaxTokens,
+    localRequireAnswerReveal,
   ]);
 
   if (isLoading) {

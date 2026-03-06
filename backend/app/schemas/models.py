@@ -171,12 +171,19 @@ class UserAuthModeEnum(str, Enum):
     ACCOUNT = "account"
 
 
+class UserLLMSourceEnum(str, Enum):
+    PERSONAL = "personal"
+    STUDY_APP = "study_app"
+
+
 class UserPreferences(BaseModel):
     provider: str = Field(default="openai", pattern="^(google|openai|anthropic|groq)$")
     model: str = ""
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=0, ge=0)
     auth_mode: UserAuthModeEnum = UserAuthModeEnum.API_KEY
+    llm_source: UserLLMSourceEnum = UserLLMSourceEnum.PERSONAL
+    require_answer_reveal: bool = True
 
 
 class UserPreferencesUpdateRequest(UserPreferences):
@@ -197,10 +204,45 @@ class ProviderConnectionStatus(BaseModel):
     backend_fallback_eligible: bool = False
 
 
+class StudyAppAssignment(BaseModel):
+    provider: str
+    model: str
+    updated_at: str = ""
+
+
 class UserSettingsResponse(BaseModel):
     has_saved_preferences: bool = False
     preferences: UserPreferences
     providers: list[ProviderConnectionStatus] = []
+    study_app_available: bool = False
+    study_app_assignment: StudyAppAssignment | None = None
+
+
+class LLMUserAssignmentUpdateRequest(BaseModel):
+    provider: str = Field(..., pattern="^(google|openai|anthropic|groq)$")
+    model: str = Field(default="", min_length=1, max_length=200)
+
+
+class LLMUserAssignmentItem(BaseModel):
+    login_provider: str
+    identifier: str
+    identity_key: str
+    is_backend_approved: bool = False
+    assignment: StudyAppAssignment | None = None
+
+
+class LLMUserAssignmentsResponse(BaseModel):
+    users: list[LLMUserAssignmentItem] = []
+    provider_models: dict[str, list[str]] = {}
+
+
+class LLMMyAssignmentResponse(BaseModel):
+    login_provider: str
+    identifier: str
+    identity_key: str
+    is_backend_approved: bool = False
+    assignment: StudyAppAssignment | None = None
+    provider_models: dict[str, list[str]] = {}
 
 
 # ── Chat Follow-Up Models ────────────────────────────────────

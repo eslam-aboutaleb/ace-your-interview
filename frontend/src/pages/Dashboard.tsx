@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, useCallback } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   BookOpen,
@@ -8,6 +8,7 @@ import {
   Sparkles,
   ChevronRight,
   MessageSquare,
+  Loader2,
 } from "lucide-react";
 import {
   containerVariants,
@@ -15,8 +16,14 @@ import {
   pageVariants,
   pageTransition,
 } from "@/utils/animations";
-import { fetchInterviewStats, fetchTopicMastery, fetchTopics } from "@/services/api";
+import {
+  createCustomTopic,
+  fetchInterviewStats,
+  fetchTopicMastery,
+  fetchTopics,
+} from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
 import type { TopicSummary } from "@/types";
@@ -54,8 +61,13 @@ const TRACK_LABELS: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const settings = useSettingsStore();
   const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [customTopic, setCustomTopic] = useState("");
+  const [creatingCustom, setCreatingCustom] = useState(false);
+  const [customError, setCustomError] = useState("");
   const [interviewStats, setInterviewStats] = useState({
     total_sessions: 0,
     completed_sessions: 0,
@@ -73,14 +85,21 @@ export default function Dashboard() {
     (s) => s.dismissCurriculumNotice,
   );
 
+  const loadTopics = useCallback(async () => {
+    setLoading(true);
+    try {
+      const loaded = await fetchTopics();
+      setTopics(loaded);
+      setTopicCount(loaded.length);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [setTopicCount]);
+
   useEffect(() => {
-    fetchTopics()
-      .then((loaded) => {
-        setTopics(loaded);
-        setTopicCount(loaded.length);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    loadTopics();
     fetchTopicMastery()
       .then((res) => {
         res.topics.forEach((t) => setMastery(t.topic_id, t.mastery_score));
@@ -93,7 +112,37 @@ export default function Dashboard() {
       .catch(() => {
         // ignore mock interview stats failures (feature flag may be off)
       });
-  }, [setTopicCount, setMastery]);
+  }, [loadTopics, setMastery]);
+
+  const handleCreateCustomTopic = async () => {
+    const topic = customTopic.trim();
+    if (topic.length < 2) {
+      setCustomError("Please enter at least 2 characters for the custom topic.");
+      return;
+    }
+
+    setCreatingCustom(true);
+    setCustomError("");
+    try {
+      const created = await createCustomTopic({
+        topic,
+        llm_config: {
+          provider: settings.provider,
+          model: settings.model,
+          temperature: settings.temperature,
+          max_tokens: settings.maxTokens,
+        },
+      });
+      await loadTopics();
+      setCustomTopic("");
+      navigate(`/topics/${created.id}`);
+    } catch (err) {
+      console.error(err);
+      setCustomError("Could not generate the custom topic roadmap. Please try again.");
+    } finally {
+      setCreatingCustom(false);
+    }
+  };
 
   const progress = totalProgress();
   const completedCount = completedTopics.length;
@@ -191,6 +240,39 @@ export default function Dashboard() {
           <span className="text-sm font-bold text-udemy-purple">
             {progress}%
           </span>
+        </div>
+      </div>
+
+      <div className="max-w-[1340px] mx-auto px-6 pt-6">
+        <div className="udemy-card p-4">
+          <div className="flex flex-col md:flex-row md:items-end gap-3">
+            <div className="flex-1">
+              <h2 className="text-sm font-bold mb-1">Create Custom Topic</h2>
+              <p className="text-xs text-udemy-text-muted mb-2">
+                Build a deep roadmap (100+ subtopics) for any topic.
+              </p>
+              <input
+                type="text"
+                value={customTopic}
+                onChange={(e) => setCustomTopic(e.target.value)}
+                placeholder="Enter custom topic (e.g. Java, Kafka, Spring Boot)"
+                className="w-full border border-udemy-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-udemy-purple"
+              />
+            </div>
+            <button
+              onClick={handleCreateCustomTopic}
+              disabled={creatingCustom}
+              className="btn-primary min-w-[220px] disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+            >
+              {creatingCustom && <Loader2 className="w-4 h-4 animate-spin" />}
+              {creatingCustom ? "Analyzing..." : "Analyze & Build Roadmap"}
+            </button>
+          </div>
+          {customError && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1 mt-3">
+              {customError}
+            </p>
+          )}
         </div>
       </div>
 

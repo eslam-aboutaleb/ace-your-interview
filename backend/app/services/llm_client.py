@@ -10,6 +10,14 @@ import litellm
 from app.config import get_settings
 from app.schemas.models import LLMConfigRequest
 from app.services.user_settings_store import UserSettingsStore, identity_key_for_user
+from app.services.llm_policy import (
+    APPROVAL_REQUIRED_CODE,
+    APPROVAL_REQUIRED_MESSAGE,
+    PERSONAL_CREDENTIAL_REQUIRED_CODE,
+    PERSONAL_CREDENTIAL_REQUIRED_MESSAGE,
+    STUDY_APP_NOT_ASSIGNED_CODE,
+    STUDY_APP_NOT_ASSIGNED_MESSAGE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +91,8 @@ class LLMClient:
         identity_key = identity_key_for_user(user_identity)
         if self._user_settings_store and identity_key:
             prefs, _has_saved = self._user_settings_store.get_user_state(identity_key)
+            llm_source = str(prefs.get("llm_source", "personal")).strip().lower()
 
-            if provider_str in ("default", ""):
-                provider_str = str(prefs.get("provider", "default"))
-            if not model_str:
-                model_str = str(prefs.get("model", ""))
             if llm_config is None or llm_config.temperature <= 0:
                 try:
                     temperature = float(prefs.get("temperature", temperature))
@@ -101,34 +106,60 @@ class LLMClient:
                 except (TypeError, ValueError):
                     pass
 
-            effective_provider = (
-                provider_str if provider_str not in ("default", "") else settings.default_provider
-            )
-            auth_mode = str(prefs.get("auth_mode", "api_key"))
-            runtime_credential, credential_source, policy_error_code = await self._user_settings_store.resolve_runtime_credential(
-                identity_key=identity_key,
-                provider=effective_provider,
-                auth_mode=auth_mode,
-            )
-            if policy_error_code:
-                policy_error_message = (
-                    "Admin approval required for backend LLM service. "
-                    "Add your own LLM credential in User Settings or ask admin approval."
+            if llm_source == "study_app":
+                assigned_provider, assigned_model, policy_error_code = (
+                    self._user_settings_store.resolve_study_app_provider_model(
+                        identity_key=identity_key,
+                    )
                 )
+                if assigned_provider:
+                    provider_str = assigned_provider
+                if assigned_model:
+                    model_str = assigned_model
+                credential_source = "study_app_backend"
+                if policy_error_code == APPROVAL_REQUIRED_CODE:
+                    policy_error_message = APPROVAL_REQUIRED_MESSAGE
+                elif policy_error_code == STUDY_APP_NOT_ASSIGNED_CODE:
+                    policy_error_message = STUDY_APP_NOT_ASSIGNED_MESSAGE
+            else:
+                if provider_str in ("default", ""):
+                    provider_str = str(prefs.get("provider", "default"))
+                if not model_str:
+                    model_str = str(prefs.get("model", ""))
+                effective_provider = (
+                    provider_str if provider_str not in ("default", "") else settings.default_provider
+                )
+                auth_mode = str(prefs.get("auth_mode", "api_key"))
+                (
+                    runtime_credential,
+                    credential_source,
+                    policy_error_code,
+                ) = await self._user_settings_store.resolve_personal_runtime_credential(
+                    identity_key=identity_key,
+                    provider=effective_provider,
+                    auth_mode=auth_mode,
+                )
+                if policy_error_code == PERSONAL_CREDENTIAL_REQUIRED_CODE:
+                    policy_error_message = PERSONAL_CREDENTIAL_REQUIRED_MESSAGE
+        else:
+            # Non-authenticated/background contexts continue using backend settings.
+            credential_source = "backend"
 
         resolved_model = _resolve_model(provider_str, model_str)
         actual_provider = (
             provider_str if provider_str not in ("default", "") else settings.default_provider
         )
 
-        if credential_source == "blocked_unapproved":
+        if policy_error_code:
             return {
                 "success": False,
                 "analysis": "",
                 "metadata": {
                     "provider": actual_provider,
                     "model": resolved_model,
-                    "credential_source": credential_source,
+                    "credential_source": (
+                        "blocked_unapproved" if policy_error_code == APPROVAL_REQUIRED_CODE else credential_source
+                    ),
                 },
                 "error": policy_error_message,
                 "error_code": policy_error_code,

@@ -16,7 +16,8 @@ export default defineConfig({
       manifest: {
         name: "Ace Your Interview",
         short_name: "Ace Interview",
-        description: "Adaptive interview prep for backend, frontend, system design, and AI stacks",
+        description:
+          "Adaptive interview prep for backend, frontend, system design, and AI stacks",
         theme_color: "#1c1d1f",
         background_color: "#1c1d1f",
         display: "standalone",
@@ -89,9 +90,10 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+    host: true, // listen on all interfaces (needed for Docker)
     proxy: {
       "/api": {
-        target: "http://localhost:8001",
+        target: process.env.VITE_DEV_BACKEND_URL || "http://localhost:8001",
         changeOrigin: true,
       },
     },
