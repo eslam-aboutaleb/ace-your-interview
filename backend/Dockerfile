@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -e "."
 # Copy application
 COPY app/ ./app/
 COPY main.py .
+COPY docs/ ./docs/
 
 EXPOSE 8001
 
