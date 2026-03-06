@@ -14,14 +14,30 @@ services:
       - key: STUDY_DEFAULT_MODEL
         value: llama-3.3-70b-versatile
       - key: STUDY_CORS_ORIGINS
-        sync: false  # Set manually to your Vercel URL
+        sync: false # Set manually to your Vercel URL
       - key: GROQ_API_KEY
-        sync: false  # Set via Render dashboard
+        sync: false # Set via Render dashboard
       - key: OPENAI_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: STUDY_AUTH_SECRET_KEY
+        sync: false
+      - key: STUDY_FRONTEND_URL
+        sync: false
+      - key: STUDY_GITHUB_CLIENT_ID
+        sync: false
+      - key: STUDY_GITHUB_CLIENT_SECRET
+        sync: false
+      - key: STUDY_GOOGLE_CLIENT_ID
+        sync: false
+      - key: STUDY_GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: STUDY_ALLOWED_GITHUB_USERS
+        value: eslam-aboutaleb
+      - key: STUDY_ALLOWED_GOOGLE_EMAILS
+        value: eslamehababoutaleb@gmail.com
     rootDir: backend
     healthCheckPath: /health

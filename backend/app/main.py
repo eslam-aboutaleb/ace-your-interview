@@ -7,11 +7,12 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import chat, llm_settings, questions, topics
+from app.dependencies import require_auth
+from app.routers import auth, chat, llm_settings, questions, topics
 from app.services.doc_parser import DocParser
 from app.services.llm_client import LLMClient
 
@@ -86,11 +87,15 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Routers
-    application.include_router(topics.router)
-    application.include_router(questions.router)
-    application.include_router(llm_settings.router)
-    application.include_router(chat.router)
+    # Auth router — no auth dependency (contains login endpoints)
+    application.include_router(auth.router)
+
+    # Protected routers
+    auth_dep = [Depends(require_auth)]
+    application.include_router(topics.router, dependencies=auth_dep)
+    application.include_router(questions.router, dependencies=auth_dep)
+    application.include_router(llm_settings.router, dependencies=auth_dep)
+    application.include_router(chat.router, dependencies=auth_dep)
 
     @application.get("/health")
     async def root_health():

@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://your-study-app-backend.onrender.com/api/:path*"
+      "destination": "https://study-app-backend-cn5k.onrender.com/api/:path*"
     }
   ]
 }

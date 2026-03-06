@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   BookOpen,
@@ -6,13 +6,22 @@ import {
   BarChart3,
   GraduationCap,
   ListChecks,
+  LogOut,
 } from "lucide-react";
 import { useProgressStore } from "@/store/progressStore";
+import { useAuthStore } from "@/store/authStore";
 
 export default function Header() {
   const location = useLocation();
+  const navigate = useNavigate();
   const totalProgress = useProgressStore((s) => s.totalProgress);
   const progress = totalProgress();
+  const { logout, user } = useAuthStore();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
 
   return (
     <header className="sticky top-0 z-50 bg-udemy-dark text-white shadow-lg">
@@ -57,8 +66,14 @@ export default function Header() {
           />
         </nav>
 
-        {/* Progress ring */}
+        {/* Progress ring + user + logout */}
         <div className="flex items-center gap-3">
+          {user && (
+            <span className="hidden md:inline text-xs text-gray-400 truncate max-w-[140px]">
+              {user.user}
+            </span>
+          )}
+
           <div className="relative w-10 h-10">
             <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
               <circle
@@ -87,6 +102,14 @@ export default function Header() {
               {progress}%
             </span>
           </div>
+
+          <button
+            onClick={handleLogout}
+            title="Sign out"
+            className="p-2 hover:bg-white/10 rounded transition-colors"
+          >
+            <LogOut className="w-4 h-4 text-gray-400 hover:text-white" />
+          </button>
 
           {/* Mobile menu */}
           <div className="md:hidden flex items-center gap-2">

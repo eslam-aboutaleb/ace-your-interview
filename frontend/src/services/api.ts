@@ -18,7 +18,22 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "/api",
   timeout: 120_000, // LLM calls can be slow
   headers: { "Content-Type": "application/json" },
+  withCredentials: true,
 });
+
+// Redirect to /login on 401
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (
+      error.response?.status === 401 &&
+      !window.location.pathname.startsWith("/login")
+    ) {
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  },
+);
 
 // ── Topics ──────────────────────────────────────────────────
 export async function fetchTopics(): Promise<TopicSummary[]> {
@@ -80,5 +95,37 @@ export async function testOllamaConnection(): Promise<OllamaTestResponse> {
 
 export async function fetchOllamaModels(): Promise<OllamaModelsResponse> {
   const { data } = await api.get<OllamaModelsResponse>("/llm/ollama/models");
+  return data;
+}
+
+// ── Auth – Allowed Users ────────────────────────────────────
+export interface AllowedUsers {
+  github_users: string[];
+  google_emails: string[];
+}
+
+export async function fetchAllowedUsers(): Promise<AllowedUsers> {
+  const { data } = await api.get<AllowedUsers>("/auth/allowed-users");
+  return data;
+}
+
+export async function addAllowedUser(
+  provider: string,
+  identifier: string,
+): Promise<AllowedUsers> {
+  const { data } = await api.post<AllowedUsers>("/auth/allowed-users", {
+    provider,
+    identifier,
+  });
+  return data;
+}
+
+export async function removeAllowedUser(
+  provider: string,
+  identifier: string,
+): Promise<AllowedUsers> {
+  const { data } = await api.delete<AllowedUsers>(
+    `/auth/allowed-users/${provider}/${encodeURIComponent(identifier)}`,
+  );
   return data;
 }

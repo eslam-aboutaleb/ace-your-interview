@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:5174,http://localhost:5173,http://127.0.0.1:5174"
 
+    # Auth
+    auth_secret_key: str = ""
+    frontend_url: str = "http://localhost:5174"
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    allowed_github_users: str = ""
+    allowed_google_emails: str = ""
+
     model_config = {"env_prefix": "STUDY_", "env_file": ".env", "extra": "ignore"}
 
 

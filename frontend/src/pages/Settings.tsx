@@ -13,6 +13,11 @@ import {
   Cloud,
   Wifi,
   WifiOff,
+  Github,
+  Mail,
+  Trash2,
+  Plus,
+  ShieldCheck,
 } from "lucide-react";
 import {
   pageVariants,
@@ -25,7 +30,11 @@ import {
   fetchHealth,
   testOllamaConnection,
   fetchOllamaModels,
+  fetchAllowedUsers,
+  addAllowedUser,
+  removeAllowedUser,
 } from "@/services/api";
+import type { AllowedUsers } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useProgressStore } from "@/store/progressStore";
 import type {
@@ -48,11 +57,18 @@ export default function SettingsPage() {
   );
   const [loadingOllama, setLoadingOllama] = useState(false);
 
+  // Allowed users state
+  const [allowedUsers, setAllowedUsers] = useState<AllowedUsers | null>(null);
+  const [newGithubUser, setNewGithubUser] = useState("");
+  const [newGoogleEmail, setNewGoogleEmail] = useState("");
+  const [loadingAllowed, setLoadingAllowed] = useState(false);
+
   const settings = useSettingsStore();
   const resetProgress = useProgressStore((s) => s.reset);
 
   useEffect(() => {
     loadProviders();
+    loadAllowedUsers();
   }, []);
 
   const loadProviders = async () => {
@@ -93,6 +109,49 @@ export default function SettingsPage() {
       setOllamaTest({ connected: false, version: "" });
     } finally {
       setLoadingOllama(false);
+    }
+  };
+
+  // Allowed users helpers
+  const loadAllowedUsers = async () => {
+    try {
+      const data = await fetchAllowedUsers();
+      setAllowedUsers(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddUser = async (provider: "github" | "google") => {
+    const identifier =
+      provider === "github" ? newGithubUser.trim() : newGoogleEmail.trim();
+    if (!identifier) return;
+    setLoadingAllowed(true);
+    try {
+      const data = await addAllowedUser(provider, identifier);
+      setAllowedUsers(data);
+      if (provider === "github") setNewGithubUser("");
+      else setNewGoogleEmail("");
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingAllowed(false);
+    }
+  };
+
+  const handleRemoveUser = async (
+    provider: "github" | "google",
+    identifier: string,
+  ) => {
+    if (!confirm(`Remove ${identifier}?`)) return;
+    setLoadingAllowed(true);
+    try {
+      const data = await removeAllowedUser(provider, identifier);
+      setAllowedUsers(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingAllowed(false);
     }
   };
 
@@ -433,6 +492,128 @@ export default function SettingsPage() {
               </div>
             </div>
           </motion.div>
+        </motion.div>
+
+        {/* ── Allowed Users Section ───────────────────────────── */}
+        <motion.div
+          variants={cardVariants}
+          initial="hidden"
+          animate="show"
+          className="mt-6"
+        >
+          <div className="udemy-card p-6">
+            <h2 className="text-lg font-bold mb-1 flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-udemy-purple" />
+              Allowed Users
+            </h2>
+            <p className="text-sm text-udemy-text-muted mb-5">
+              Only these accounts can sign in to this app.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* GitHub users */}
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
+                  <Github className="w-4 h-4" />
+                  GitHub Usernames
+                </h3>
+                <div className="space-y-2 mb-3">
+                  {allowedUsers?.github_users.map((u) => (
+                    <div
+                      key={u}
+                      className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm"
+                    >
+                      <span className="font-medium">{u}</span>
+                      <button
+                        onClick={() => handleRemoveUser("github", u)}
+                        disabled={loadingAllowed}
+                        className="text-red-400 hover:text-red-600 transition-colors p-1"
+                        title="Remove"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {allowedUsers?.github_users.length === 0 && (
+                    <p className="text-xs text-udemy-text-muted italic">
+                      No GitHub users allowed
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="github-username"
+                    value={newGithubUser}
+                    onChange={(e) => setNewGithubUser(e.target.value)}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleAddUser("github")
+                    }
+                    className="flex-1 border border-udemy-border rounded px-3 py-2 text-sm"
+                  />
+                  <button
+                    onClick={() => handleAddUser("github")}
+                    disabled={loadingAllowed || !newGithubUser.trim()}
+                    className="btn-secondary text-xs flex items-center gap-1 px-3 py-2"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Google emails */}
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
+                  <Mail className="w-4 h-4" />
+                  Google Emails
+                </h3>
+                <div className="space-y-2 mb-3">
+                  {allowedUsers?.google_emails.map((e) => (
+                    <div
+                      key={e}
+                      className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm"
+                    >
+                      <span className="font-medium">{e}</span>
+                      <button
+                        onClick={() => handleRemoveUser("google", e)}
+                        disabled={loadingAllowed}
+                        className="text-red-400 hover:text-red-600 transition-colors p-1"
+                        title="Remove"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {allowedUsers?.google_emails.length === 0 && (
+                    <p className="text-xs text-udemy-text-muted italic">
+                      No Google emails allowed
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    placeholder="user@gmail.com"
+                    value={newGoogleEmail}
+                    onChange={(e) => setNewGoogleEmail(e.target.value)}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleAddUser("google")
+                    }
+                    className="flex-1 border border-udemy-border rounded px-3 py-2 text-sm"
+                  />
+                  <button
+                    onClick={() => handleAddUser("google")}
+                    disabled={loadingAllowed || !newGoogleEmail.trim()}
+                    className="btn-secondary text-xs flex items-center gap-1 px-3 py-2"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </motion.div>
       </div>
     </motion.div>

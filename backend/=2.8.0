@@ -1,0 +1,8 @@
+Collecting PyJWT
+  Downloading pyjwt-2.11.0-py3-none-any.whl.metadata (4.0 kB)
+Downloading pyjwt-2.11.0-py3-none-any.whl (28 kB)
+Installing collected packages: PyJWT
+Successfully installed PyJWT-2.11.0
+
+[notice] A new release of pip is available: 24.0 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
