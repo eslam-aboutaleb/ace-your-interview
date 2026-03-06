@@ -62,7 +62,7 @@ touch app/generated/__init__.py
 # Set env vars for local gRPC
 export STUDY_GRPC_LLM_CHAIN_HOST=localhost
 export STUDY_GRPC_CLI_AGENT_HOST=localhost
-export STUDY_DOCS_PATH=../../docs
+export STUDY_DOCS_PATH=docs
 
 # Run
 uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
@@ -85,6 +85,13 @@ Open http://localhost:5174
 | GET    | `/api/topics`             | List all study topics          |
 | GET    | `/api/topics/{id}`        | Get topic detail with sections |
 | POST   | `/api/questions/generate` | Generate interview Q&A via LLM |
+| POST   | `/api/questions/generate-v2` | Generate grounded Q&A (strict schema) |
+| POST   | `/api/questions/quiz/generate` | Generate quiz questions (legacy) |
+| POST   | `/api/questions/quiz/generate-v2` | Generate grounded quiz (strict schema) |
+| POST   | `/api/learning/attempts` | Record study/quiz attempt for adaptive scheduling |
+| GET    | `/api/learning/review-queue` | Get due review items |
+| GET    | `/api/learning/weak-areas` | Get weakest topics summary |
+| GET    | `/api/learning/mastery` | Get topic mastery scores |
 | GET    | `/api/llm/providers`      | List available LLM providers   |
 | GET    | `/api/llm/health`         | Check gRPC backend health      |
 | GET    | `/health`                 | App health check               |
@@ -102,6 +109,22 @@ Providers route to the correct backend automatically:
 
 - OpenAI / Anthropic / Google / Groq / Ollama → `llm-chain` (port 50051)
 - GitHub Models → `cli-agent` (port 50052)
+
+## Localhost Auth Bypass (Dev)
+
+For local-only development, you can bypass login while still keeping auth enabled elsewhere:
+
+```bash
+STUDY_DEV_AUTH_BYPASS_LOCALHOST=true
+```
+
+When enabled, requests coming from `localhost` / `127.0.0.1` are treated as an authenticated local dev user.
+
+For deployment, keep this disabled:
+
+```bash
+STUDY_DEV_AUTH_BYPASS_LOCALHOST=false
+```
 
 ## Architecture
 

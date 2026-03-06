@@ -1,24 +1,48 @@
-"""Generate interview questions & answers via LLM."""
+"""Generate interview questions & answers via LLM with strict validation."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
-from typing import Optional
+from collections import Counter
+from typing import Any, Callable, Optional
 
 from app.schemas.models import (
     GenerateQuestionsResponse,
+    GenerateQuestionsV2Response,
     GenerateQuizResponse,
+    GenerateQuizV2Response,
     LLMConfigRequest,
     QuestionAnswer,
+    QuestionAnswerV2,
     QuizChoice,
     QuizQuestion,
     QuizQuestionType,
+    QuizQuestionV2,
 )
 from app.services.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+_MAX_DOC_CONTEXT = 45000
+_MAX_TOPIC_CONTEXT = 9000
+_MAX_ATTEMPTS = 5
+_VALID_DIFFICULTIES = {"easy", "medium", "hard"}
+
+
+def _question_id(topic_id: str, question: str) -> str:
+    digest = hashlib.sha1(f"{topic_id}:{question.strip().lower()}".encode("utf-8")).hexdigest()
+    return f"{topic_id}:{digest[:14]}"
+
+
+def _normalise_question(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def _clamp_content(doc_content: str) -> str:
+    return doc_content[:_MAX_DOC_CONTEXT]
 
 
 def _build_prompt(
@@ -35,30 +59,35 @@ def _build_prompt(
 
     if section_title and section_content:
         scope = f'the "{section_title}" section of "{topic_title}"'
-        content = section_content[:30000]
+        content = _clamp_content(section_content)
     else:
         scope = f'"{topic_title}"'
-        content = doc_content[:30000]
+        content = _clamp_content(doc_content)
 
     return f"""You are an expert technical interviewer and educator.
 
-Given the following documentation about {scope}, generate exactly {count} interview-style questions with detailed, educational answers.{diff_clause}
+Given documentation about {scope}, generate exactly {count} interview-style questions with detailed educational answers.{diff_clause}
 
-IMPORTANT: Return ONLY a valid JSON array with this exact structure (no markdown, no code fences, no extra text):
+Return ONLY valid JSON in this shape:
 [
   {{
-    "question": "The interview question here?",
-    "answer": "A detailed, educational answer that thoroughly explains the concept. Include examples, reasoning, and practical implications where relevant.",
-    "difficulty": "easy|medium|hard"
+    "question": "Question text",
+    "answer": "3-8 sentence educational answer",
+    "difficulty": "easy|medium|hard",
+    "learning_objective": "what this question tests",
+    "source_section": "exact section heading",
+    "source_quote": "short direct quote from docs",
+    "misconception_trap": "common mistake this question targets",
+    "reasoning_summary": "1-2 sentence reasoning path to answer"
   }}
 ]
 
 Rules:
-- Questions should test deep understanding, not just memorisation
-- Answers should be 3-8 sentences, thorough and educational
-- Vary question types: conceptual, practical, scenario-based, comparison
-- Questions MUST be specifically about the provided documentation content
-- Each question must stand alone (no "as mentioned above")
+- Questions must be standalone and non-duplicative.
+- Questions must cover conceptual + practical angles.
+- Answers must be grounded in the provided documentation.
+- source_quote must be factual text from provided docs.
+- No markdown, no commentary, no code fences.
 
 Documentation:
 {content}"""
@@ -75,76 +104,94 @@ def _build_quiz_prompt(
     if difficulty:
         diff_clause = f' All questions should be "{difficulty}" difficulty.'
 
-    type_instructions = ""
     if "mcq" in types and "true_false" in types:
-        type_instructions = "Mix of multiple-choice (4 options labeled A,B,C,D) and true/false questions."
+        type_instructions = "Mix multiple-choice (exactly 4 options A/B/C/D) and true_false (exactly A=True, B=False)."
     elif "mcq" in types:
-        type_instructions = "All questions must be multiple-choice with exactly 4 options labeled A,B,C,D."
+        type_instructions = "All questions must be MCQ with exactly 4 options A/B/C/D."
     else:
-        type_instructions = "All questions must be true/false format with exactly 2 options: A (True) and B (False)."
+        type_instructions = "All questions must be true_false with exactly 2 options: A=True, B=False."
 
     docs_text = ""
     for tc in topics_content:
-        docs_text += f"\n\n--- Topic: {tc['title']} (id: {tc['id']}) ---\n{tc['content'][:8000]}"
+        docs_text += f"\n\n--- Topic: {tc['title']} (id: {tc['id']}) ---\n{tc['content'][:_MAX_TOPIC_CONTEXT]}"
 
-    return f"""You are an expert quiz creator for technical education.
+    return f"""You are an expert technical quiz creator.
 
-Create exactly {count} quiz questions based on the following documentation.{diff_clause}
+Create exactly {count} quiz questions from the documentation below.{diff_clause}
 {type_instructions}
 
-IMPORTANT: Return ONLY a valid JSON array with this exact structure (no markdown, no code fences, no extra text):
+Return ONLY valid JSON:
 [
   {{
-    "question": "The question text?",
-    "type": "mcq",
-    "choices": [
-      {{"label": "A", "text": "First option"}},
-      {{"label": "B", "text": "Second option"}},
-      {{"label": "C", "text": "Third option"}},
-      {{"label": "D", "text": "Fourth option"}}
-    ],
-    "correct_answer": "A",
-    "explanation": "Detailed explanation of why this is correct.",
+    "question": "Question text",
+    "type": "mcq|true_false",
+    "choices": [{{"label":"A","text":"..."}}, {{"label":"B","text":"..."}}, ...],
+    "correct_answer": "A|B|C|D",
+    "explanation": "2-4 sentence explanation",
     "difficulty": "easy|medium|hard",
-    "topic_id": "the topic id this question is about"
+    "topic_id": "one of provided topic ids",
+    "source_quote": "short direct quote from docs",
+    "reasoning_summary": "1-2 sentence why answer is correct"
   }}
 ]
 
-For true_false type, use only two choices:
-  "choices": [{{"label": "A", "text": "True"}}, {{"label": "B", "text": "False"}}]
-
 Rules:
-- correct_answer must be one of the choice labels (A, B, C, or D)
-- Explanations should be 2-4 sentences
-- Questions should test real understanding, not trivial details
-- Distribute questions across the provided topics
-- Each question must stand alone
+- topic_id must be one of the provided ids.
+- correct_answer must match one choice label.
+- Avoid trick ambiguity; one clearly correct answer.
+- Distribute questions across topics as evenly as possible.
+- No markdown, no commentary, no code fences.
 
 Documentation:
-{docs_text[:30000]}"""
+{docs_text[:_MAX_DOC_CONTEXT]}"""
+
+
+def _build_retry_prompt(base_prompt: str, missing_count: int, issues: str, existing_questions: list[str]) -> str:
+    existing_blob = "\n".join([f"- {q}" for q in existing_questions[:50]])
+    return f"""Your previous output did not satisfy the schema or quality constraints.
+
+Missing items needed: {missing_count}
+Validation issues:
+{issues}
+
+Do not repeat any of these existing questions:
+{existing_blob if existing_blob else "- (none)"}
+
+Return ONLY a JSON array with exactly {missing_count} NEW valid items.
+
+{base_prompt}
+"""
 
 
 def _parse_questions_json(raw: str) -> list[dict]:
     """Robustly extract JSON array from LLM response."""
-    # Try direct parse first
+    raw = (raw or "").strip()
+    if not raw:
+        return []
     try:
         data = json.loads(raw)
         if isinstance(data, list):
             return data
+        if isinstance(data, dict):
+            payload = data.get("questions") or data.get("items")
+            if isinstance(payload, list):
+                return payload
     except json.JSONDecodeError:
         pass
 
-    # Try extracting from markdown code block
     m = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", raw, re.DOTALL)
     if m:
         try:
             data = json.loads(m.group(1))
             if isinstance(data, list):
                 return data
+            if isinstance(data, dict):
+                payload = data.get("questions") or data.get("items")
+                if isinstance(payload, list):
+                    return payload
         except json.JSONDecodeError:
             pass
 
-    # Try finding the array boundaries
     start = raw.find("[")
     end = raw.rfind("]")
     if start != -1 and end != -1 and end > start:
@@ -158,8 +205,217 @@ def _parse_questions_json(raw: str) -> list[dict]:
     return []
 
 
+def _validate_question_item(item: dict[str, Any], topic_id: str, difficulty: Optional[str]) -> tuple[bool, str]:
+    required = [
+        "question",
+        "answer",
+        "learning_objective",
+        "source_section",
+        "source_quote",
+        "misconception_trap",
+        "reasoning_summary",
+    ]
+    for key in required:
+        if not isinstance(item.get(key), str) or not item.get(key).strip():
+            return False, f"missing_or_empty_{key}"
+
+    diff = str(item.get("difficulty", "medium")).lower()
+    if diff not in _VALID_DIFFICULTIES:
+        return False, "invalid_difficulty"
+    if difficulty and diff != difficulty:
+        return False, "difficulty_mismatch"
+    if len(item["question"].strip()) < 12:
+        return False, "question_too_short"
+    if len(item["answer"].strip()) < 60:
+        return False, "answer_too_short"
+    item["topic_id"] = topic_id
+    item["difficulty"] = diff
+    return True, ""
+
+
+def _validate_quiz_item(
+    item: dict[str, Any],
+    allowed_topics: set[str],
+    allowed_types: set[str],
+    difficulty: Optional[str],
+) -> tuple[bool, str]:
+    required = [
+        "question",
+        "type",
+        "choices",
+        "correct_answer",
+        "explanation",
+        "topic_id",
+        "source_quote",
+        "reasoning_summary",
+    ]
+    for key in required:
+        if key not in item:
+            return False, f"missing_{key}"
+
+    q_text = item.get("question")
+    q_type = str(item.get("type", "")).lower()
+    choices = item.get("choices")
+    correct = str(item.get("correct_answer", "")).strip()
+    explanation = item.get("explanation")
+    topic_id = str(item.get("topic_id", "")).strip()
+    source_quote = item.get("source_quote")
+    reasoning_summary = item.get("reasoning_summary")
+
+    if not isinstance(q_text, str) or len(q_text.strip()) < 8:
+        return False, "invalid_question"
+    if q_type not in {"mcq", "true_false"}:
+        return False, "invalid_type"
+    if q_type not in allowed_types:
+        return False, "disallowed_type"
+    if topic_id not in allowed_topics:
+        return False, "invalid_topic_id"
+    if not isinstance(explanation, str) or len(explanation.strip()) < 15:
+        return False, "invalid_explanation"
+    if not isinstance(source_quote, str) or len(source_quote.strip()) < 8:
+        return False, "invalid_source_quote"
+    if not isinstance(reasoning_summary, str) or len(reasoning_summary.strip()) < 8:
+        return False, "invalid_reasoning_summary"
+
+    if not isinstance(choices, list):
+        return False, "invalid_choices_type"
+    labels = []
+    for c in choices:
+        if not isinstance(c, dict):
+            return False, "invalid_choice_item"
+        label = str(c.get("label", "")).strip()
+        text = c.get("text")
+        if label not in {"A", "B", "C", "D"}:
+            return False, "invalid_choice_label"
+        if not isinstance(text, str) or not text.strip():
+            return False, "invalid_choice_text"
+        labels.append(label)
+
+    if q_type == "mcq":
+        if labels != ["A", "B", "C", "D"]:
+            return False, "mcq_labels_must_be_abcd"
+        if len(choices) != 4:
+            return False, "mcq_must_have_4_choices"
+        if correct not in {"A", "B", "C", "D"}:
+            return False, "invalid_correct_answer_mcq"
+    else:
+        if len(choices) != 2:
+            return False, "true_false_must_have_2_choices"
+        if labels != ["A", "B"]:
+            return False, "true_false_labels_must_be_ab"
+        true_false_texts = [str(choices[0].get("text", "")).strip().lower(), str(choices[1].get("text", "")).strip().lower()]
+        if true_false_texts != ["true", "false"]:
+            return False, "true_false_text_must_be_true_false"
+        if correct not in {"A", "B"}:
+            return False, "invalid_correct_answer_true_false"
+
+    diff = str(item.get("difficulty", "medium")).lower()
+    if diff not in _VALID_DIFFICULTIES:
+        return False, "invalid_difficulty"
+    if difficulty and diff != difficulty:
+        return False, "difficulty_mismatch"
+    item["difficulty"] = diff
+    item["type"] = q_type
+    return True, ""
+
+
+async def _collect_with_retries(
+    *,
+    llm: LLMClient,
+    base_prompt: str,
+    llm_config: Optional[LLMConfigRequest],
+    target_count: int,
+    validator: Callable[[dict[str, Any]], tuple[bool, str]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    dedup: set[str] = set()
+    valid_items: list[dict[str, Any]] = []
+    malformed_items = 0
+    retries_used = 0
+    issue_counter: Counter[str] = Counter()
+    metadata: dict[str, Any] = {}
+    prompt = base_prompt
+    last_error = ""
+
+    for attempt in range(_MAX_ATTEMPTS):
+        result = await llm.completion(prompt, llm_config)
+        metadata = result.get("metadata", {})
+        if not result.get("success"):
+            last_error = result.get("error", "unknown_error")
+            retries_used += 1
+            prompt = _build_retry_prompt(
+                base_prompt=base_prompt,
+                missing_count=max(1, target_count - len(valid_items)),
+                issues=f"transport_or_provider_error: {last_error}",
+                existing_questions=[x.get("question", "") for x in valid_items],
+            )
+            continue
+
+        parsed = _parse_questions_json(result.get("analysis", ""))
+        if not parsed:
+            retries_used += 1
+            issue_counter["json_parse_failed"] += 1
+            prompt = _build_retry_prompt(
+                base_prompt=base_prompt,
+                missing_count=max(1, target_count - len(valid_items)),
+                issues="json_parse_failed",
+                existing_questions=[x.get("question", "") for x in valid_items],
+            )
+            continue
+
+        for item in parsed:
+            if not isinstance(item, dict):
+                malformed_items += 1
+                issue_counter["non_dict_item"] += 1
+                continue
+
+            is_valid, issue = validator(item)
+            if not is_valid:
+                malformed_items += 1
+                issue_counter[issue] += 1
+                continue
+
+            q_norm = _normalise_question(str(item.get("question", "")))
+            if not q_norm or q_norm in dedup:
+                malformed_items += 1
+                issue_counter["duplicate_question"] += 1
+                continue
+            dedup.add(q_norm)
+            valid_items.append(item)
+            if len(valid_items) >= target_count:
+                break
+
+        if len(valid_items) >= target_count:
+            break
+
+        retries_used += 1
+        top_issues = ", ".join([f"{k}:{v}" for k, v in issue_counter.most_common(5)]) or "insufficient_valid_items"
+        prompt = _build_retry_prompt(
+            base_prompt=base_prompt,
+            missing_count=target_count - len(valid_items),
+            issues=top_issues,
+            existing_questions=[x.get("question", "") for x in valid_items],
+        )
+
+    if len(valid_items) < target_count:
+        logger.warning(
+            "Generation produced %d/%d valid items after retries=%d issues=%s last_error=%s",
+            len(valid_items),
+            target_count,
+            retries_used,
+            dict(issue_counter),
+            last_error,
+        )
+
+    stats = {
+        "metadata": metadata,
+        "retries_used": retries_used,
+        "malformed_items_dropped": malformed_items,
+    }
+    return valid_items[:target_count], stats
+
+
 class QuestionGenerator:
-    """Uses LiteLLM to generate interview Q&A."""
+    """Uses LiteLLM to generate interview Q&A and quizzes."""
 
     def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
@@ -175,57 +431,90 @@ class QuestionGenerator:
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
     ) -> GenerateQuestionsResponse:
-        prompt = _build_prompt(
-            topic_title, doc_content, count, difficulty,
-            section_title=section_title, section_content=section_content,
+        v2 = await self.generate_v2(
+            topic_id=topic_id,
+            topic_title=topic_title,
+            doc_content=doc_content,
+            count=count,
+            difficulty=difficulty,
+            llm_config=llm_config,
+            section_title=section_title,
+            section_content=section_content,
         )
-
-        result = await self.llm.completion(prompt, llm_config)
-
-        questions: list[QuestionAnswer] = []
-
-        if result["success"] and result["analysis"]:
-            parsed = _parse_questions_json(result["analysis"])
-            if not parsed:
-                # Retry with a stricter prompt
-                retry_prompt = (
-                    "Your previous response was not valid JSON. "
-                    "Please return ONLY a valid JSON array. No extra text.\n\n"
-                    + prompt
-                )
-                result = await self.llm.completion(retry_prompt, llm_config)
-                if result["success"] and result["analysis"]:
-                    parsed = _parse_questions_json(result["analysis"])
-
-            for item in parsed:
-                if isinstance(item, dict) and "question" in item and "answer" in item:
-                    questions.append(
-                        QuestionAnswer(
-                            question=item["question"],
-                            answer=item["answer"],
-                            difficulty=item.get("difficulty", "medium"),
-                        )
-                    )
-
-        if not questions and result.get("error"):
-            logger.error(f"Failed to generate questions: {result['error']}")
-            # Return a fallback question indicating the error
-            questions.append(
+        questions = [
+            QuestionAnswer(question=q.question, answer=q.answer, difficulty=q.difficulty)
+            for q in v2.questions
+        ]
+        if not questions:
+            questions = [
                 QuestionAnswer(
                     question="Unable to generate questions at this time.",
-                    answer=f"The LLM service returned an error: {result['error']}. "
-                    "Please check your LLM configuration and ensure the service is running.",
+                    answer="The LLM did not return valid structured output. Please try again.",
                     difficulty="easy",
                 )
-            )
-
-        metadata = result.get("metadata", {})
+            ]
         return GenerateQuestionsResponse(
+            topic_id=topic_id,
+            topic_title=topic_title,
+            questions=questions,
+            provider_used=v2.provider_used,
+            model_used=v2.model_used,
+        )
+
+    async def generate_v2(
+        self,
+        topic_id: str,
+        topic_title: str,
+        doc_content: str,
+        count: int = 5,
+        difficulty: Optional[str] = None,
+        llm_config: Optional[LLMConfigRequest] = None,
+        section_title: Optional[str] = None,
+        section_content: Optional[str] = None,
+    ) -> GenerateQuestionsV2Response:
+        prompt = _build_prompt(
+            topic_title=topic_title,
+            doc_content=doc_content,
+            count=count,
+            difficulty=difficulty,
+            section_title=section_title,
+            section_content=section_content,
+        )
+
+        validator = lambda item: _validate_question_item(item, topic_id, difficulty)
+        raw_items, stats = await _collect_with_retries(
+            llm=self.llm,
+            base_prompt=prompt,
+            llm_config=llm_config,
+            target_count=count,
+            validator=validator,
+        )
+
+        questions = [
+            QuestionAnswerV2(
+                question_id=_question_id(topic_id, item["question"]),
+                topic_id=topic_id,
+                question=item["question"].strip(),
+                answer=item["answer"].strip(),
+                difficulty=item["difficulty"],
+                learning_objective=item["learning_objective"].strip(),
+                source_section=item["source_section"].strip(),
+                source_quote=item["source_quote"].strip(),
+                misconception_trap=item["misconception_trap"].strip(),
+                reasoning_summary=item["reasoning_summary"].strip(),
+            )
+            for item in raw_items
+        ]
+
+        metadata = stats.get("metadata", {})
+        return GenerateQuestionsV2Response(
             topic_id=topic_id,
             topic_title=topic_title,
             questions=questions,
             provider_used=metadata.get("provider", ""),
             model_used=metadata.get("model", ""),
+            retries_used=stats.get("retries_used", 0),
+            malformed_items_dropped=stats.get("malformed_items_dropped", 0),
         )
 
     async def generate_quiz(
@@ -236,56 +525,81 @@ class QuestionGenerator:
         difficulty: Optional[str] = None,
         llm_config: Optional[LLMConfigRequest] = None,
     ) -> GenerateQuizResponse:
-        """Generate quiz questions (MCQ and/or True/False) across topics."""
-        prompt = _build_quiz_prompt(topics_content, count, question_types, difficulty)
-
-        result = await self.llm.completion(prompt, llm_config)
-
-        questions: list[QuizQuestion] = []
-
-        if result["success"] and result["analysis"]:
-            parsed = _parse_questions_json(result["analysis"])
-            if not parsed:
-                retry_prompt = (
-                    "Your previous response was not valid JSON. "
-                    "Please return ONLY a valid JSON array. No extra text.\n\n"
-                    + prompt
-                )
-                result = await self.llm.completion(retry_prompt, llm_config)
-                if result["success"] and result["analysis"]:
-                    parsed = _parse_questions_json(result["analysis"])
-
-            for item in parsed:
-                if not isinstance(item, dict) or "question" not in item:
-                    continue
-                q_type = item.get("type", "mcq")
-                choices_raw = item.get("choices", [])
-                choices = []
-                for c in choices_raw:
-                    if isinstance(c, dict) and "label" in c and "text" in c:
-                        choices.append(QuizChoice(label=c["label"], text=c["text"]))
-                if not choices:
-                    continue
-                questions.append(
-                    QuizQuestion(
-                        question=item["question"],
-                        type=QuizQuestionType(q_type) if q_type in ("mcq", "true_false") else QuizQuestionType.MCQ,
-                        choices=choices,
-                        correct_answer=item.get("correct_answer", "A"),
-                        explanation=item.get("explanation", ""),
-                        difficulty=item.get("difficulty", "medium"),
-                        topic_id=item.get("topic_id", ""),
-                    )
-                )
-
-        if not questions and result.get("error"):
-            logger.error(f"Failed to generate quiz: {result['error']}")
-
-        metadata = result.get("metadata", {})
-        topic_ids = list({tc["id"] for tc in topics_content})
+        v2 = await self.generate_quiz_v2(
+            topics_content=topics_content,
+            count=count,
+            question_types=question_types,
+            difficulty=difficulty,
+            llm_config=llm_config,
+        )
+        legacy_questions = [
+            QuizQuestion(
+                question=q.question,
+                type=q.type,
+                choices=q.choices,
+                correct_answer=q.correct_answer,
+                explanation=q.explanation,
+                difficulty=q.difficulty,
+                topic_id=q.topic_id,
+            )
+            for q in v2.questions
+        ]
         return GenerateQuizResponse(
+            questions=legacy_questions,
+            topics_used=v2.topics_used,
+            provider_used=v2.provider_used,
+            model_used=v2.model_used,
+        )
+
+    async def generate_quiz_v2(
+        self,
+        topics_content: list[dict],
+        count: int = 10,
+        question_types: list[str] | None = None,
+        difficulty: Optional[str] = None,
+        llm_config: Optional[LLMConfigRequest] = None,
+    ) -> GenerateQuizV2Response:
+        prompt = _build_quiz_prompt(topics_content, count, question_types, difficulty)
+        allowed_topics = {str(tc["id"]) for tc in topics_content}
+        allowed_types = set(question_types or ["mcq", "true_false"])
+        validator = lambda item: _validate_quiz_item(item, allowed_topics, allowed_types, difficulty)
+
+        raw_items, stats = await _collect_with_retries(
+            llm=self.llm,
+            base_prompt=prompt,
+            llm_config=llm_config,
+            target_count=count,
+            validator=validator,
+        )
+
+        questions = []
+        for item in raw_items:
+            topic_id = str(item.get("topic_id", "")).strip()
+            qid = _question_id(topic_id or "quiz", item["question"])
+            choices = [QuizChoice(label=c["label"], text=c["text"]) for c in item["choices"]]
+            questions.append(
+                QuizQuestionV2(
+                    question_id=qid,
+                    question=item["question"].strip(),
+                    type=QuizQuestionType(item["type"]),
+                    choices=choices,
+                    correct_answer=str(item["correct_answer"]).strip(),
+                    explanation=item["explanation"].strip(),
+                    difficulty=item["difficulty"],
+                    topic_id=topic_id,
+                    source_quote=item["source_quote"].strip(),
+                    reasoning_summary=item["reasoning_summary"].strip(),
+                )
+            )
+
+        metadata = stats.get("metadata", {})
+        topic_ids = sorted({tc["id"] for tc in topics_content})
+        return GenerateQuizV2Response(
             questions=questions,
             topics_used=topic_ids,
             provider_used=metadata.get("provider", ""),
             model_used=metadata.get("model", ""),
+            retries_used=stats.get("retries_used", 0),
+            malformed_items_dropped=stats.get("malformed_items_dropped", 0),
         )
+

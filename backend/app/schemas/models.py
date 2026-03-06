@@ -76,6 +76,29 @@ class GenerateQuestionsResponse(BaseModel):
     model_used: str = ""
 
 
+class QuestionAnswerV2(BaseModel):
+    question_id: str
+    topic_id: str
+    question: str
+    answer: str
+    difficulty: str = "medium"
+    learning_objective: str = ""
+    source_section: str = ""
+    source_quote: str = ""
+    misconception_trap: str = ""
+    reasoning_summary: str = ""
+
+
+class GenerateQuestionsV2Response(BaseModel):
+    topic_id: str
+    topic_title: str
+    questions: list[QuestionAnswerV2]
+    provider_used: str = ""
+    model_used: str = ""
+    retries_used: int = 0
+    malformed_items_dropped: int = 0
+
+
 class TopicSummary(BaseModel):
     id: str
     title: str
@@ -165,6 +188,90 @@ class GenerateQuizResponse(BaseModel):
     topics_used: list[str] = []
     provider_used: str = ""
     model_used: str = ""
+
+
+class QuizQuestionV2(BaseModel):
+    question_id: str
+    question: str
+    type: QuizQuestionType
+    choices: list[QuizChoice]
+    correct_answer: str
+    explanation: str
+    difficulty: str = "medium"
+    topic_id: str = ""
+    source_quote: str = ""
+    reasoning_summary: str = ""
+
+
+class GenerateQuizV2Response(BaseModel):
+    questions: list[QuizQuestionV2]
+    topics_used: list[str] = []
+    provider_used: str = ""
+    model_used: str = ""
+    retries_used: int = 0
+    malformed_items_dropped: int = 0
+
+
+class LearningMode(str, Enum):
+    STUDY = "study"
+    QUIZ = "quiz"
+
+
+class LearningAttemptRequest(BaseModel):
+    question_id: str = Field(..., min_length=2, max_length=200)
+    topic_id: str = Field(..., min_length=1, max_length=200)
+    user_answer: str = Field(default="", max_length=8000)
+    is_correct: bool
+    confidence: int = Field(default=3, ge=1, le=5)
+    response_time_ms: int = Field(default=0, ge=0)
+    mode: LearningMode
+
+
+class LearningAttemptResponse(BaseModel):
+    attempt_id: int
+    topic_id: str
+    question_id: str
+    mastery_score: float
+    due_at: str
+    review_bucket: int
+
+
+class ReviewQueueItem(BaseModel):
+    topic_id: str
+    question_id: str
+    due_at: str
+    mastery_score: float
+    last_confidence: int
+    review_bucket: int
+    attempts: int
+
+
+class ReviewQueueResponse(BaseModel):
+    items: list[ReviewQueueItem]
+    total_due: int = 0
+
+
+class WeakAreaItem(BaseModel):
+    topic_id: str
+    attempts: int
+    accuracy: float
+    avg_confidence: float
+    mastery_score: float
+    due_count: int
+
+
+class WeakAreasResponse(BaseModel):
+    weak_areas: list[WeakAreaItem]
+
+
+class TopicMasteryItem(BaseModel):
+    topic_id: str
+    mastery_score: float
+    attempts: int
+
+
+class TopicMasteryResponse(BaseModel):
+    topics: list[TopicMasteryItem]
 
 
 # ── Ollama Models ────────────────────────────────────────────

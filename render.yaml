@@ -13,6 +13,8 @@ services:
         value: groq
       - key: STUDY_DEFAULT_MODEL
         value: llama-3.3-70b-versatile
+      - key: STUDY_DEV_AUTH_BYPASS_LOCALHOST
+        value: "false"
       - key: STUDY_CORS_ORIGINS
         sync: false # Set manually to your Vercel URL
       - key: GROQ_API_KEY

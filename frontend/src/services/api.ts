@@ -4,14 +4,21 @@ import type {
   TopicDetail,
   GenerateQuestionsRequest,
   GenerateQuestionsResponse,
+  GenerateQuestionsV2Response,
   GenerateQuizRequest,
   GenerateQuizResponse,
+  GenerateQuizV2Response,
   ChatFollowUpRequest,
   ChatFollowUpResponse,
   LLMProvidersResponse,
   HealthStatus,
   OllamaModelsResponse,
   OllamaTestResponse,
+  LearningAttemptRequest,
+  LearningAttemptResponse,
+  ReviewQueueResponse,
+  WeakAreasResponse,
+  TopicMasteryResponse,
 } from "@/types";
 
 const api = axios.create({
@@ -25,9 +32,15 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    const reqUrl = String(error.config?.url || "");
+    const skip401Redirect =
+      reqUrl.includes("/learning/mastery") ||
+      reqUrl.includes("/learning/weak-areas") ||
+      reqUrl.includes("/learning/review-queue");
     if (
       error.response?.status === 401 &&
-      !window.location.pathname.startsWith("/login")
+      !window.location.pathname.startsWith("/login") &&
+      !skip401Redirect
     ) {
       window.location.href = "/login";
     }
@@ -57,6 +70,16 @@ export async function generateQuestions(
   return data;
 }
 
+export async function generateQuestionsV2(
+  req: GenerateQuestionsRequest,
+): Promise<GenerateQuestionsV2Response> {
+  const { data } = await api.post<GenerateQuestionsV2Response>(
+    "/questions/generate-v2",
+    req,
+  );
+  return data;
+}
+
 // ── Quiz ────────────────────────────────────────────────────
 export async function generateQuiz(
   req: GenerateQuizRequest,
@@ -68,11 +91,56 @@ export async function generateQuiz(
   return data;
 }
 
+export async function generateQuizV2(
+  req: GenerateQuizRequest,
+): Promise<GenerateQuizV2Response> {
+  const { data } = await api.post<GenerateQuizV2Response>(
+    "/questions/quiz/generate-v2",
+    req,
+  );
+  return data;
+}
+
 // ── Chat Follow-Up ──────────────────────────────────────────
 export async function chatFollowUp(
   req: ChatFollowUpRequest,
 ): Promise<ChatFollowUpResponse> {
   const { data } = await api.post<ChatFollowUpResponse>("/chat/follow-up", req);
+  return data;
+}
+
+// ── Adaptive Learning ────────────────────────────────────────
+export async function recordLearningAttempt(
+  req: LearningAttemptRequest,
+): Promise<LearningAttemptResponse> {
+  const { data } = await api.post<LearningAttemptResponse>("/learning/attempts", req);
+  return data;
+}
+
+export async function fetchReviewQueue(
+  limit = 50,
+): Promise<ReviewQueueResponse> {
+  const { data } = await api.get<ReviewQueueResponse>("/learning/review-queue", {
+    params: { limit },
+  });
+  return data;
+}
+
+export async function fetchWeakAreas(
+  limit = 10,
+): Promise<WeakAreasResponse> {
+  const { data } = await api.get<WeakAreasResponse>("/learning/weak-areas", {
+    params: { limit },
+  });
+  return data;
+}
+
+export async function fetchTopicMastery(
+  limit = 500,
+): Promise<TopicMasteryResponse> {
+  const { data } = await api.get<TopicMasteryResponse>("/learning/mastery", {
+    params: { limit },
+  });
   return data;
 }
 

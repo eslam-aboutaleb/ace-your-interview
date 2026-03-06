@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Loader2,
   Play,
+  AlertTriangle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import {
@@ -18,51 +19,86 @@ import {
   containerVariants,
   cardVariants,
 } from "@/utils/animations";
-import { fetchTopic, generateQuestions } from "@/services/api";
+import {
+  fetchTopic,
+  generateQuestions,
+  generateQuestionsV2,
+  recordLearningAttempt,
+} from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useProgressStore } from "@/store/progressStore";
 import DifficultyBadge from "@/components/common/DifficultyBadge";
 import ProgressBar from "@/components/common/ProgressBar";
 import WordHighlightChat from "@/components/common/WordHighlightChat";
-import type { TopicDetail, QuestionAnswer } from "@/types";
+import type { TopicDetail, QuestionAnswerV2 } from "@/types";
+
+type ProviderInfo = {
+  provider: string;
+  model: string;
+  retries: number;
+  malformed: number;
+};
 
 export default function TopicStudy() {
   const { topicId } = useParams<{ topicId: string }>();
   const [topic, setTopic] = useState<TopicDetail | null>(null);
-  const [questions, setQuestions] = useState<QuestionAnswer[]>([]);
+  const [questions, setQuestions] = useState<QuestionAnswerV2[]>([]);
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [revealedAnswers, setRevealedAnswers] = useState<Set<number>>(
+  const [revealedAnswers, setRevealedAnswers] = useState<Set<number>>(new Set());
+  const [submittedAttempts, setSubmittedAttempts] = useState<Set<number>>(
     new Set(),
   );
+  const [answerDrafts, setAnswerDrafts] = useState<Record<number, string>>({});
+  const [confidenceByIdx, setConfidenceByIdx] = useState<Record<number, number>>({});
+  const [questionStartMs, setQuestionStartMs] = useState<Record<number, number>>(
+    {},
+  );
+  const [submittingIdx, setSubmittingIdx] = useState<number | null>(null);
   const [activeSection, setActiveSection] = useState(0);
   const [questionCount, setQuestionCount] = useState(5);
   const [difficulty, setDifficulty] = useState<string>("");
-  const [providerInfo, setProviderInfo] = useState({ provider: "", model: "" });
+  const [providerInfo, setProviderInfo] = useState<ProviderInfo>({
+    provider: "",
+    model: "",
+    retries: 0,
+    malformed: 0,
+  });
+  const [errorMsg, setErrorMsg] = useState("");
 
   const settings = useSettingsStore();
-  const { addAnswered, getTopicProgress, markTopicComplete } =
-    useProgressStore();
+  const {
+    getTopicProgress,
+    markTopicComplete,
+    recordAttempt,
+    setMastery,
+    addAnswered,
+  } = useProgressStore();
 
   useEffect(() => {
     if (!topicId) return;
     setLoading(true);
     fetchTopic(topicId)
       .then(setTopic)
-      .catch(console.error)
+      .catch(() => setErrorMsg("Failed to load this topic. Please retry."))
       .finally(() => setLoading(false));
   }, [topicId]);
 
   const handleGenerate = useCallback(async () => {
     if (!topicId || !topic) return;
     setGenerating(true);
+    setErrorMsg("");
     setQuestions([]);
     setExpandedQ(null);
     setRevealedAnswers(new Set());
+    setSubmittedAttempts(new Set());
+    setAnswerDrafts({});
+    setConfidenceByIdx({});
+    setQuestionStartMs({});
     try {
       const activeS = topic.sections[activeSection];
-      const res = await generateQuestions({
+      const payload = {
         topic_id: topicId,
         count: questionCount,
         difficulty: difficulty || undefined,
@@ -72,18 +108,50 @@ export default function TopicStudy() {
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
         },
-        // Section-scoped: pass active section content
         ...(activeS
           ? {
               section_title: activeS.heading,
               section_content: activeS.content,
             }
           : {}),
-      });
-      setQuestions(res.questions);
-      setProviderInfo({ provider: res.provider_used, model: res.model_used });
+      };
+      try {
+        const res = await generateQuestionsV2(payload);
+        setQuestions(res.questions);
+        setProviderInfo({
+          provider: res.provider_used,
+          model: res.model_used,
+          retries: res.retries_used,
+          malformed: res.malformed_items_dropped,
+        });
+      } catch {
+        const legacy = await generateQuestions(payload);
+        const upgraded: QuestionAnswerV2[] = legacy.questions.map((q, idx) => ({
+          question_id: `${topicId}:legacy:${idx}`,
+          topic_id: topicId,
+          question: q.question,
+          answer: q.answer,
+          difficulty: q.difficulty,
+          learning_objective: "Understand the concept and apply it in context.",
+          source_section:
+            activeS?.heading || topic.sections[activeSection]?.heading || "Topic",
+          source_quote: "Legacy mode response did not include source quote.",
+          misconception_trap: "Confusing terms without checking documentation context.",
+          reasoning_summary: "Review the answer and compare with your own reasoning.",
+        }));
+        setQuestions(upgraded);
+        setProviderInfo({
+          provider: legacy.provider_used,
+          model: legacy.model_used,
+          retries: 0,
+          malformed: 0,
+        });
+      }
     } catch (err) {
       console.error(err);
+      setErrorMsg(
+        "Question generation failed. Check LLM settings/connection and try again.",
+      );
     } finally {
       setGenerating(false);
     }
@@ -92,23 +160,60 @@ export default function TopicStudy() {
   const toggleQuestion = (idx: number) => {
     if (expandedQ === idx) {
       setExpandedQ(null);
-    } else {
-      setExpandedQ(idx);
-      if (!revealedAnswers.has(idx)) {
-        setRevealedAnswers((prev) => new Set(prev).add(idx));
-        if (topicId) addAnswered(topicId, 1);
-      }
+      return;
+    }
+    setExpandedQ(idx);
+    setQuestionStartMs((prev) =>
+      prev[idx] ? prev : { ...prev, [idx]: Date.now() },
+    );
+    setConfidenceByIdx((prev) => ({ ...prev, [idx]: prev[idx] || 3 }));
+  };
+
+  const handleReveal = (idx: number) => {
+    setRevealedAnswers((prev) => new Set(prev).add(idx));
+  };
+
+  const submitAttempt = async (idx: number, isCorrect: boolean) => {
+    if (!topicId || submittedAttempts.has(idx)) return;
+    const q = questions[idx];
+    if (!q) return;
+    setSubmittingIdx(idx);
+    setErrorMsg("");
+
+    const confidence = confidenceByIdx[idx] || 3;
+    const responseTime = Math.max(0, Date.now() - (questionStartMs[idx] || Date.now()));
+    const learnerAnswer = answerDrafts[idx] || "";
+
+    try {
+      const res = await recordLearningAttempt({
+        question_id: q.question_id,
+        topic_id: topicId,
+        user_answer: learnerAnswer,
+        is_correct: isCorrect,
+        confidence,
+        response_time_ms: responseTime,
+        mode: "study",
+      });
+      setSubmittedAttempts((prev) => new Set(prev).add(idx));
+      addAnswered(topicId, 1);
+      recordAttempt(topicId, isCorrect, confidence);
+      setMastery(topicId, res.mastery_score);
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("Could not save your attempt. Please retry.");
+    } finally {
+      setSubmittingIdx(null);
     }
   };
 
-  const allRevealed =
-    questions.length > 0 && revealedAnswers.size === questions.length;
+  const allSubmitted =
+    questions.length > 0 && submittedAttempts.size === questions.length;
 
   useEffect(() => {
-    if (allRevealed && topicId) {
+    if (allSubmitted && topicId) {
       markTopicComplete(topicId);
     }
-  }, [allRevealed, topicId, markTopicComplete]);
+  }, [allSubmitted, topicId, markTopicComplete]);
 
   const progress = topicId ? getTopicProgress(topicId) : 0;
 
@@ -139,7 +244,6 @@ export default function TopicStudy() {
       exit="exit"
       transition={pageTransition}
     >
-      {/* Breadcrumb + title bar */}
       <div className="bg-udemy-dark text-white">
         <div className="max-w-[1340px] mx-auto px-6 py-6">
           <Link
@@ -159,7 +263,6 @@ export default function TopicStudy() {
 
       <div className="max-w-[1340px] mx-auto px-6 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
-          {/* Sidebar — sections */}
           <aside className="lg:w-72 flex-shrink-0">
             <div className="udemy-card p-4 sticky top-20">
               <h3 className="text-sm font-bold text-udemy-text-muted uppercase tracking-wide mb-3">
@@ -170,12 +273,11 @@ export default function TopicStudy() {
                   <button
                     key={i}
                     onClick={() => setActiveSection(i)}
-                    className={`w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center gap-2
-                      ${
-                        activeSection === i
-                          ? "bg-udemy-purple/10 text-udemy-purple font-medium"
-                          : "text-udemy-text-muted hover:bg-gray-50"
-                      }`}
+                    className={`w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center gap-2 ${
+                      activeSection === i
+                        ? "bg-udemy-purple/10 text-udemy-purple font-medium"
+                        : "text-udemy-text-muted hover:bg-gray-50"
+                    }`}
                   >
                     <span className="w-5 h-5 flex items-center justify-center rounded-full bg-udemy-bg text-xs font-bold flex-shrink-0">
                       {i + 1}
@@ -185,11 +287,9 @@ export default function TopicStudy() {
                 ))}
               </nav>
 
-              {/* Quiz link */}
               {questions.length > 0 && (
                 <Link
                   to={`/quiz/${topicId}`}
-                  state={{ questions }}
                   className="btn-secondary w-full text-center mt-4 text-sm flex items-center justify-center gap-2"
                 >
                   <Play className="w-4 h-4" />
@@ -199,9 +299,7 @@ export default function TopicStudy() {
             </div>
           </aside>
 
-          {/* Main content */}
           <div className="flex-1 min-w-0">
-            {/* Action section content */}
             {topic.sections[activeSection] && (
               <motion.div
                 key={activeSection}
@@ -221,7 +319,6 @@ export default function TopicStudy() {
               </motion.div>
             )}
 
-            {/* Generate questions controls */}
             <div className="udemy-card p-6 mb-6">
               <div className="flex flex-wrap items-end gap-4 mb-4">
                 <div>
@@ -233,7 +330,7 @@ export default function TopicStudy() {
                     onChange={(e) => setQuestionCount(Number(e.target.value))}
                     className="border border-udemy-border rounded px-3 py-2 text-sm"
                   >
-                    {[3, 5, 10, 15, 20, 30, 50, 75, 100].map((n) => (
+                    {[3, 5, 10, 15, 20].map((n) => (
                       <option key={n} value={n}>
                         {n}
                       </option>
@@ -273,14 +370,30 @@ export default function TopicStudy() {
 
               {providerInfo.provider && (
                 <p className="text-xs text-udemy-text-muted">
-                  Powered by{" "}
-                  <span className="font-medium">{providerInfo.provider}</span>
+                  Powered by <span className="font-medium">{providerInfo.provider}</span>
                   {providerInfo.model && ` / ${providerInfo.model}`}
+                  {` · retries: ${providerInfo.retries} · dropped malformed: ${providerInfo.malformed}`}
                 </p>
               )}
             </div>
 
-            {/* Loading skeleton */}
+            {errorMsg && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p>{errorMsg}</p>
+                  {!generating && (
+                    <button
+                      onClick={handleGenerate}
+                      className="text-xs font-medium underline mt-1"
+                    >
+                      Retry generation
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {generating && (
               <div className="space-y-3">
                 {Array.from({ length: questionCount }).map((_, i) => (
@@ -298,7 +411,6 @@ export default function TopicStudy() {
               </div>
             )}
 
-            {/* Question list */}
             {!generating && questions.length > 0 && (
               <motion.div
                 className="space-y-3"
@@ -307,7 +419,7 @@ export default function TopicStudy() {
                 animate="show"
               >
                 {questions.map((qa, idx) => (
-                  <motion.div key={idx} variants={cardVariants}>
+                  <motion.div key={qa.question_id} variants={cardVariants}>
                     <div className="udemy-card overflow-hidden">
                       <button
                         onClick={() => toggleQuestion(idx)}
@@ -322,10 +434,10 @@ export default function TopicStudy() {
                           </p>
                           <div className="flex items-center gap-2 mt-2">
                             <DifficultyBadge difficulty={qa.difficulty} />
-                            {revealedAnswers.has(idx) && (
+                            {submittedAttempts.has(idx) && (
                               <span className="text-udemy-success text-xs flex items-center gap-1">
                                 <CheckCircle2 className="w-3.5 h-3.5" />
-                                Reviewed
+                                Attempt Saved
                               </span>
                             )}
                           </div>
@@ -349,31 +461,113 @@ export default function TopicStudy() {
                             className="overflow-hidden"
                           >
                             <div className="px-5 pb-5 pt-0 border-t border-udemy-border">
-                              <WordHighlightChat
-                                contextQuestion={qa.question}
-                                contextAnswer={qa.answer}
-                                qaKey={`${topicId}-${idx}`}
-                              >
-                                {/* Question — selectable for highlight chat */}
-                                <div className="mt-4 bg-udemy-purple/5 rounded-lg p-4 border border-udemy-purple/10">
-                                  <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
-                                    Question
-                                  </h4>
-                                  <p className="text-[14px] leading-relaxed font-medium select-text cursor-text">
-                                    {qa.question}
-                                  </p>
+                              <div className="mt-4 bg-white rounded-lg p-4 border border-udemy-border">
+                                <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
+                                  Your Attempt (Before Reveal)
+                                </h4>
+                                <textarea
+                                  value={answerDrafts[idx] || ""}
+                                  onChange={(e) =>
+                                    setAnswerDrafts((prev) => ({
+                                      ...prev,
+                                      [idx]: e.target.value,
+                                    }))
+                                  }
+                                  rows={4}
+                                  placeholder="Type your answer in your own words..."
+                                  className="w-full border border-udemy-border rounded p-3 text-sm"
+                                />
+                                <div className="mt-3">
+                                  <label className="text-xs font-medium text-udemy-text-muted block mb-1">
+                                    Confidence: {confidenceByIdx[idx] || 3}/5
+                                  </label>
+                                  <input
+                                    type="range"
+                                    min={1}
+                                    max={5}
+                                    step={1}
+                                    value={confidenceByIdx[idx] || 3}
+                                    onChange={(e) =>
+                                      setConfidenceByIdx((prev) => ({
+                                        ...prev,
+                                        [idx]: Number(e.target.value),
+                                      }))
+                                    }
+                                    className="w-full accent-udemy-purple"
+                                  />
                                 </div>
+                              </div>
 
-                                {/* Answer */}
-                                <div className="mt-3 bg-udemy-bg rounded-lg p-4">
-                                  <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
-                                    Answer
-                                  </h4>
-                                  <div className="markdown-content text-[14px] leading-relaxed">
-                                    <ReactMarkdown>{qa.answer}</ReactMarkdown>
+                              {!revealedAnswers.has(idx) && (
+                                <button
+                                  onClick={() => handleReveal(idx)}
+                                  className="btn-secondary mt-3"
+                                >
+                                  Reveal Official Answer
+                                </button>
+                              )}
+
+                              {revealedAnswers.has(idx) && (
+                                <WordHighlightChat
+                                  contextQuestion={qa.question}
+                                  contextAnswer={qa.answer}
+                                  qaKey={`${topicId}-${idx}`}
+                                >
+                                  <div className="mt-3 bg-udemy-bg rounded-lg p-4">
+                                    <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
+                                      Official Answer
+                                    </h4>
+                                    <div className="markdown-content text-[14px] leading-relaxed">
+                                      <ReactMarkdown>{qa.answer}</ReactMarkdown>
+                                    </div>
                                   </div>
+
+                                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="bg-white border border-udemy-border rounded-lg p-3">
+                                      <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
+                                        Learning Objective
+                                      </h4>
+                                      <p className="text-sm">{qa.learning_objective}</p>
+                                    </div>
+                                    <div className="bg-white border border-udemy-border rounded-lg p-3">
+                                      <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
+                                        Misconception Trap
+                                      </h4>
+                                      <p className="text-sm">{qa.misconception_trap}</p>
+                                    </div>
+                                    <div className="bg-white border border-udemy-border rounded-lg p-3 md:col-span-2">
+                                      <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
+                                        Source Grounding
+                                      </h4>
+                                      <p className="text-xs text-udemy-text-muted mb-1">
+                                        Section: {qa.source_section}
+                                      </p>
+                                      <p className="text-sm italic">&ldquo;{qa.source_quote}&rdquo;</p>
+                                    </div>
+                                  </div>
+                                </WordHighlightChat>
+                              )}
+
+                              {revealedAnswers.has(idx) && !submittedAttempts.has(idx) && (
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <button
+                                    onClick={() => submitAttempt(idx, true)}
+                                    disabled={submittingIdx === idx}
+                                    className="btn-primary disabled:opacity-60"
+                                  >
+                                    {submittingIdx === idx
+                                      ? "Saving..."
+                                      : "I got this mostly right"}
+                                  </button>
+                                  <button
+                                    onClick={() => submitAttempt(idx, false)}
+                                    disabled={submittingIdx === idx}
+                                    className="btn-secondary disabled:opacity-60"
+                                  >
+                                    I need more practice
+                                  </button>
                                 </div>
-                              </WordHighlightChat>
+                              )}
                             </div>
                           </motion.div>
                         )}
@@ -382,43 +576,27 @@ export default function TopicStudy() {
                   </motion.div>
                 ))}
 
-                {/* Completion banner */}
                 <AnimatePresence>
-                  {allRevealed && (
+                  {allSubmitted && (
                     <motion.div
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0 }}
                       className="udemy-card p-6 text-center border-2 border-udemy-success"
                     >
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{
-                          type: "spring",
-                          stiffness: 400,
-                          damping: 15,
-                          delay: 0.2,
-                        }}
-                        className="w-16 h-16 bg-udemy-success-bg rounded-full flex items-center justify-center mx-auto mb-3"
-                      >
+                      <div className="w-16 h-16 bg-udemy-success-bg rounded-full flex items-center justify-center mx-auto mb-3">
                         <CheckCircle2 className="w-8 h-8 text-udemy-success" />
-                      </motion.div>
-                      <h3 className="text-lg font-bold mb-1">
-                        Topic Complete! 🎉
-                      </h3>
+                      </div>
+                      <h3 className="text-lg font-bold mb-1">Topic Complete</h3>
                       <p className="text-sm text-udemy-text-muted mb-4">
-                        You've reviewed all {questions.length} questions.
+                        You submitted learning attempts for all {questions.length} questions.
                       </p>
                       <div className="flex items-center justify-center gap-3">
-                        <button
-                          onClick={handleGenerate}
-                          className="btn-primary"
-                        >
+                        <button onClick={handleGenerate} className="btn-primary">
                           Generate More
                         </button>
-                        <Link to="/" className="btn-secondary">
-                          Back to Dashboard
+                        <Link to={`/quiz/${topicId}`} className="btn-secondary">
+                          Take Quiz
                         </Link>
                       </div>
                     </motion.div>
@@ -432,3 +610,4 @@ export default function TopicStudy() {
     </motion.div>
   );
 }
+
