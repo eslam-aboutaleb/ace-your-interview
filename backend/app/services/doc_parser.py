@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Optional
 
 from app.config import get_settings
@@ -14,7 +15,8 @@ class DocParser:
     """Reads and caches all owner-handbook .md files."""
 
     def __init__(self, docs_path: Optional[str] = None):
-        self.docs_path = docs_path or get_settings().docs_path
+        configured = docs_path or get_settings().docs_path
+        self.docs_path = self._resolve_docs_path(configured)
         self._topics: dict[str, TopicDetail] = {}
         self._load()
 
@@ -42,6 +44,22 @@ class DocParser:
         return topic.raw_content if topic else ""
 
     # ── internals ───────────────────────────────────────────
+    @staticmethod
+    def _resolve_docs_path(configured_path: str) -> str:
+        """Resolve docs path robustly for local and container runtimes."""
+        p = Path(configured_path)
+        if p.is_absolute():
+            return str(p)
+
+        # Prefer cwd-relative if it exists, otherwise backend-root relative.
+        cwd_candidate = (Path.cwd() / p).resolve()
+        if cwd_candidate.is_dir():
+            return str(cwd_candidate)
+
+        backend_root = Path(__file__).resolve().parents[2]
+        backend_candidate = (backend_root / p).resolve()
+        return str(backend_candidate)
+
     def _load(self):
         handbook_dir = os.path.join(self.docs_path, "owner-handbook")
         if not os.path.isdir(handbook_dir):
@@ -109,7 +127,7 @@ class DocParser:
         while i < len(parts) - 2:
             heading = parts[i + 1].strip()
             body = parts[i + 2].strip() if i + 2 < len(parts) else ""
-            sections.append({"heading": heading, "content": body[:2000]})
+            sections.append({"heading": heading, "content": body[:12000]})
             i += 3
 
         return sections

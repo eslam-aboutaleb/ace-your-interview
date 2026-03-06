@@ -13,6 +13,7 @@ import {
   Sparkles,
   ListChecks,
   ChevronDown,
+  AlertTriangle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import {
@@ -23,21 +24,30 @@ import {
   cardVariants,
   expandVariants,
 } from "@/utils/animations";
-import { fetchTopics, generateQuiz } from "@/services/api";
+import {
+  fetchTopics,
+  generateQuiz,
+  generateQuizV2,
+  recordLearningAttempt,
+  fetchWeakAreas,
+} from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useProgressStore } from "@/store/progressStore";
 import DifficultyBadge from "@/components/common/DifficultyBadge";
-import type { TopicSummary, QuizQuestion, QuizQuestionType } from "@/types";
+import type {
+  TopicSummary,
+  QuizQuestionType,
+  QuizQuestionV2,
+  WeakAreaItem,
+} from "@/types";
 
 type QuizState = "setup" | "playing" | "results";
 
 export default function QuizMode() {
   const { topicId } = useParams<{ topicId: string }>();
   const location = useLocation();
-
-  // If navigated from TopicStudy with pre-filled topic
   const preselectedTopic = topicId || "";
 
-  // ── Setup state ──────────────────────────────────────────
   const [quizState, setQuizState] = useState<QuizState>("setup");
   const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<Set<string>>(
@@ -50,22 +60,33 @@ export default function QuizMode() {
   const [difficulty, setDifficulty] = useState("");
   const [generating, setGenerating] = useState(false);
   const [loadingTopics, setLoadingTopics] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  // ── Playing state ────────────────────────────────────────
-  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [questions, setQuestions] = useState<QuizQuestionV2[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [answered, setAnswered] = useState(false);
+  const [answerConfidence, setAnswerConfidence] = useState(3);
   const [answers, setAnswers] = useState<
-    Record<number, { selected: string; correct: boolean }>
+    Record<number, { selected: string; correct: boolean; confidence: number }>
   >({});
-  const [providerInfo, setProviderInfo] = useState({ provider: "", model: "" });
+  const [questionStartMs, setQuestionStartMs] = useState<Record<number, number>>(
+    {},
+  );
+  const [providerInfo, setProviderInfo] = useState({
+    provider: "",
+    model: "",
+    retries: 0,
+    malformed: 0,
+  });
 
-  // ── Results state ────────────────────────────────────────
   const [showReview, setShowReview] = useState(false);
   const [expandedReview, setExpandedReview] = useState<number | null>(null);
+  const [weakAreas, setWeakAreas] = useState<WeakAreaItem[]>([]);
+  const [loadingWeakAreas, setLoadingWeakAreas] = useState(false);
 
   const settings = useSettingsStore();
+  const { recordAttempt, setMastery } = useProgressStore();
 
   const current = questions[currentIdx];
   const total = questions.length;
@@ -74,23 +95,29 @@ export default function QuizMode() {
     [answers],
   );
 
-  // Load topics on mount
   useEffect(() => {
     fetchTopics()
       .then(setTopics)
-      .catch(console.error)
+      .catch(() => setErrorMsg("Failed to load topics."))
       .finally(() => setLoadingTopics(false));
   }, []);
 
-  // If passed from TopicStudy with old-style questions, go to setup
   const passedQuestions = (location.state as { questions?: unknown[] })
     ?.questions;
-
   useEffect(() => {
     if (preselectedTopic && !passedQuestions) {
       setSelectedTopics(new Set([preselectedTopic]));
     }
   }, [preselectedTopic, passedQuestions]);
+
+  useEffect(() => {
+    if (quizState !== "results") return;
+    setLoadingWeakAreas(true);
+    fetchWeakAreas(5)
+      .then((res) => setWeakAreas(res.weak_areas))
+      .catch(() => setWeakAreas([]))
+      .finally(() => setLoadingWeakAreas(false));
+  }, [quizState]);
 
   const toggleTopic = (id: string) => {
     setSelectedTopics((prev) => {
@@ -105,7 +132,7 @@ export default function QuizMode() {
     setQuestionTypes((prev) => {
       const next = new Set(prev);
       if (next.has(type)) {
-        if (next.size > 1) next.delete(type); // Keep at least one
+        if (next.size > 1) next.delete(type);
       } else {
         next.add(type);
       }
@@ -116,8 +143,9 @@ export default function QuizMode() {
   const handleStartQuiz = useCallback(async () => {
     if (selectedTopics.size === 0) return;
     setGenerating(true);
+    setErrorMsg("");
     try {
-      const res = await generateQuiz({
+      const req = {
         topic_ids: Array.from(selectedTopics),
         count: questionCount,
         question_types: Array.from(questionTypes),
@@ -128,41 +156,111 @@ export default function QuizMode() {
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
         },
-      });
-      if (res.questions.length > 0) {
+      };
+
+      try {
+        const res = await generateQuizV2(req);
+        if (res.questions.length === 0) {
+          setErrorMsg("No valid quiz questions generated. Try again.");
+          return;
+        }
         setQuestions(res.questions);
         setProviderInfo({
           provider: res.provider_used,
           model: res.model_used,
+          retries: res.retries_used,
+          malformed: res.malformed_items_dropped,
         });
-        setCurrentIdx(0);
-        setAnswers({});
-        setSelectedAnswer(null);
-        setAnswered(false);
-        setQuizState("playing");
+      } catch {
+        const legacy = await generateQuiz(req);
+        const upgraded: QuizQuestionV2[] = legacy.questions.map((q, idx) => ({
+          question_id: `quiz-legacy-${idx}`,
+          question: q.question,
+          type: q.type,
+          choices: q.choices,
+          correct_answer: q.correct_answer,
+          explanation: q.explanation,
+          difficulty: q.difficulty,
+          topic_id: q.topic_id || req.topic_ids[0] || "",
+          source_quote: "Legacy mode did not return source quote.",
+          reasoning_summary: "Review the explanation to reinforce reasoning.",
+        }));
+        if (upgraded.length === 0) {
+          setErrorMsg("No quiz questions generated. Try again.");
+          return;
+        }
+        setQuestions(upgraded);
+        setProviderInfo({
+          provider: legacy.provider_used,
+          model: legacy.model_used,
+          retries: 0,
+          malformed: 0,
+        });
       }
+
+      setCurrentIdx(0);
+      setAnswers({});
+      setSelectedAnswer(null);
+      setAnswered(false);
+      setAnswerConfidence(3);
+      setQuestionStartMs({ 0: Date.now() });
+      setQuizState("playing");
     } catch (err) {
       console.error(err);
+      setErrorMsg("Quiz generation failed. Check settings and retry.");
     } finally {
       setGenerating(false);
     }
   }, [selectedTopics, questionCount, questionTypes, difficulty, settings]);
 
-  const handleSubmitAnswer = () => {
+  const handleSubmitAnswer = async () => {
     if (!selectedAnswer || !current) return;
     const correct = selectedAnswer === current.correct_answer;
     setAnswers((prev) => ({
       ...prev,
-      [currentIdx]: { selected: selectedAnswer, correct },
+      [currentIdx]: {
+        selected: selectedAnswer,
+        correct,
+        confidence: answerConfidence,
+      },
     }));
     setAnswered(true);
+
+    try {
+      const responseTime = Math.max(
+        0,
+        Date.now() - (questionStartMs[currentIdx] || Date.now()),
+      );
+      const topicForAttempt = current.topic_id || Array.from(selectedTopics)[0] || "";
+      const res = await recordLearningAttempt({
+        question_id: current.question_id,
+        topic_id: topicForAttempt,
+        user_answer: selectedAnswer,
+        is_correct: correct,
+        confidence: answerConfidence,
+        response_time_ms: responseTime,
+        mode: "quiz",
+      });
+      if (topicForAttempt) {
+        recordAttempt(topicForAttempt, correct, answerConfidence);
+        setMastery(topicForAttempt, res.mastery_score);
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("Answer recorded locally, but syncing attempt failed.");
+    }
   };
 
   const handleNext = () => {
     if (currentIdx < total - 1) {
-      setCurrentIdx((p) => p + 1);
-      setSelectedAnswer(null);
-      setAnswered(false);
+      const nextIdx = currentIdx + 1;
+      setCurrentIdx(nextIdx);
+      setSelectedAnswer(answers[nextIdx]?.selected || null);
+      setAnswered(!!answers[nextIdx]);
+      setAnswerConfidence(answers[nextIdx]?.confidence || 3);
+      setQuestionStartMs((prev) =>
+        prev[nextIdx] ? prev : { ...prev, [nextIdx]: Date.now() },
+      );
     } else {
       setQuizState("results");
     }
@@ -175,8 +273,11 @@ export default function QuizMode() {
     setCurrentIdx(0);
     setSelectedAnswer(null);
     setAnswered(false);
+    setAnswerConfidence(3);
     setShowReview(false);
     setExpandedReview(null);
+    setWeakAreas([]);
+    setErrorMsg("");
   };
 
   const percentage = total > 0 ? Math.round((correctCount / total) * 100) : 0;
@@ -190,7 +291,6 @@ export default function QuizMode() {
       transition={pageTransition}
       className="min-h-[80vh] flex flex-col"
     >
-      {/* ═══════════ SETUP SCREEN ═══════════ */}
       {quizState === "setup" && (
         <>
           <div className="bg-udemy-dark text-white">
@@ -207,25 +307,29 @@ export default function QuizMode() {
                 Quiz Mode
               </h1>
               <p className="text-gray-400 mt-2">
-                Test your knowledge with multiple choice and true/false
-                questions
+                Adaptive quiz with attempt tracking and weak-area feedback
               </p>
             </div>
           </div>
 
           <div className="max-w-[1340px] mx-auto px-6 py-8 flex-1">
+            {errorMsg && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <div>{errorMsg}</div>
+              </div>
+            )}
             <motion.div
               className="grid grid-cols-1 lg:grid-cols-3 gap-6"
               variants={containerVariants}
               initial="hidden"
               animate="show"
             >
-              {/* Topic selection */}
               <motion.div variants={cardVariants} className="lg:col-span-2">
                 <div className="udemy-card p-6">
                   <h2 className="text-lg font-bold mb-4">Select Topics</h2>
                   <p className="text-sm text-udemy-text-muted mb-4">
-                    Choose one or more topics to be quizzed on
+                    Choose one or more topics for this quiz.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-1">
                     {loadingTopics
@@ -264,30 +368,11 @@ export default function QuizMode() {
                           </button>
                         ))}
                   </div>
-                  <div className="flex gap-2 mt-4">
-                    <button
-                      onClick={() =>
-                        setSelectedTopics(new Set(topics.map((t) => t.id)))
-                      }
-                      className="text-xs text-udemy-purple hover:underline"
-                    >
-                      Select all
-                    </button>
-                    <span className="text-xs text-udemy-text-muted">·</span>
-                    <button
-                      onClick={() => setSelectedTopics(new Set())}
-                      className="text-xs text-udemy-text-muted hover:underline"
-                    >
-                      Clear
-                    </button>
-                  </div>
                 </div>
               </motion.div>
 
-              {/* Quiz settings panel */}
               <motion.div variants={cardVariants}>
                 <div className="udemy-card p-6 space-y-6">
-                  {/* Question count */}
                   <div>
                     <label className="block text-sm font-medium mb-2">
                       Number of Questions
@@ -295,7 +380,7 @@ export default function QuizMode() {
                     <input
                       type="range"
                       min="5"
-                      max="100"
+                      max="30"
                       step="5"
                       value={questionCount}
                       onChange={(e) => setQuestionCount(Number(e.target.value))}
@@ -306,11 +391,10 @@ export default function QuizMode() {
                       <span className="font-bold text-udemy-purple text-sm">
                         {questionCount}
                       </span>
-                      <span>100</span>
+                      <span>30</span>
                     </div>
                   </div>
 
-                  {/* Question types */}
                   <div>
                     <label className="block text-sm font-medium mb-2">
                       Question Types
@@ -339,7 +423,6 @@ export default function QuizMode() {
                     </div>
                   </div>
 
-                  {/* Difficulty */}
                   <div>
                     <label className="block text-sm font-medium mb-2">
                       Difficulty
@@ -356,7 +439,6 @@ export default function QuizMode() {
                     </select>
                   </div>
 
-                  {/* Start button */}
                   <button
                     onClick={handleStartQuiz}
                     disabled={selectedTopics.size === 0 || generating}
@@ -373,8 +455,7 @@ export default function QuizMode() {
                   </button>
 
                   <p className="text-xs text-center text-udemy-text-muted">
-                    Powered by{" "}
-                    <span className="capitalize">{settings.provider}</span>
+                    Powered by {providerInfo.provider || settings.provider}
                   </p>
                 </div>
               </motion.div>
@@ -383,10 +464,8 @@ export default function QuizMode() {
         </>
       )}
 
-      {/* ═══════════ PLAYING SCREEN ═══════════ */}
       {quizState === "playing" && current && (
         <>
-          {/* Top bar */}
           <div className="bg-udemy-dark text-white">
             <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
               <button
@@ -403,11 +482,8 @@ export default function QuizMode() {
               <span className="text-sm font-medium">
                 {currentIdx + 1} / {total}
               </span>
-              <span className="text-sm text-gray-400">
-                {correctCount} correct
-              </span>
+              <span className="text-sm text-gray-400">{correctCount} correct</span>
             </div>
-            {/* Progress */}
             <div className="h-1 bg-gray-700">
               <motion.div
                 className="h-full bg-udemy-purple"
@@ -430,15 +506,17 @@ export default function QuizMode() {
                 className="udemy-card max-w-2xl w-full"
               >
                 <div className="p-6 md:p-8">
-                  {/* Question header */}
+                  {errorMsg && (
+                    <div className="mb-4 text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded p-2">
+                      {errorMsg}
+                    </div>
+                  )}
                   <div className="flex items-center gap-3 mb-2">
                     <span className="w-8 h-8 bg-udemy-purple rounded-full flex items-center justify-center text-white text-sm font-bold">
                       {currentIdx + 1}
                     </span>
                     <DifficultyBadge
-                      difficulty={
-                        current.difficulty as "easy" | "medium" | "hard"
-                      }
+                      difficulty={current.difficulty as "easy" | "medium" | "hard"}
                     />
                     <span
                       className={`text-xs font-bold px-2 py-0.5 rounded-full ${
@@ -453,12 +531,10 @@ export default function QuizMode() {
                     </span>
                   </div>
 
-                  {/* Question text */}
                   <h2 className="text-lg md:text-xl font-bold leading-relaxed mb-6 mt-4">
                     {current.question}
                   </h2>
 
-                  {/* Answer choices */}
                   <div className="space-y-3 mb-6">
                     {current.choices.map((choice) => {
                       const isSelected = selectedAnswer === choice.label;
@@ -505,15 +581,7 @@ export default function QuizMode() {
                               choice.label
                             )}
                           </span>
-                          <span
-                            className={`text-[15px] leading-relaxed pt-1 ${
-                              isCorrect
-                                ? "font-medium text-green-800"
-                                : isWrong
-                                  ? "text-red-800"
-                                  : ""
-                            }`}
-                          >
+                          <span className="text-[15px] leading-relaxed pt-1">
                             {choice.text}
                           </span>
                         </button>
@@ -521,7 +589,23 @@ export default function QuizMode() {
                     })}
                   </div>
 
-                  {/* Explanation after answering */}
+                  {!answered && (
+                    <div className="mb-5">
+                      <label className="text-xs font-medium text-udemy-text-muted block mb-1">
+                        Confidence: {answerConfidence}/5
+                      </label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={5}
+                        step={1}
+                        value={answerConfidence}
+                        onChange={(e) => setAnswerConfidence(Number(e.target.value))}
+                        className="w-full accent-udemy-purple"
+                      />
+                    </div>
+                  )}
+
                   <AnimatePresence>
                     {answered && current.explanation && (
                       <motion.div
@@ -543,12 +627,16 @@ export default function QuizMode() {
                           <div className="markdown-content text-[14px] leading-relaxed">
                             <ReactMarkdown>{current.explanation}</ReactMarkdown>
                           </div>
+                          {current.source_quote && (
+                            <p className="text-xs text-udemy-text-muted mt-2 italic">
+                              Source: &ldquo;{current.source_quote}&rdquo;
+                            </p>
+                          )}
                         </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
 
-                  {/* Actions */}
                   <div className="flex items-center justify-between">
                     {!answered ? (
                       <button
@@ -575,42 +663,6 @@ export default function QuizMode() {
                         )}
                       </button>
                     )}
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setCurrentIdx((p) => Math.max(0, p - 1));
-                          setSelectedAnswer(
-                            answers[currentIdx - 1]?.selected || null,
-                          );
-                          setAnswered(!!answers[currentIdx - 1]);
-                        }}
-                        disabled={currentIdx === 0}
-                        className="p-2 rounded hover:bg-gray-100 disabled:opacity-30 transition-colors"
-                      >
-                        <ChevronLeft className="w-5 h-5" />
-                      </button>
-                      <span className="text-sm text-udemy-text-muted">
-                        {currentIdx + 1} / {total}
-                      </span>
-                      <button
-                        onClick={() => {
-                          if (answers[currentIdx]) {
-                            setCurrentIdx((p) => Math.min(total - 1, p + 1));
-                            setSelectedAnswer(
-                              answers[currentIdx + 1]?.selected || null,
-                            );
-                            setAnswered(!!answers[currentIdx + 1]);
-                          }
-                        }}
-                        disabled={
-                          currentIdx === total - 1 || !answers[currentIdx]
-                        }
-                        className="p-2 rounded hover:bg-gray-100 disabled:opacity-30 transition-colors"
-                      >
-                        <ChevronRight className="w-5 h-5" />
-                      </button>
-                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -619,7 +671,6 @@ export default function QuizMode() {
         </>
       )}
 
-      {/* ═══════════ RESULTS SCREEN ═══════════ */}
       {quizState === "results" && (
         <div className="flex-1 flex flex-col items-center px-6 py-10">
           <motion.div
@@ -628,7 +679,6 @@ export default function QuizMode() {
             animate="visible"
             className="udemy-card p-8 max-w-lg w-full text-center mb-8"
           >
-            {/* Score ring */}
             <div className="relative w-32 h-32 mx-auto mb-6">
               <svg className="w-32 h-32 -rotate-90" viewBox="0 0 120 120">
                 <circle
@@ -658,82 +708,84 @@ export default function QuizMode() {
                   animate={{
                     strokeDashoffset: 2 * Math.PI * 52 * (1 - percentage / 100),
                   }}
-                  transition={{ duration: 1.5, ease: "easeOut", delay: 0.3 }}
+                  transition={{ duration: 1.2, ease: "easeOut", delay: 0.2 }}
                 />
               </svg>
-              <motion.span
-                className="absolute inset-0 flex items-center justify-center text-3xl font-bold"
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.8, type: "spring" }}
-              >
+              <span className="absolute inset-0 flex items-center justify-center text-3xl font-bold">
                 {percentage}%
-              </motion.span>
+              </span>
             </div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 1 }}
-            >
-              <h2 className="text-2xl font-bold mb-2">
-                {percentage >= 80
-                  ? "Outstanding! \u{1F3C6}"
-                  : percentage >= 60
-                    ? "Great work! \u{1F4AA}"
-                    : percentage >= 40
-                      ? "Good effort! \u{1F4DA}"
-                      : "Keep studying! \u{1F3AF}"}
-              </h2>
-              <p className="text-udemy-text-muted mb-2">
-                You got{" "}
-                <span className="font-bold text-udemy-text">
-                  {correctCount}
-                </span>{" "}
-                out of{" "}
-                <span className="font-bold text-udemy-text">{total}</span>{" "}
-                questions correct.
-              </p>
+            <h2 className="text-2xl font-bold mb-2">
+              {percentage >= 80
+                ? "Outstanding"
+                : percentage >= 60
+                  ? "Great work"
+                  : percentage >= 40
+                    ? "Good effort"
+                    : "Keep studying"}
+            </h2>
+            <p className="text-udemy-text-muted mb-2">
+              You got <span className="font-bold text-udemy-text">{correctCount}</span>{" "}
+              out of <span className="font-bold text-udemy-text">{total}</span>{" "}
+              correct.
+            </p>
+            <p className="text-xs text-udemy-text-muted mb-3">
+              Powered by {providerInfo.provider}
+              {providerInfo.model && ` / ${providerInfo.model}`}
+              {` · retries: ${providerInfo.retries} · dropped malformed: ${providerInfo.malformed}`}
+            </p>
 
-              {/* Breakdown */}
-              <div className="flex items-center justify-center gap-4 mb-6 text-sm">
-                <span className="text-green-600 font-medium flex items-center gap-1">
-                  <CheckCircle2 className="w-4 h-4" />
-                  {correctCount} correct
-                </span>
-                <span className="text-red-500 font-medium flex items-center gap-1">
-                  <XCircle className="w-4 h-4" />
-                  {total - correctCount} incorrect
-                </span>
-              </div>
-
-              {providerInfo.provider && (
-                <p className="text-xs text-udemy-text-muted mb-4">
-                  Powered by {providerInfo.provider}
-                  {providerInfo.model && ` / ${providerInfo.model}`}
-                </p>
-              )}
-
-              <div className="flex items-center justify-center gap-3">
-                <button
-                  onClick={handleRestart}
-                  className="btn-secondary flex items-center gap-2"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  New Quiz
-                </button>
-                <button
-                  onClick={() => setShowReview(!showReview)}
-                  className="btn-primary flex items-center gap-2"
-                >
-                  <ListChecks className="w-4 h-4" />
-                  {showReview ? "Hide" : "Review"} Answers
-                </button>
-              </div>
-            </motion.div>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={handleRestart}
+                className="btn-secondary flex items-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                New Quiz
+              </button>
+              <button
+                onClick={() => setShowReview(!showReview)}
+                className="btn-primary flex items-center gap-2"
+              >
+                <ListChecks className="w-4 h-4" />
+                {showReview ? "Hide" : "Review"} Answers
+              </button>
+            </div>
           </motion.div>
 
-          {/* Review section */}
+          <div className="max-w-2xl w-full mb-6">
+            <div className="udemy-card p-4">
+              <h3 className="font-bold mb-2">Personalized Next Step</h3>
+              {loadingWeakAreas ? (
+                <p className="text-sm text-udemy-text-muted">Loading weak areas...</p>
+              ) : weakAreas.length === 0 ? (
+                <p className="text-sm text-udemy-text-muted">
+                  No weak-area data yet. Keep practicing to build your adaptive queue.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {weakAreas.slice(0, 3).map((w) => (
+                    <div
+                      key={w.topic_id}
+                      className="flex items-center justify-between text-sm bg-udemy-bg rounded p-2"
+                    >
+                      <div>
+                        <span className="font-medium">{w.topic_id}</span>
+                        <span className="text-udemy-text-muted ml-2">
+                          mastery {Math.round(w.mastery_score * 100)}% · due {w.due_count}
+                        </span>
+                      </div>
+                      <Link to={`/topics/${w.topic_id}`} className="text-udemy-purple">
+                        Review
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           <AnimatePresence>
             {showReview && (
               <motion.div
@@ -742,15 +794,13 @@ export default function QuizMode() {
                 exit={{ opacity: 0, y: 20 }}
                 className="max-w-2xl w-full space-y-3"
               >
-                <h3 className="text-lg font-bold mb-2 text-center">
-                  Question Review
-                </h3>
+                <h3 className="text-lg font-bold mb-2 text-center">Question Review</h3>
                 {questions.map((q, idx) => {
                   const ans = answers[idx];
                   const isCorrect = ans?.correct;
                   return (
                     <motion.div
-                      key={idx}
+                      key={q.question_id}
                       variants={cardVariants}
                       initial="hidden"
                       animate="show"
@@ -770,12 +820,12 @@ export default function QuizMode() {
                           {idx + 1}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium line-clamp-2">
-                            {q.question}
-                          </p>
+                          <p className="text-sm font-medium line-clamp-2">{q.question}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <span
-                              className={`text-xs font-bold ${isCorrect ? "text-green-600" : "text-red-500"}`}
+                              className={`text-xs font-bold ${
+                                isCorrect ? "text-green-600" : "text-red-500"
+                              }`}
                             >
                               {isCorrect ? "Correct" : "Incorrect"}
                             </span>
@@ -786,15 +836,12 @@ export default function QuizMode() {
                           </div>
                         </div>
                         <motion.div
-                          animate={{
-                            rotate: expandedReview === idx ? 180 : 0,
-                          }}
+                          animate={{ rotate: expandedReview === idx ? 180 : 0 }}
                           className="flex-shrink-0 mt-1"
                         >
                           <ChevronDown className="w-5 h-5 text-udemy-text-muted" />
                         </motion.div>
                       </button>
-
                       <AnimatePresence>
                         {expandedReview === idx && (
                           <motion.div
@@ -805,7 +852,6 @@ export default function QuizMode() {
                             className="overflow-hidden"
                           >
                             <div className="px-4 pb-4 border-t border-udemy-border pt-3">
-                              {/* Show choices with highlighting */}
                               <div className="space-y-2 mb-3">
                                 {q.choices.map((c) => (
                                   <div
@@ -813,19 +859,13 @@ export default function QuizMode() {
                                     className={`text-sm px-3 py-2 rounded-lg flex items-center gap-2 ${
                                       c.label === q.correct_answer
                                         ? "bg-green-50 text-green-800 font-medium"
-                                        : c.label === ans?.selected &&
-                                            !ans.correct
+                                        : c.label === ans?.selected && !ans?.correct
                                           ? "bg-red-50 text-red-800"
                                           : "text-gray-600"
                                     }`}
                                   >
-                                    <span className="font-bold">
-                                      {c.label}.
-                                    </span>
+                                    <span className="font-bold">{c.label}.</span>
                                     <span>{c.text}</span>
-                                    {c.label === q.correct_answer && (
-                                      <CheckCircle2 className="w-4 h-4 text-green-600 ml-auto flex-shrink-0" />
-                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -835,10 +875,11 @@ export default function QuizMode() {
                                     Explanation
                                   </h4>
                                   <div className="markdown-content text-[13px] leading-relaxed">
-                                    <ReactMarkdown>
-                                      {q.explanation}
-                                    </ReactMarkdown>
+                                    <ReactMarkdown>{q.explanation}</ReactMarkdown>
                                   </div>
+                                  <p className="text-xs text-udemy-text-muted mt-2 italic">
+                                    Source: &ldquo;{q.source_quote}&rdquo;
+                                  </p>
                                 </div>
                               )}
                             </div>
@@ -856,3 +897,4 @@ export default function QuizMode() {
     </motion.div>
   );
 }
+

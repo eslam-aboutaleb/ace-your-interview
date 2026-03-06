@@ -44,11 +44,39 @@ import type {
   OllamaTestResponse,
 } from "@/types";
 
+const FALLBACK_PROVIDER_MODELS: Record<string, string[]> = {
+  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo-preview", "gpt-3.5-turbo"],
+  anthropic: [
+    "claude-3-5-sonnet-20241022",
+    "claude-3-opus-20240229",
+    "claude-3-sonnet-20240229",
+    "claude-3-haiku-20240307",
+  ],
+  google: ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro"],
+  groq: [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+  ],
+  ollama: ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
+  github: ["gpt-4o-mini", "gpt-4o"],
+};
+
+function fallbackProviders(): ProviderStatus[] {
+  return Object.entries(FALLBACK_PROVIDER_MODELS).map(([name, models]) => ({
+    name,
+    models,
+    available: true,
+    backend: "fallback",
+  }));
+}
+
 export default function SettingsPage() {
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loadingProviders, setLoadingProviders] = useState(true);
   const [loadingHealth, setLoadingHealth] = useState(false);
+  const [providersError, setProvidersError] = useState("");
 
   // Ollama-specific state
   const [ollamaTest, setOllamaTest] = useState<OllamaTestResponse | null>(null);
@@ -73,11 +101,21 @@ export default function SettingsPage() {
 
   const loadProviders = async () => {
     setLoadingProviders(true);
+    setProvidersError("");
     try {
       const res = await fetchProviders();
-      setProviders(res.providers);
+      if (res.providers.length === 0) {
+        setProviders(fallbackProviders());
+        setProvidersError("No providers returned by backend. Showing fallback list.");
+      } else {
+        setProviders(res.providers);
+      }
     } catch (err) {
       console.error(err);
+      setProviders(fallbackProviders());
+      setProvidersError(
+        "Could not load provider status from backend. Showing saved/default configuration.",
+      );
     } finally {
       setLoadingProviders(false);
     }
@@ -200,6 +238,12 @@ export default function SettingsPage() {
                 <Cpu className="w-5 h-5 text-udemy-purple" />
                 Provider & Model
               </h2>
+
+              {providersError && (
+                <div className="mb-4 text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded px-3 py-2">
+                  {providersError}
+                </div>
+              )}
 
               {/* Provider grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">

@@ -13,12 +13,17 @@ class Settings(BaseSettings):
     port: int = 8001
 
     # Docs path
-    docs_path: str = "/app/docs"
+    docs_path: str = "docs"
 
     # Default LLM settings
     default_provider: str = "groq"      # Free tier friendly default
     default_model: str = "llama-3.3-70b-versatile"
     default_temperature: float = 0.7
+
+    # Learning/adaptive configuration
+    learning_db_path: str = "/tmp/study_hub_learning.db"
+    enable_v2_generation: bool = True
+    enable_adaptive_learning: bool = True
 
     # CORS
     cors_origins: str = "http://localhost:5174,http://localhost:5173,http://127.0.0.1:5174"
@@ -26,6 +31,7 @@ class Settings(BaseSettings):
     # Auth
     auth_secret_key: str = ""
     frontend_url: str = "http://localhost:5174"
+    dev_auth_bypass_localhost: bool = False
     github_client_id: str = ""
     github_client_secret: str = ""
     google_client_id: str = ""

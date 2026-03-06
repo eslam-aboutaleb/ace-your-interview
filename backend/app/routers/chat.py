@@ -41,7 +41,14 @@ The user highlighted the word/phrase: "{body.word}"
 
 User's question: {body.user_message}
 
-Provide a clear, educational explanation. Be concise but thorough (2-5 sentences). If the highlighted word is a technical term, define it and explain its relevance in this context. Use examples where helpful."""
+Provide a clear, educational explanation grounded in the context above.
+Rules:
+- Be concise but thorough (2-5 sentences).
+- If the highlighted word is technical, define it and explain why it matters here.
+- Include one short quote from the context when possible.
+- If the answer is uncertain from context, explicitly say what is uncertain and avoid inventing facts.
+- End with one practical takeaway sentence.
+Return plain text only."""
 
     result = await _llm_client.completion(prompt, body.llm_config)
 

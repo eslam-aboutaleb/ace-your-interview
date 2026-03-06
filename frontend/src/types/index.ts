@@ -27,6 +27,19 @@ export interface QuestionAnswer {
   difficulty: "easy" | "medium" | "hard";
 }
 
+export interface QuestionAnswerV2 {
+  question_id: string;
+  topic_id: string;
+  question: string;
+  answer: string;
+  difficulty: "easy" | "medium" | "hard";
+  learning_objective: string;
+  source_section: string;
+  source_quote: string;
+  misconception_trap: string;
+  reasoning_summary: string;
+}
+
 export interface LLMConfig {
   provider: string;
   model: string;
@@ -49,6 +62,16 @@ export interface GenerateQuestionsResponse {
   questions: QuestionAnswer[];
   provider_used: string;
   model_used: string;
+}
+
+export interface GenerateQuestionsV2Response {
+  topic_id: string;
+  topic_title: string;
+  questions: QuestionAnswerV2[];
+  provider_used: string;
+  model_used: string;
+  retries_used: number;
+  malformed_items_dropped: number;
 }
 
 export interface ProviderStatus {
@@ -110,6 +133,19 @@ export interface QuizQuestion {
   topic_id: string;
 }
 
+export interface QuizQuestionV2 {
+  question_id: string;
+  question: string;
+  type: QuizQuestionType;
+  choices: QuizChoice[];
+  correct_answer: string;
+  explanation: string;
+  difficulty: string;
+  topic_id: string;
+  source_quote: string;
+  reasoning_summary: string;
+}
+
 export interface GenerateQuizRequest {
   topic_ids: string[];
   count: number;
@@ -123,6 +159,74 @@ export interface GenerateQuizResponse {
   topics_used: string[];
   provider_used: string;
   model_used: string;
+}
+
+export interface GenerateQuizV2Response {
+  questions: QuizQuestionV2[];
+  topics_used: string[];
+  provider_used: string;
+  model_used: string;
+  retries_used: number;
+  malformed_items_dropped: number;
+}
+
+export type LearningMode = "study" | "quiz";
+
+export interface LearningAttemptRequest {
+  question_id: string;
+  topic_id: string;
+  user_answer: string;
+  is_correct: boolean;
+  confidence: number;
+  response_time_ms: number;
+  mode: LearningMode;
+}
+
+export interface LearningAttemptResponse {
+  attempt_id: number;
+  topic_id: string;
+  question_id: string;
+  mastery_score: number;
+  due_at: string;
+  review_bucket: number;
+}
+
+export interface ReviewQueueItem {
+  topic_id: string;
+  question_id: string;
+  due_at: string;
+  mastery_score: number;
+  last_confidence: number;
+  review_bucket: number;
+  attempts: number;
+}
+
+export interface ReviewQueueResponse {
+  items: ReviewQueueItem[];
+  total_due: number;
+}
+
+export interface WeakAreaItem {
+  topic_id: string;
+  attempts: number;
+  accuracy: number;
+  avg_confidence: number;
+  mastery_score: number;
+  due_count: number;
+}
+
+export interface WeakAreasResponse {
+  weak_areas: WeakAreaItem[];
+}
+
+export interface TopicMasteryItem {
+  topic_id: string;
+  mastery_score: number;
+  attempts: number;
+}
+
+export interface TopicMasteryResponse {
+  topics: TopicMasteryItem[];
 }
 
 /* ── Ollama Types ────────────────────────────────────────── */

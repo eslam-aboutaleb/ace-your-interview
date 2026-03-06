@@ -14,7 +14,7 @@ import {
   pageVariants,
   pageTransition,
 } from "@/utils/animations";
-import { fetchTopics } from "@/services/api";
+import { fetchTopicMastery, fetchTopics } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
@@ -43,13 +43,25 @@ export default function Dashboard() {
   const completedTopics = useProgressStore((s) => s.completedTopics);
   const totalProgress = useProgressStore((s) => s.totalProgress);
   const getTopicProgress = useProgressStore((s) => s.getTopicProgress);
+  const setTopicCount = useProgressStore((s) => s.setTopicCount);
+  const setMastery = useProgressStore((s) => s.setMastery);
 
   useEffect(() => {
     fetchTopics()
-      .then(setTopics)
+      .then((loaded) => {
+        setTopics(loaded);
+        setTopicCount(loaded.length);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+    fetchTopicMastery()
+      .then((res) => {
+        res.topics.forEach((t) => setMastery(t.topic_id, t.mastery_score));
+      })
+      .catch(() => {
+        // ignore mastery bootstrap failures
+      });
+  }, [setTopicCount, setMastery]);
 
   const progress = totalProgress();
   const completedCount = completedTopics.length;
