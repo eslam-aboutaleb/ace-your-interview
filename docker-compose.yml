@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  study-backend:
+    build: ./backend
+    ports:
+      - "8001:8001"
+    volumes:
+      - ../docs:/app/docs:ro
+    env_file:
+      - ../.env
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      STUDY_DOCS_PATH: /app/docs
+      STUDY_DEFAULT_PROVIDER: ${STUDY_DEFAULT_PROVIDER:-groq}
+      STUDY_DEFAULT_MODEL: ${STUDY_DEFAULT_MODEL:-llama-3.3-70b-versatile}
+      STUDY_CORS_ORIGINS: "http://localhost:5174,http://127.0.0.1:5174"
+    restart: unless-stopped
+
+  study-frontend:
+    build: ./frontend
+    ports:
+      - "5174:5174"
+    depends_on:
+      - study-backend
+    restart: unless-stopped

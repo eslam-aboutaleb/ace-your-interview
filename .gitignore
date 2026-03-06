@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# Environment files (NEVER commit these)
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+frontend/dist/
+backend/*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# PWA generated assets
+sw.js
+workbox-*.js

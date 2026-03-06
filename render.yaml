@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: study-app-backend
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: STUDY_DOCS_PATH
+        value: ./docs
+      - key: STUDY_DEFAULT_PROVIDER
+        value: groq
+      - key: STUDY_DEFAULT_MODEL
+        value: llama-3.3-70b-versatile
+      - key: STUDY_CORS_ORIGINS
+        sync: false  # Set manually to your Vercel URL
+      - key: GROQ_API_KEY
+        sync: false  # Set via Render dashboard
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+    rootDir: study-app/backend
+    healthCheckPath: /health

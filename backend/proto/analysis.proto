@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package polymarket.analysis;
+
+enum LLMProvider {
+  LLM_PROVIDER_DEFAULT = 0;
+  LLM_PROVIDER_OPENAI = 1;
+  LLM_PROVIDER_ANTHROPIC = 2;
+  LLM_PROVIDER_GOOGLE = 3;
+  LLM_PROVIDER_GROQ = 4;
+  LLM_PROVIDER_OLLAMA = 5;
+  LLM_PROVIDER_GITHUB = 6;
+}
+
+message LLMConfig {
+  LLMProvider provider = 1;
+  string model = 2;
+  float temperature = 3;
+  int32 max_tokens = 4;
+}
+
+service AnalysisService {
+  rpc QuickAnalysis(QuickAnalysisRequest) returns (AnalysisResponse);
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool healthy = 1;
+  string service_name = 2;
+  string version = 3;
+  map<string, string> capabilities = 4;
+}
+
+message AnalysisResponse {
+  bool success = 1;
+  string analysis = 2;
+  string research_context = 3;
+  string timestamp = 4;
+  map<string, string> metadata = 5;
+  string error = 6;
+}
+
+message QuickAnalysisRequest {
+  string question = 1;
+  double current_price = 2;
+  string user_id = 3;
+  LLMConfig llm_config = 4;
+}
