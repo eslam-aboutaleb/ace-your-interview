@@ -134,9 +134,10 @@ export default function SettingsPage() {
       const data = await fetchLLMAssignmentUsers();
       setAssignmentUsers(data.users);
       setAssignmentProviderModels(data.provider_models || {});
+      const providers = Object.keys(data.provider_models || {}) as UserSettingsProvider[];
       const drafts: Record<string, AssignmentDraft> = {};
       for (const user of data.users) {
-        const provider = (user.assignment?.provider || providerOptions[0] || "openai") as UserSettingsProvider;
+        const provider = (user.assignment?.provider || providers[0] || "openai") as UserSettingsProvider;
         const model = user.assignment?.model || firstModel(data.provider_models, provider);
         drafts[user.identity_key] = { provider, model };
       }

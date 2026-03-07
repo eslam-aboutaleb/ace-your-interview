@@ -91,12 +91,20 @@ npm run dev
 | GET | `/api/llm/providers` | Provider availability |
 | GET | `/api/llm/health` | Backend health |
 | GET | `/api/user-settings` | User LLM settings + credential status |
-| PUT | `/api/user-settings/preferences` | Save user provider/model/mode |
+| PUT | `/api/user-settings/preferences` | Save user provider/model/auth + `llm_source` |
 | PUT | `/api/user-settings/api-key/{provider}` | Save user API key |
 | DELETE | `/api/user-settings/api-key/{provider}` | Delete user API key |
 | GET | `/api/user-settings/google/connect` | Start Gemini OAuth connect |
 | GET | `/api/user-settings/google/callback` | Gemini OAuth callback |
 | POST | `/api/user-settings/google/disconnect` | Disconnect Gemini account |
+| GET | `/api/auth/llm-service-users` | Admin: backend-funded Study App access list |
+| POST | `/api/auth/llm-service-users` | Admin: approve backend-funded Study App access |
+| DELETE | `/api/auth/llm-service-users/{provider}/{identifier}` | Admin: revoke backend-funded Study App access |
+| GET | `/api/auth/llm-assignments/users` | Admin: list allowed-login users + Study App assignment |
+| PUT | `/api/auth/llm-assignments/{provider}/{identifier}` | Admin: set fixed Study App provider/model for a user |
+| DELETE | `/api/auth/llm-assignments/{provider}/{identifier}` | Admin: remove user Study App assignment |
+| GET | `/api/auth/llm-assignments/me` | Admin: get own Study App assignment |
+| PUT | `/api/auth/llm-assignments/me` | Admin: set own Study App assignment |
 | GET | `/health` | Service health |
 
 ## Auth for Local Development
@@ -125,7 +133,17 @@ STUDY_CREDENTIALS_ENCRYPTION_KEY=change-me
 STUDY_USER_SETTINGS_FILE=user_llm_settings.json
 ```
 
+Configure backend-funded Study App access and per-user assignments:
+```bash
+STUDY_LLM_SERVICE_USERS_FILE=llm_service_users.json
+STUDY_LLM_ASSIGNMENTS_FILE=llm_assignments.json
+```
+
 When `STUDY_ENVIRONMENT` is not `development`, `STUDY_CREDENTIALS_ENCRYPTION_KEY` is required at startup.
+
+Runtime policy:
+- `Personal LLM` mode uses only the user credential path (no fallback).
+- `Study App LLM` mode requires admin approval + admin assignment, then uses backend-funded provider/model.
 
 ## Mock Interview Feature Flag
 Mock interview endpoints are gated by:
