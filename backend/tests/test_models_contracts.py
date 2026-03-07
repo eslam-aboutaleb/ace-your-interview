@@ -1,6 +1,7 @@
 import unittest
 
 from app.schemas.models import (
+    ChatFollowUpRequest,
     CreateCustomTopicRequest,
     CreateInterviewSessionRequest,
     FeedbackModeEnum,
@@ -94,6 +95,11 @@ class ModelContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(payload.points[0].interview_type.value, "coding")
+
+    def test_chat_follow_up_request_memory_defaults(self):
+        payload = ChatFollowUpRequest(word="cache", user_message="why", history=[])
+        self.assertEqual(payload.conversation_id, "")
+        self.assertTrue(payload.use_memory)
 
 
 if __name__ == "__main__":

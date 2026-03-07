@@ -28,6 +28,7 @@ class InterviewStoreTests(unittest.TestCase):
             self.assertEqual(session["status"], "active")
             self.assertEqual(session["interviewer_style"], "supportive")
             self.assertEqual(session["feedback_mode"], "deep")
+            self.assertEqual(session["memory_summary"], "")
 
             store.set_current_question(
                 user_id="alice",
@@ -67,6 +68,14 @@ class InterviewStoreTests(unittest.TestCase):
                 },
             )
             self.assertEqual(report["overall_score"], 82)
+            updated_with_memory = store.set_memory_summary(
+                user_id="alice",
+                session_id=session["session_id"],
+                summary="Candidate needs stronger quantification.",
+            )
+            self.assertIsNotNone(updated_with_memory)
+            assert updated_with_memory is not None
+            self.assertIn("quantification", updated_with_memory["memory_summary"])
 
             stats = store.get_stats(user_id="alice")
             self.assertEqual(stats["total_sessions"], 1)
@@ -136,6 +145,7 @@ class InterviewStoreTests(unittest.TestCase):
             }
             self.assertIn("interviewer_style", session_columns)
             self.assertIn("feedback_mode", session_columns)
+            self.assertIn("memory_summary", session_columns)
 
             session = store.create_session(
                 user_id="bob",

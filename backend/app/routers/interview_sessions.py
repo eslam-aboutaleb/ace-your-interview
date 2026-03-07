@@ -201,6 +201,19 @@ async def submit_answer(
         follow_up_note=eval_payload["follow_up_note"],
         response_time_ms=body.response_time_ms,
     )
+    prior_memory = str(session.get("memory_summary", "")).strip()
+    memory_update = (
+        f"{prior_memory}\n"
+        f"Turn {turn_index} question: {question[:220]}\n"
+        f"Candidate answer summary: {body.user_answer[:320]}\n"
+        f"Strengths: {'; '.join(eval_payload['strengths'][:2])}\n"
+        f"Improvements: {'; '.join(eval_payload['improvements'][:2])}"
+    ).strip()
+    _store.set_memory_summary(
+        user_id=user["user"],
+        session_id=session_id,
+        summary=memory_update[:2400],
+    )
 
     if get_settings().enable_adaptive_learning and _learning_store is not None:
         topic_id = _track_topic_id(session["track"])

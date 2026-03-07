@@ -12,6 +12,7 @@ from app.services.llm_client import LLMClient
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
+from app.services.prompt_blocks import optional_context_block, render_contract
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -19,6 +20,30 @@ _llm_client: LLMClient | None = None
 _parser: DocParser | None = None
 _learning_store: LearningStore | None = None
 _mcp_gateway: MCPGateway | None = None
+
+
+def _conversation_id(body: ChatFollowUpRequest) -> str:
+    raw = (body.conversation_id or "").strip()
+    if raw:
+        return raw[:120]
+    fallback = f"{body.topic_id}:{body.section_title}:{body.word}".strip(":")
+    return (fallback or "chat").lower()[:120]
+
+
+def _memory_prompt_block(memory: dict | None) -> str:
+    if not isinstance(memory, dict):
+        return ""
+    summary = memory.get("summary")
+    if not isinstance(summary, dict):
+        return ""
+    summary_text = str(summary.get("summary", "")).strip()
+    if not summary_text:
+        return ""
+    return optional_context_block(
+        "Conversation memory (assistant summary from prior turns; use as soft context)",
+        summary_text,
+        900,
+    )
 
 
 def init(
@@ -46,6 +71,8 @@ async def chat_follow_up(
     resolved_detail = body.response_detail.value if body.response_detail else "concise"
     resolved_language = (body.preferred_language or "").strip().lower()
     resolved_requires_programming = bool(body.requires_programming)
+    conv_id = _conversation_id(body)
+    memory_block = ""
 
     if body.topic_id and _learning_store is not None:
         topic_detail = None
@@ -69,6 +96,14 @@ async def chat_follow_up(
                 resolved_language = resolved.get("preferred_language", "")
             if body.requires_programming is None:
                 resolved_requires_programming = bool(resolved.get("requires_programming", False))
+
+    if bool(body.use_memory) and _learning_store is not None:
+        memory = _learning_store.get_assistant_memory(
+            user_id=user["user"],
+            conversation_id=conv_id,
+            flow="chat",
+        )
+        memory_block = _memory_prompt_block(memory)
 
     # Build conversation history for context
     history_text = ""
@@ -101,23 +136,49 @@ async def chat_follow_up(
             topic_id=body.topic_id,
             topic_title=body.topic_title,
         )
-    mcp_block = (
-        f"\n\nExternal context (optional, use only if helpful and factual):\n{mcp_context}"
-        if mcp_context
-        else ""
+    mcp_block = optional_context_block(
+        "External context (optional, use only if helpful and factual)",
+        mcp_context,
+        2500,
     )
     detail_clause = (
         "Use concise responses by default."
         if resolved_detail == "concise"
         else "Provide very detailed responses with layered explanation depth."
     )
-    language_clause = ""
+    language_rule = ""
     if resolved_requires_programming and resolved_language:
-        language_clause = (
-            f'\n- Include one practical fenced code example in "{resolved_language}" when code adds clarity.'
+        language_rule = (
+            f'Include one practical fenced code example in "{resolved_language}" when code adds clarity.'
         )
     elif not resolved_requires_programming:
-        language_clause = "\n- Avoid code blocks unless the user explicitly asks for code."
+        language_rule = "Avoid code blocks unless the user explicitly asks for code."
+    contract = render_contract(
+        schema_label="Return markdown only",
+        schema_block='(single markdown response, no JSON wrapper)',
+        rules=[
+            "Be concise but thorough.",
+            detail_clause,
+            "Keep the explanation oriented to the provided topic context and this Q&A.",
+            "If the question drifts outside topic scope, answer briefly and connect back to the current topic.",
+            "If the highlighted word is technical, define it and explain why it matters here.",
+            "Include one short quote from the context when possible.",
+            "If the answer is uncertain from context, explicitly say what is uncertain and avoid inventing facts.",
+            "Format as markdown with adaptive structure.",
+            "use short paragraphs with blank lines for long responses.",
+            "use bullets only when listing steps/checklists/categories.",
+            "use headings only when sections improve clarity.",
+            "use tables only for direct comparisons/category matrices.",
+            "If you use a table, output valid GFM table syntax.",
+            "one row per line.",
+            "include a separator row (e.g. `| --- | --- |`).",
+            "You may include fenced code blocks when code clarifies the explanation.",
+            language_rule,
+            "You may include fenced Mermaid diagrams when system behavior is easier to explain visually.",
+            "If you include fences, always use explicit language tags (for example: ```python, ```mermaid).",
+            "End with one practical takeaway sentence.",
+        ],
+    )
 
     prompt = f"""You are a helpful study assistant. The user is studying technical documentation and has a follow-up question.
 
@@ -130,31 +191,12 @@ Topic context:
 
 The user highlighted the word/phrase: "{body.word}"
 {f"Previous conversation:{history_text}" if history_text else ""}
+{memory_block}
 
 User's question: {body.user_message}
 
 Provide a clear, educational explanation grounded in the context above.
-Rules:
-- Be concise but thorough.
-- {detail_clause}
-- Keep the explanation oriented to the provided topic context and this Q&A.
-- If the question drifts outside topic scope, answer briefly and connect back to the current topic.
-- If the highlighted word is technical, define it and explain why it matters here.
-- Include one short quote from the context when possible.
-- If the answer is uncertain from context, explicitly say what is uncertain and avoid inventing facts.
-- Format as markdown with adaptive structure:
-  - use short paragraphs with blank lines for long responses,
-  - use bullets only when listing steps/checklists/categories,
-  - use headings only when sections improve clarity,
-  - use tables only for direct comparisons/category matrices.
-- If you use a table, output valid GFM table syntax:
-  - one row per line,
-  - include a separator row (e.g. `| --- | --- |`).
-- You may include fenced code blocks when code clarifies the explanation.{language_clause}
-- You may include fenced Mermaid diagrams when system behavior is easier to explain visually.
-- If you include fences, always use explicit language tags (for example: ```python, ```mermaid).
-- End with one practical takeaway sentence.
-Return markdown only.{mcp_block}"""
+{contract}.{mcp_block}"""
 
     result = await _llm_client.completion(
         prompt,
@@ -166,6 +208,33 @@ Return markdown only.{mcp_block}"""
     if result["success"] and result["analysis"]:
         metadata = result.get("metadata", {})
         reply = format_markdown_readable(result["analysis"])
+        if bool(body.use_memory) and _learning_store is not None:
+            previous = _learning_store.get_assistant_memory(
+                user_id=user["user"],
+                conversation_id=conv_id,
+                flow="chat",
+            ) or {}
+            prev_summary = ""
+            if isinstance(previous.get("summary"), dict):
+                prev_summary = str(previous["summary"].get("summary", "")).strip()
+            merged_summary = (
+                f"{prev_summary}\n"
+                f"Topic: {body.topic_title or body.topic_id or 'unknown'} | "
+                f"Word: {body.word}\n"
+                f"User asked: {body.user_message[:240]}\n"
+                f"Assistant: {reply[:380]}"
+            ).strip()
+            _learning_store.upsert_assistant_memory(
+                user_id=user["user"],
+                conversation_id=conv_id,
+                flow="chat",
+                summary={
+                    "summary": merged_summary[:1200],
+                    "topic_id": body.topic_id,
+                    "word": body.word,
+                    "updated_by": "chat_follow_up",
+                },
+            )
         return ChatFollowUpResponse(
             reply=reply,
             provider_used=metadata.get("provider", ""),

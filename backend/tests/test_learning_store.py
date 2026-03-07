@@ -239,6 +239,35 @@ class LearningStoreTests(unittest.TestCase):
             self.assertTrue(resolved["requires_programming"])
             self.assertEqual(resolved["preferred_language"], "python")
 
+    def test_assistant_memory_upsert_and_isolation(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "learning.db")
+            store = LearningStore(db_path)
+
+            saved = store.upsert_assistant_memory(
+                user_id="alice",
+                conversation_id="conv-1",
+                flow="chat",
+                summary={"summary": "Previous chat context", "topic_id": "backend"},
+            )
+            self.assertEqual(saved["conversation_id"], "conv-1")
+
+            loaded = store.get_assistant_memory(
+                user_id="alice",
+                conversation_id="conv-1",
+                flow="chat",
+            )
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded["summary"]["topic_id"], "backend")
+            self.assertIsNone(
+                store.get_assistant_memory(
+                    user_id="bob",
+                    conversation_id="conv-1",
+                    flow="chat",
+                )
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

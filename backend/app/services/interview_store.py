@@ -52,6 +52,7 @@ class InterviewStore:
                     focus_areas_json TEXT NOT NULL,
                     asked_questions_json TEXT NOT NULL,
                     current_question TEXT NOT NULL,
+                    memory_summary TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -104,6 +105,7 @@ class InterviewStore:
             required_columns = {
                 "interviewer_style": "TEXT NOT NULL DEFAULT 'neutral'",
                 "feedback_mode": "TEXT NOT NULL DEFAULT 'concise'",
+                "memory_summary": "TEXT NOT NULL DEFAULT ''",
             }
             for column, ddl in required_columns.items():
                 if column not in existing_columns:
@@ -151,6 +153,7 @@ class InterviewStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "current_question": row["current_question"],
+            "memory_summary": row["memory_summary"] if "memory_summary" in row.keys() else "",
             "report_ready": bool(int(row["report_ready"])) if "report_ready" in row.keys() else False,
         }
 
@@ -183,8 +186,8 @@ class InterviewStore:
                         target_role, interviewer_style, feedback_mode,
                         job_description_text, resume_summary_text,
                         focus_areas_json, asked_questions_json,
-                        current_question, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        current_question, memory_summary, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -201,6 +204,7 @@ class InterviewStore:
                         resume_summary_text,
                         self._dumps(focus),
                         self._dumps([]),
+                        "",
                         "",
                         now,
                         now,
@@ -221,6 +225,7 @@ class InterviewStore:
             "created_at": now,
             "updated_at": now,
             "current_question": "",
+            "memory_summary": "",
             "report_ready": False,
         }
 
@@ -303,6 +308,26 @@ class InterviewStore:
                     WHERE user_id = ? AND session_id = ?
                     """,
                     (q, self._dumps(asked), now, user_id, session_id),
+                )
+        return self.get_session(user_id=user_id, session_id=session_id)
+
+    def set_memory_summary(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        summary: str,
+    ) -> dict[str, Any] | None:
+        now = _utc_now_iso()
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    UPDATE interview_sessions
+                    SET memory_summary = ?, updated_at = ?
+                    WHERE user_id = ? AND session_id = ?
+                    """,
+                    (str(summary or "")[:3000], now, user_id, session_id),
                 )
         return self.get_session(user_id=user_id, session_id=session_id)
 

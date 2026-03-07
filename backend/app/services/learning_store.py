@@ -176,6 +176,25 @@ class LearningStore:
                 ON dynamic_topic_curricula(user_id, topic_id, updated_at DESC)
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS assistant_memory (
+                    user_id TEXT NOT NULL,
+                    conversation_id TEXT NOT NULL,
+                    flow TEXT NOT NULL,
+                    summary_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, conversation_id, flow)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_assistant_memory_updated
+                ON assistant_memory(user_id, flow, updated_at DESC)
+                """
+            )
 
     @staticmethod
     def _event_score(is_correct: bool, confidence: int) -> float:
@@ -1165,4 +1184,81 @@ class LearningStore:
             "language_options": language_options,
             "profile_source": (profile or {}).get("source", ""),
             "profile_updated_at": (profile or {}).get("updated_at", ""),
+        }
+
+    def get_assistant_memory(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        flow: str = "chat",
+    ) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT summary_json, created_at, updated_at
+            FROM assistant_memory
+            WHERE user_id = ? AND conversation_id = ? AND flow = ?
+            LIMIT 1
+            """,
+            (user_id, conversation_id, flow),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            summary = json.loads(str(row["summary_json"]))
+        except json.JSONDecodeError:
+            summary = {}
+        if not isinstance(summary, dict):
+            summary = {}
+        return {
+            "conversation_id": conversation_id,
+            "flow": flow,
+            "summary": summary,
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def upsert_assistant_memory(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        flow: str = "chat",
+        summary: dict | None = None,
+    ) -> dict:
+        now_iso = _to_iso(_utc_now())
+        summary_obj = summary if isinstance(summary, dict) else {}
+        payload = json.dumps(summary_obj, ensure_ascii=True)
+        existing = self.get_assistant_memory(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            flow=flow,
+        )
+        created_at = (existing or {}).get("created_at", now_iso)
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO assistant_memory(
+                        user_id, conversation_id, flow, summary_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, conversation_id, flow) DO UPDATE SET
+                        summary_json = excluded.summary_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        user_id,
+                        conversation_id,
+                        flow,
+                        payload,
+                        created_at,
+                        now_iso,
+                    ),
+                )
+        return {
+            "conversation_id": conversation_id,
+            "flow": flow,
+            "summary": summary_obj,
+            "created_at": created_at,
+            "updated_at": now_iso,
         }
