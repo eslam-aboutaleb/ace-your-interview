@@ -87,6 +87,14 @@ async def require_auth(request: Request, session: str = Cookie(default=None)) ->
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
 
+async def optional_auth(request: Request, session: str = Cookie(default=None)) -> dict | None:
+    """Return the authenticated user dict, or ``None`` for anonymous visitors."""
+    try:
+        return await require_auth(request, session)
+    except HTTPException:
+        return None
+
+
 async def require_admin(user: dict = Depends(require_auth)) -> dict:
     if not is_admin_identity(user=user.get("user", ""), provider=user.get("provider", "")):
         raise HTTPException(status_code=403, detail="Admin access required")

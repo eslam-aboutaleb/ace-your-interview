@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -37,6 +37,7 @@ import {
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useProgressStore } from "@/store/progressStore";
+import { useAuthStore } from "@/store/authStore";
 import DifficultyBadge from "@/components/common/DifficultyBadge";
 import ProgressBar from "@/components/common/ProgressBar";
 import WordHighlightChat from "@/components/common/WordHighlightChat";
@@ -77,6 +78,7 @@ type IndexedSection = {
 
 export default function TopicStudy() {
   const { topicId } = useParams<{ topicId: string }>();
+  const navigate = useNavigate();
   const [topic, setTopic] = useState<TopicDetail | null>(null);
   const [questions, setQuestions] = useState<QuestionAnswerV2[]>([]);
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
@@ -293,6 +295,10 @@ export default function TopicStudy() {
   const handleGenerateCurriculum = useCallback(
     async (forceRegenerate: boolean) => {
       if (!topicId || !topic?.is_dynamic_topic) return;
+      if (!useAuthStore.getState().isAuthenticated) {
+        navigate("/login");
+        return;
+      }
       curriculumAbortRef.current?.abort();
       const controller = new AbortController();
       curriculumAbortRef.current = controller;
@@ -313,7 +319,9 @@ export default function TopicStudy() {
           topicId,
           {
             preferred_language: selected,
-            ...(topic?.sections?.length ? { target_sections: topic.sections.length } : {}),
+            ...(topic?.sections?.length
+              ? { target_sections: topic.sections.length }
+              : {}),
             force_regenerate: forceRegenerate,
             llm_config: {
               provider: settings.provider,
@@ -379,6 +387,10 @@ export default function TopicStudy() {
 
   const handleGenerate = useCallback(async () => {
     if (!topicId || !topic) return;
+    if (!useAuthStore.getState().isAuthenticated) {
+      navigate("/login");
+      return;
+    }
     if (topic.is_dynamic_topic && !topic.content_ready) {
       setErrorMsg("Generate the problem-solving roadmap first.");
       return;

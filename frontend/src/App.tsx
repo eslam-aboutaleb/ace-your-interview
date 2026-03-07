@@ -22,6 +22,24 @@ import { useAuthStore } from "@/store/authStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import type { UserPreferences } from "@/types";
 
+function PublicRoute() {
+  const { isLoading, checkAuth } = useAuthStore();
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-udemy-bg flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-udemy-purple animate-spin" />
+      </div>
+    );
+  }
+
+  return <Outlet />;
+}
+
 function ProtectedRoute() {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const hydratedRef = useRef(false);
@@ -31,7 +49,9 @@ function ProtectedRoute() {
   const localModel = useSettingsStore((s) => s.model);
   const localTemperature = useSettingsStore((s) => s.temperature);
   const localMaxTokens = useSettingsStore((s) => s.maxTokens);
-  const localRequireAnswerReveal = useSettingsStore((s) => s.requireAnswerReveal);
+  const localRequireAnswerReveal = useSettingsStore(
+    (s) => s.requireAnswerReveal,
+  );
 
   useEffect(() => {
     checkAuth();
@@ -53,11 +73,15 @@ function ProtectedRoute() {
         let prefs = res.preferences;
 
         if (!res.has_saved_preferences) {
-          const provider = allowedProviders.has(localProvider as UserPreferences["provider"])
+          const provider = allowedProviders.has(
+            localProvider as UserPreferences["provider"],
+          )
             ? (localProvider as UserPreferences["provider"])
             : res.preferences.provider;
-          const modelOptions = res.providers.find((p) => p.provider === provider)?.models || [];
-          const model = localModel && modelOptions.includes(localModel) ? localModel : "";
+          const modelOptions =
+            res.providers.find((p) => p.provider === provider)?.models || [];
+          const model =
+            localModel && modelOptions.includes(localModel) ? localModel : "";
           const seedPayload: UserPreferences = {
             provider,
             model,
@@ -129,19 +153,26 @@ export default function App() {
     <AnimatePresence mode="wait">
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route element={<PublicRoute />}>
+          <Route path="/" element={<Layout />}>
+            <Route path="topics" element={<TopicsList />} />
+            <Route path="topics/:topicId" element={<TopicStudy />} />
+          </Route>
+        </Route>
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<Layout />}>
             <Route index element={<Dashboard />} />
-            <Route path="topics" element={<TopicsList />} />
             <Route path="topics/custom/build" element={<CustomTopicBuild />} />
-            <Route path="topics/:topicId" element={<TopicStudy />} />
             <Route path="quiz" element={<QuizMode />} />
             <Route path="quiz/:topicId" element={<QuizMode />} />
             <Route path="review" element={<ReviewQueue />} />
             <Route path="study-plan" element={<StudyPlan />} />
             <Route path="interview" element={<InterviewSetup />} />
             <Route path="interview/trends" element={<InterviewTrendsPage />} />
-            <Route path="interview/:sessionId" element={<InterviewSessionPage />} />
+            <Route
+              path="interview/:sessionId"
+              element={<InterviewSessionPage />}
+            />
             <Route
               path="interview/:sessionId/report"
               element={<InterviewReportPage />}

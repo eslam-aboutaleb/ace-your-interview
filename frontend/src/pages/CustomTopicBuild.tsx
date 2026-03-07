@@ -163,7 +163,8 @@ export default function CustomTopicBuild() {
             {normalizeEscapedMultilineText(progressMessage)}
           </p>
           <p className="mt-1 font-medium">
-            Generated sections: {generatedCount}{targetSections ? ` / ${targetSections}` : ""}
+            Generated sections: {generatedCount}
+            {targetSections ? ` / ${targetSections}` : ""}
           </p>
         </div>
 
