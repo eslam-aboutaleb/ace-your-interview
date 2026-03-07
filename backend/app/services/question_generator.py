@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from collections import Counter
+from difflib import SequenceMatcher
 from typing import Any, AsyncIterator, Callable, Optional
 
 from app.schemas.models import (
@@ -51,6 +52,34 @@ _MAX_TOTAL_ATTEMPTS = 18
 _MAX_RECOVERY_ATTEMPTS = 24
 _VALID_DIFFICULTIES = {"easy", "medium", "hard"}
 _VALID_LEVELS = {"junior", "mid", "senior"}
+_QUESTION_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "do",
+    "for",
+    "from",
+    "how",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "what",
+    "when",
+    "why",
+    "with",
+    "would",
+    "you",
+}
 
 
 def _question_id(topic_id: str, question: str) -> str:
@@ -60,6 +89,43 @@ def _question_id(topic_id: str, question: str) -> str:
 
 def _normalise_question(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def _question_tokens(text: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", _normalise_question(text))
+    normalized: set[str] = set()
+    for word in words:
+        if len(word) <= 2 or word in _QUESTION_STOPWORDS:
+            continue
+        if word.endswith("ies") and len(word) > 4:
+            word = f"{word[:-3]}y"
+        elif word.endswith("s") and len(word) > 4:
+            word = word[:-1]
+        normalized.add(word)
+    return normalized
+
+
+def _is_near_duplicate_question(candidate: str, seen_questions: list[str]) -> bool:
+    cand_norm = _normalise_question(candidate)
+    if not cand_norm:
+        return True
+    cand_tokens = _question_tokens(candidate)
+    for seen in seen_questions:
+        seen_norm = _normalise_question(seen)
+        if not seen_norm:
+            continue
+        if cand_norm == seen_norm:
+            return True
+        if (cand_norm in seen_norm or seen_norm in cand_norm) and min(len(cand_norm), len(seen_norm)) >= 24:
+            return True
+        if SequenceMatcher(None, cand_norm, seen_norm).ratio() >= 0.87:
+            return True
+        seen_tokens = _question_tokens(seen)
+        if cand_tokens and seen_tokens:
+            overlap = len(cand_tokens & seen_tokens) / max(1, len(cand_tokens | seen_tokens))
+            if overlap >= 0.65:
+                return True
+    return False
 
 
 def _clamp_content(doc_content: str) -> str:
@@ -522,7 +588,9 @@ def _build_fallback_question_items(
     if not fragments:
         fragments = [source_scope, topic_title or "core concepts", "practical implementation"]
 
-    dedup: set[str] = {_normalise_question(q) for q in _normalise_existing_questions(existing_questions)}
+    existing_seed = _normalise_existing_questions(existing_questions)
+    dedup: set[str] = {_normalise_question(q) for q in existing_seed}
+    seen_questions: list[str] = [*existing_seed]
     difficulty_value = (difficulty or "medium").strip().lower()
     if difficulty_value not in _VALID_DIFFICULTIES:
         difficulty_value = "medium"
@@ -532,6 +600,10 @@ def _build_fallback_question_items(
         "How would you apply {focus} in a real implementation for {topic} while prioritizing {angle}?",
         "What tradeoffs should be evaluated when working with {focus} in {topic} regarding {angle}?",
         "How would you validate that {focus} is implemented correctly in {topic} with emphasis on {angle}?",
+        "A production issue appears around {focus} in {topic}. How would you diagnose and fix it with focus on {angle}?",
+        "How would you test and monitor {focus} in {topic} to maintain strong {angle} guarantees?",
+        "If {focus} must scale in {topic}, what architecture changes would you make for better {angle}?",
+        "When refactoring {focus} in {topic}, how would you reduce risk and preserve {angle} behavior?",
     ]
     angles = [
         "correctness",
@@ -559,7 +631,7 @@ def _build_fallback_question_items(
         ).strip()
         q_norm = _normalise_question(question)
         idx += 1
-        if not q_norm or q_norm in dedup:
+        if not q_norm or q_norm in dedup or _is_near_duplicate_question(question, seen_questions):
             continue
 
         answer = (
@@ -583,6 +655,7 @@ def _build_fallback_question_items(
         if not valid:
             continue
         dedup.add(q_norm)
+        seen_questions.append(question)
         items.append(item)
 
     return items[:remaining]
@@ -738,6 +811,7 @@ async def _collect_with_retries(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     existing_seed = _normalise_existing_questions(existing_questions)
     dedup: set[str] = {_normalise_question(q) for q in existing_seed}
+    seen_questions: list[str] = [*existing_seed]
     valid_items: list[dict[str, Any]] = []
     malformed_items = 0
     retries_used = 0
@@ -790,11 +864,13 @@ async def _collect_with_retries(
                 continue
 
             q_norm = _normalise_question(str(item.get("question", "")))
-            if not q_norm or q_norm in dedup:
+            question_text = str(item.get("question", "")).strip()
+            if not q_norm or q_norm in dedup or _is_near_duplicate_question(question_text, seen_questions):
                 malformed_items += 1
                 issue_counter["duplicate_question"] += 1
                 continue
             dedup.add(q_norm)
+            seen_questions.append(question_text)
             valid_items.append(item)
             if len(valid_items) >= target_count:
                 break
@@ -855,12 +931,14 @@ async def _collect_with_retries(
                     continue
 
                 q_norm = _normalise_question(str(item.get("question", "")))
-                if not q_norm or q_norm in dedup:
+                question_text = str(item.get("question", "")).strip()
+                if not q_norm or q_norm in dedup or _is_near_duplicate_question(question_text, seen_questions):
                     malformed_items += 1
                     issue_counter["duplicate_question"] += 1
                     continue
 
                 dedup.add(q_norm)
+                seen_questions.append(question_text)
                 valid_items.append(item)
                 added = True
                 break
@@ -1044,7 +1122,7 @@ class QuestionGenerator:
                             issue_counter["invalid_question"] += 1
                             continue
 
-                        if q_norm in dedup_norm:
+                        if q_norm in dedup_norm or _is_near_duplicate_question(q_text, generated_question_texts):
                             malformed_dropped += 1
                             issue_counter["duplicate_question"] += 1
                             continue
@@ -1222,7 +1300,7 @@ class QuestionGenerator:
             for item in fallback_items:
                 q_text = str(item.get("question", "")).strip()
                 q_norm = _normalise_question(q_text)
-                if not q_norm or q_norm in dedup_norm:
+                if not q_norm or q_norm in dedup_norm or _is_near_duplicate_question(q_text, generated_question_texts):
                     continue
                 dedup_norm.add(q_norm)
                 generated_question_texts.append(q_text)
@@ -1350,9 +1428,9 @@ class QuestionGenerator:
         retries_used = 0
         malformed_items_dropped = 0
         raw_items: list[dict[str, Any]] = []
-        dedup_norm: set[str] = {
-            _normalise_question(q) for q in _normalise_existing_questions(existing_questions)
-        }
+        existing_seed = _normalise_existing_questions(existing_questions)
+        dedup_norm: set[str] = {_normalise_question(q) for q in existing_seed}
+        seen_questions: list[str] = [*existing_seed]
 
         pass_modes: list[dict[str, Any]] = [
             {
@@ -1388,7 +1466,7 @@ class QuestionGenerator:
                 break
             remaining = target_count - len(raw_items)
             existing_for_pass = [
-                *(_normalise_existing_questions(existing_questions)),
+                *existing_seed,
                 *[str(item.get("question", "")) for item in raw_items],
             ]
             prompt = _build_prompt(
@@ -1425,10 +1503,12 @@ class QuestionGenerator:
                 model_used = str(pass_metadata.get("model"))
 
             for item in pass_items:
-                q_norm = _normalise_question(str(item.get("question", "")))
-                if not q_norm or q_norm in dedup_norm:
+                question_text = str(item.get("question", "")).strip()
+                q_norm = _normalise_question(question_text)
+                if not q_norm or q_norm in dedup_norm or _is_near_duplicate_question(question_text, seen_questions):
                     continue
                 dedup_norm.add(q_norm)
+                seen_questions.append(question_text)
                 raw_items.append(item)
                 if len(raw_items) >= target_count:
                     break
@@ -1444,15 +1524,17 @@ class QuestionGenerator:
                 section_title=None,
                 section_content=None,
                 existing_questions=[
-                    *(_normalise_existing_questions(existing_questions)),
+                    *existing_seed,
                     *[str(item.get("question", "")) for item in raw_items],
                 ],
             )
             for item in fallback_items:
-                q_norm = _normalise_question(str(item.get("question", "")))
-                if not q_norm or q_norm in dedup_norm:
+                question_text = str(item.get("question", "")).strip()
+                q_norm = _normalise_question(question_text)
+                if not q_norm or q_norm in dedup_norm or _is_near_duplicate_question(question_text, seen_questions):
                     continue
                 dedup_norm.add(q_norm)
+                seen_questions.append(question_text)
                 raw_items.append(item)
                 if len(raw_items) >= target_count:
                     break
