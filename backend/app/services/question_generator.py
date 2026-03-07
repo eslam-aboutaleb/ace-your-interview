@@ -191,15 +191,12 @@ Return ONLY valid JSON in this shape:
   {{
     "question": "Question text",
     "answer": "3-8 sentence educational answer",
-    "difficulty": "easy|medium|hard",
-    "learning_objective": "what this question tests",
-    "source_section": "exact section heading",
-    "source_quote": "short direct quote from docs",
-    "misconception_trap": "common mistake this question targets",
-    "reasoning_summary": "1-2 sentence reasoning path to answer",
-    "target_level": "junior|mid|senior"
+    "difficulty": "easy|medium|hard"
   }}
 ]
+
+Optional fields (recommended when available): learning_objective, source_section, source_quote,
+misconception_trap, reasoning_summary, target_level.
 
 Rules:
 - Return exactly {count} items; never return fewer.
@@ -223,6 +220,7 @@ Rules:
 - Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.
 - source_quote must be factual text from provided docs.
 - target_level must match "{target_level}" exactly.
+- Do not wrap JSON with prose; return raw JSON only.
 - Complexity must match target_level:
   - junior: fundamentals, definitions, and straightforward tradeoffs.
   - mid: implementation details, constraints, and moderate tradeoffs.
@@ -356,42 +354,107 @@ Return ONLY a JSON array with exactly {missing_count} NEW valid items.
 
 def _parse_questions_json(raw: str) -> list[dict]:
     """Robustly extract JSON array from LLM response."""
-    raw = (raw or "").strip()
-    if not raw:
+    text = (raw or "").strip()
+    if not text:
         return []
-    try:
-        data = json.loads(raw)
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            payload = data.get("questions") or data.get("items")
-            if isinstance(payload, list):
-                return payload
-    except json.JSONDecodeError:
-        pass
 
-    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", raw, re.DOTALL)
+    def _extract_items(payload: Any) -> list[dict]:
+        if isinstance(payload, list):
+            return [x for x in payload if isinstance(x, dict)]
+        if isinstance(payload, dict):
+            nested = payload.get("questions") or payload.get("items")
+            if isinstance(nested, list):
+                return [x for x in nested if isinstance(x, dict)]
+            if payload.get("question") and payload.get("answer"):
+                return [payload]
+        return []
+
+    def _try_load_json(candidate: str) -> list[dict]:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            return []
+        return _extract_items(parsed)
+
+    def _strip_outer_code_fence(candidate: str) -> str:
+        stripped = candidate.strip()
+        if not stripped.startswith("```"):
+            return stripped
+        lines = stripped.splitlines()
+        if len(lines) < 3 or not lines[-1].strip().startswith("```"):
+            return stripped
+        return "\n".join(lines[1:-1]).strip()
+
+    def _parse_text_qa_pairs(candidate: str) -> list[dict]:
+        cleaned = candidate.replace("\r\n", "\n").replace("\r", "\n")
+        cleaned = _strip_outer_code_fence(cleaned)
+
+        q_pattern = re.compile(
+            r"(?im)^\s*(?:\d+\s*[\).:\-]\s*)?(?:\*\*)?\s*(?:question|q)\s*\d*\s*[:\-]\s*"
+        )
+        a_pattern = re.compile(r"(?im)^\s*(?:\*\*)?\s*(?:answer|a)\s*\d*\s*[:\-]\s*")
+        q_matches = list(q_pattern.finditer(cleaned))
+        items: list[dict] = []
+
+        if q_matches:
+            for idx, q_match in enumerate(q_matches):
+                block_end = q_matches[idx + 1].start() if idx + 1 < len(q_matches) else len(cleaned)
+                block = cleaned[q_match.end() : block_end].strip()
+                if not block:
+                    continue
+                answer_match = a_pattern.search(block)
+                if answer_match:
+                    question = block[: answer_match.start()].strip(" -*\t\n")
+                    answer = block[answer_match.end() :].strip(" \t\n")
+                else:
+                    parts = [p.strip() for p in block.split("\n", 1)]
+                    question = parts[0].strip(" -*\t")
+                    answer = parts[1].strip() if len(parts) > 1 else ""
+                if question and answer:
+                    items.append({"question": question, "answer": answer})
+            if items:
+                return items
+
+        numbered_pattern = re.compile(
+            r"(?ims)^\s*(\d+)[\).:\-]\s*(.+?)(?:\n\s*(?:answer|a)\s*[:\-]\s*(.+?))(?=^\s*\d+[\).:\-]|\Z)"
+        )
+        for match in numbered_pattern.finditer(cleaned):
+            question = match.group(2).strip(" -*\t\n")
+            answer = match.group(3).strip()
+            if question and answer:
+                items.append({"question": question, "answer": answer})
+        return items
+
+    parsed = _try_load_json(text)
+    if parsed:
+        return parsed
+
+    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
     if m:
-        try:
-            data = json.loads(m.group(1))
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                payload = data.get("questions") or data.get("items")
-                if isinstance(payload, list):
-                    return payload
-        except json.JSONDecodeError:
-            pass
+        parsed = _try_load_json(m.group(1))
+        if parsed:
+            return parsed
 
-    start = raw.find("[")
-    end = raw.rfind("]")
-    if start != -1 and end != -1 and end > start:
+    decoder = json.JSONDecoder()
+    cursor = 0
+    while cursor < len(text):
+        start_match = re.search(r"[\[{]", text[cursor:])
+        if not start_match:
+            break
+        start = cursor + start_match.start()
         try:
-            data = json.loads(raw[start : end + 1])
-            if isinstance(data, list):
-                return data
+            decoded, consumed = decoder.raw_decode(text[start:])
         except json.JSONDecodeError:
-            pass
+            cursor = start + 1
+            continue
+        parsed = _extract_items(decoded)
+        if parsed:
+            return parsed
+        cursor = start + consumed
+
+    parsed = _parse_text_qa_pairs(text)
+    if parsed:
+        return parsed
 
     return []
 
