@@ -12,6 +12,7 @@ export type InterviewType =
   | "technical"
   | "system_design"
   | "ai_fundamentals"
+  | "coding"
   | "mixed";
 
 export interface TopicSummary {
@@ -441,6 +442,32 @@ export interface TopicMasteryResponse {
   topics: TopicMasteryItem[];
 }
 
+export type StudyPlanTaskType = "review" | "topic_study" | "quiz";
+
+export interface StudyPlanTask {
+  task_type: StudyPlanTaskType;
+  topic_id: string;
+  title: string;
+  reason: string;
+  estimated_minutes: number;
+  cta_route: string;
+}
+
+export interface StudyPlanDay {
+  day_index: number;
+  label: string;
+  date: string;
+  tasks: StudyPlanTask[];
+}
+
+export interface StudyPlanResponse {
+  generated_at: string;
+  days: number;
+  daily_items: number;
+  total_tasks: number;
+  days_plan: StudyPlanDay[];
+}
+
 /* ── Mock Interview Types ────────────────────────────────── */
 
 export interface InterviewRubricScore {
@@ -560,6 +587,29 @@ export interface InterviewStatsResponse {
   total_sessions: number;
   completed_sessions: number;
   interview_readiness_score: number;
+}
+
+export interface InterviewTrendPoint {
+  session_id: string;
+  completed_at: string;
+  overall_score: number;
+  rubric_averages: InterviewRubricAverages;
+  track: LearningTrack;
+  level: InterviewLevel;
+  interview_type: InterviewType;
+  readiness_label: string;
+}
+
+export interface InterviewTrendsSummary {
+  latest_score: number;
+  previous_score: number;
+  delta: number;
+  session_count: number;
+}
+
+export interface InterviewTrendsResponse {
+  points: InterviewTrendPoint[];
+  summary: InterviewTrendsSummary;
 }
 
 /* ── Ollama Types ────────────────────────────────────────── */

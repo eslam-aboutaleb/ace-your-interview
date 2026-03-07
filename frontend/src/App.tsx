@@ -8,12 +8,15 @@ import TopicsList from "@/pages/TopicsList";
 import CustomTopicBuild from "@/pages/CustomTopicBuild";
 import TopicStudy from "@/pages/TopicStudy";
 import QuizMode from "@/pages/QuizMode";
+import ReviewQueue from "@/pages/ReviewQueue";
+import StudyPlan from "@/pages/StudyPlan";
 import Settings from "@/pages/Settings";
 import UserSettings from "@/pages/UserSettings";
 import LoginPage from "@/pages/LoginPage";
 import InterviewSetup from "@/pages/InterviewSetup";
 import InterviewSessionPage from "@/pages/InterviewSessionPage";
 import InterviewReportPage from "@/pages/InterviewReportPage";
+import InterviewTrendsPage from "@/pages/InterviewTrends";
 import { fetchUserSettings, updateUserPreferences } from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -134,7 +137,10 @@ export default function App() {
             <Route path="topics/:topicId" element={<TopicStudy />} />
             <Route path="quiz" element={<QuizMode />} />
             <Route path="quiz/:topicId" element={<QuizMode />} />
+            <Route path="review" element={<ReviewQueue />} />
+            <Route path="study-plan" element={<StudyPlan />} />
             <Route path="interview" element={<InterviewSetup />} />
+            <Route path="interview/trends" element={<InterviewTrendsPage />} />
             <Route path="interview/:sessionId" element={<InterviewSessionPage />} />
             <Route
               path="interview/:sessionId/report"

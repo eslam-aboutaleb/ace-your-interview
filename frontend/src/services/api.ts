@@ -28,6 +28,7 @@ import type {
   LearningAttemptRequest,
   LearningAttemptResponse,
   ReviewQueueResponse,
+  StudyPlanResponse,
   WeakAreasResponse,
   TopicMasteryResponse,
   CreateInterviewSessionRequest,
@@ -39,6 +40,7 @@ import type {
   InterviewReportResponse,
   InterviewSessionsListResponse,
   InterviewStatsResponse,
+  InterviewTrendsResponse,
   LLMAssignmentsUsersResponse,
   LLMAssignmentUserItem,
   LLMMyAssignmentResponse,
@@ -163,7 +165,8 @@ api.interceptors.response.use(
     const skip401Redirect =
       reqUrl.includes("/learning/mastery") ||
       reqUrl.includes("/learning/weak-areas") ||
-      reqUrl.includes("/learning/review-queue");
+      reqUrl.includes("/learning/review-queue") ||
+      reqUrl.includes("/learning/study-plan");
     if (
       error.response?.status === 401 &&
       !window.location.pathname.startsWith("/login") &&
@@ -645,6 +648,16 @@ export async function fetchTopicMastery(
   return data;
 }
 
+export async function fetchStudyPlan(
+  days = 7,
+  dailyItems = 3,
+): Promise<StudyPlanResponse> {
+  const { data } = await api.get<StudyPlanResponse>("/learning/study-plan", {
+    params: { days, daily_items: dailyItems },
+  });
+  return data;
+}
+
 // ── Mock Interview ──────────────────────────────────────────
 export async function createInterviewSession(
   req: CreateInterviewSessionRequest,
@@ -710,6 +723,16 @@ export async function fetchInterviewReport(
 export async function fetchInterviewStats(): Promise<InterviewStatsResponse> {
   const { data } = await api.get<InterviewStatsResponse>(
     "/interview-sessions/stats",
+  );
+  return data;
+}
+
+export async function fetchInterviewTrends(
+  limit = 50,
+): Promise<InterviewTrendsResponse> {
+  const { data } = await api.get<InterviewTrendsResponse>(
+    "/interview-sessions/trends",
+    { params: { limit } },
   );
   return data;
 }

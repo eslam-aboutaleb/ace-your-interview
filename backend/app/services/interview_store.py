@@ -438,6 +438,65 @@ class InterviewStore:
             "updated_at": row["updated_at"],
         }
 
+    def get_trends(self, *, user_id: str, limit: int = 50) -> dict[str, Any]:
+        rows = self._conn.execute(
+            """
+            SELECT
+                s.session_id,
+                s.track,
+                s.level,
+                s.interview_type,
+                s.updated_at AS completed_at,
+                r.report_json
+            FROM interview_reports r
+            JOIN interview_sessions s ON s.session_id = r.session_id AND s.user_id = r.user_id
+            WHERE r.user_id = ?
+            ORDER BY s.updated_at DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+
+        points_desc: list[dict[str, Any]] = []
+        for row in rows:
+            report = self._loads_dict(row["report_json"])
+            overall_score = float(report.get("overall_score") or 0.0)
+            rubric_raw = report.get("rubric_averages") if isinstance(report.get("rubric_averages"), dict) else {}
+            rubric_averages = {
+                "technical_accuracy": float(rubric_raw.get("technical_accuracy") or 0.0),
+                "reasoning_depth": float(rubric_raw.get("reasoning_depth") or 0.0),
+                "communication_clarity": float(rubric_raw.get("communication_clarity") or 0.0),
+                "completeness": float(rubric_raw.get("completeness") or 0.0),
+                "confidence_signal": float(rubric_raw.get("confidence_signal") or 0.0),
+                "overall": float(rubric_raw.get("overall") or overall_score),
+            }
+            points_desc.append(
+                {
+                    "session_id": str(row["session_id"]),
+                    "completed_at": str(row["completed_at"]),
+                    "overall_score": round(overall_score, 2),
+                    "rubric_averages": rubric_averages,
+                    "track": str(row["track"]),
+                    "level": str(row["level"]),
+                    "interview_type": str(row["interview_type"]),
+                    "readiness_label": str(report.get("readiness_label") or ""),
+                }
+            )
+
+        points = list(reversed(points_desc))
+        latest_score = float(points[-1]["overall_score"]) if points else 0.0
+        previous_score = float(points[-2]["overall_score"]) if len(points) > 1 else 0.0
+        delta = round(latest_score - previous_score, 2) if len(points) > 1 else 0.0
+        return {
+            "points": points,
+            "summary": {
+                "latest_score": round(latest_score, 2),
+                "previous_score": round(previous_score, 2),
+                "delta": delta,
+                "session_count": len(points),
+            },
+        }
+
     def get_stats(self, *, user_id: str) -> dict[str, Any]:
         total_sessions = int(
             self._conn.execute(
