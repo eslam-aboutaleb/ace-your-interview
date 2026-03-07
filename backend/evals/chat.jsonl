@@ -1,0 +1,1 @@
+{"flow":"chat","retries_used":0,"reply":"Idempotency matters because retries are common in distributed systems. If an operation is idempotent, repeated submissions keep state consistent instead of creating duplicate side effects.\n\nPractical takeaway: use an idempotency key and a deduplication window for mutation endpoints."}

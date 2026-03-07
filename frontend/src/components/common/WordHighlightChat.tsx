@@ -250,6 +250,8 @@ export default function WordHighlightChat({
         requires_programming: requiresProgramming,
         user_message: msg,
         history: newMessages,
+        conversation_id: sessionKey,
+        use_memory: true,
         llm_config: {
           provider: settings.provider,
           model: settings.model,

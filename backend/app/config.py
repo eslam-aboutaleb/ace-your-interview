@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     default_provider: str = "groq"      # Free tier friendly default
     default_model: str = "llama-3.3-70b-versatile"
     default_temperature: float = 0.7
+    llm_task_routing_enabled: bool = False
+    llm_task_route_map_json: str = ""
 
     # Learning/adaptive configuration
     learning_db_path: str = "/tmp/study_hub_learning.db"
@@ -57,6 +59,8 @@ class Settings(BaseSettings):
     mcp_enable_questions: bool = True
     mcp_enable_quiz: bool = True
     mcp_enable_interview: bool = True
+    mcp_agentic_loop_enabled: bool = False
+    mcp_agentic_max_steps: int = 2
 
     # Tavily
     tavily_api_key: str = ""

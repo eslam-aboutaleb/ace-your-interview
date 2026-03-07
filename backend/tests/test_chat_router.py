@@ -1,9 +1,12 @@
 import asyncio
+import os
+import tempfile
 import unittest
 
 from app.routers import chat
 from app.schemas.models import ChatFollowUpRequest
 from app.services.llm_policy import LLMServiceApprovalRequiredError
+from app.services.learning_store import LearningStore
 
 
 class FakeLLM:
@@ -93,6 +96,34 @@ class ChatRouterTests(unittest.TestCase):
                 asyncio.run(chat.chat_follow_up(payload, user={"user": "u1", "provider": "google"}))
         finally:
             chat._llm_client = prev_llm
+
+    def test_follow_up_uses_memory_context_when_available(self):
+        prev_llm = chat._llm_client
+        prev_store = chat._learning_store
+        fake = FakeLLM(success=True)
+        with tempfile.TemporaryDirectory() as td:
+            store = LearningStore(os.path.join(td, "learning.db"))
+            store.upsert_assistant_memory(
+                user_id="u1",
+                conversation_id="conv-xyz",
+                flow="chat",
+                summary={"summary": "Earlier we discussed idempotency key storage tradeoffs."},
+            )
+            chat.init(fake, learning_store=store)
+            try:
+                payload = ChatFollowUpRequest(
+                    word="idempotency",
+                    context_question="What is idempotency?",
+                    context_answer="Idempotency means repeated requests have the same effect.",
+                    user_message="How do I store the key?",
+                    conversation_id="conv-xyz",
+                    history=[],
+                )
+                _ = asyncio.run(chat.chat_follow_up(payload, user={"user": "u1", "provider": "google"}))
+                self.assertIn("Conversation memory", fake.last_prompt)
+            finally:
+                chat._llm_client = prev_llm
+                chat._learning_store = prev_store
 
 
 if __name__ == "__main__":

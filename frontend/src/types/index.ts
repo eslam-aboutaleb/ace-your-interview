@@ -367,6 +367,8 @@ export interface ChatFollowUpRequest {
   requires_programming?: boolean;
   user_message: string;
   history: ChatMessage[];
+  conversation_id?: string;
+  use_memory?: boolean;
   llm_config?: LLMConfig;
 }
 

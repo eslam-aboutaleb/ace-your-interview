@@ -319,6 +319,8 @@ class ChatFollowUpRequest(BaseModel):
     requires_programming: Optional[bool] = None
     user_message: str
     history: list[ChatMessage] = []
+    conversation_id: str = ""
+    use_memory: bool = True
     llm_config: Optional[LLMConfigRequest] = None
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -142,6 +143,71 @@ class MCPGateway:
             return ""
         return "GitHub context:\n" + "\n".join(rows)
 
+    @staticmethod
+    def _query_terms(text: str) -> list[str]:
+        stop = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "this",
+            "that",
+            "what",
+            "when",
+            "where",
+            "which",
+            "into",
+            "about",
+            "your",
+        }
+        out: list[str] = []
+        for token in re.findall(r"[a-z0-9]+", str(text or "").lower()):
+            if len(token) < 4 or token in stop:
+                continue
+            if token not in out:
+                out.append(token)
+            if len(out) >= 8:
+                break
+        return out
+
+    def _rewrite_query_candidates(
+        self,
+        *,
+        query: str,
+        topic_id: str,
+        topic_title: str,
+        max_steps: int,
+    ) -> list[str]:
+        base = " ".join(str(query or "").split())[:300]
+        if not base:
+            return []
+        candidates: list[str] = [base]
+        tokens = self._query_terms(base)
+        topic_tokens = self._query_terms(f"{topic_title} {topic_id}")
+        if tokens:
+            candidates.append(f"{' '.join(tokens[:4])} interview best practices")
+        if topic_tokens:
+            candidates.append(f"{' '.join(topic_tokens[:4])} implementation pitfalls tradeoffs")
+        out: list[str] = []
+        for cand in candidates:
+            normalized = " ".join(cand.split())[:300]
+            if normalized and normalized not in out:
+                out.append(normalized)
+            if len(out) >= max_steps:
+                break
+        return out
+
+    def _context_is_adequate(self, *, query: str, merged: str, step: int, max_steps: int) -> bool:
+        if step >= max_steps:
+            return True
+        if len(merged) >= 1400:
+            return True
+        query_terms = self._query_terms(query)
+        merged_l = merged.lower()
+        overlap = sum(1 for term in query_terms if term in merged_l)
+        return overlap >= 3 and len(merged) >= 600
+
     async def gather_context(
         self,
         *,
@@ -158,21 +224,42 @@ class MCPGateway:
             return ""
 
         parts: list[str] = []
+        max_steps = max(1, int(getattr(self.settings, "mcp_agentic_max_steps", 2)))
+        if not getattr(self.settings, "mcp_agentic_loop_enabled", False):
+            max_steps = 1
+        queries = self._rewrite_query_candidates(
+            query=normalized_query,
+            topic_id=topic_id,
+            topic_title=topic_title,
+            max_steps=max_steps,
+        )
+        if not queries:
+            return ""
         try:
-            tavily_text, first_url = await self._tavily_context(normalized_query)
-            if tavily_text:
-                parts.append(tavily_text)
+            for step, query_variant in enumerate(queries, start=1):
+                tavily_text, first_url = await self._tavily_context(query_variant)
+                if tavily_text:
+                    parts.append(tavily_text)
 
-            firecrawl_text = await self._firecrawl_context(first_url)
-            if firecrawl_text:
-                parts.append(firecrawl_text)
+                firecrawl_text = await self._firecrawl_context(first_url)
+                if firecrawl_text:
+                    parts.append(firecrawl_text)
 
-            github_query = " ".join(
-                token for token in [topic_title, topic_id, normalized_query] if token
-            )[:260]
-            github_text = await self._github_context(github_query)
-            if github_text:
-                parts.append(github_text)
+                github_query = " ".join(
+                    token for token in [topic_title, topic_id, query_variant] if token
+                )[:260]
+                github_text = await self._github_context(github_query)
+                if github_text:
+                    parts.append(github_text)
+
+                merged_preview = "\n\n".join(parts)
+                if self._context_is_adequate(
+                    query=normalized_query,
+                    merged=merged_preview,
+                    step=step,
+                    max_steps=max_steps,
+                ):
+                    break
         except Exception as exc:
             logger.exception("mcp_gather_context_unexpected flow=%s err=%s", flow, exc)
             return ""

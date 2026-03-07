@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -34,6 +35,8 @@ _PROVIDER_PREFIX: dict[str, str] = {
     "github": "github/",       # e.g. "github/gpt-4o-mini"
 }
 
+_TASK_ROUTE_KEYS = {"planner", "retrieval", "eval", "final"}
+
 
 def _resolve_model(provider: str, model: str) -> str:
     """Convert (provider, model) into a LiteLLM-compatible model string."""
@@ -55,6 +58,37 @@ def _resolve_model(provider: str, model: str) -> str:
     return model
 
 
+def _infer_task_from_prompt(prompt: str) -> str:
+    text = str(prompt or "").lower()
+    if "evaluate the candidate answer" in text or '"rubric"' in text:
+        return "eval"
+    if "external context" in text or "web context" in text or "search" in text:
+        return "retrieval"
+    if "plan" in text and "steps" in text:
+        return "planner"
+    return "final"
+
+
+def _load_task_route_map(raw: str) -> dict[str, str]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("Invalid STUDY_LLM_TASK_ROUTE_MAP_JSON, ignoring")
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in parsed.items():
+        task = str(key or "").strip().lower()
+        model = str(value or "").strip()
+        if task in _TASK_ROUTE_KEYS and model:
+            out[task] = model
+    return out
+
+
 class LLMClient:
     """Thin async wrapper around litellm.acompletion."""
 
@@ -66,18 +100,22 @@ class LLMClient:
         prompt: str,
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
+        task: Optional[str] = None,
     ) -> dict:
         """Send a prompt and return a standardised result dict."""
         settings = get_settings()
 
         provider_str = "default"
         model_str = ""
+        model_locked = False
         temperature = settings.default_temperature
         max_tokens = 4096
 
         if llm_config:
             provider_str = llm_config.provider.value
             model_str = llm_config.model or ""
+            if model_str:
+                model_locked = True
             if llm_config.temperature > 0:
                 temperature = llm_config.temperature
             if llm_config.max_tokens > 0:
@@ -116,6 +154,7 @@ class LLMClient:
                     provider_str = assigned_provider
                 if assigned_model:
                     model_str = assigned_model
+                    model_locked = True
                 credential_source = "study_app_backend"
                 if policy_error_code == APPROVAL_REQUIRED_CODE:
                     policy_error_message = APPROVAL_REQUIRED_MESSAGE
@@ -126,6 +165,8 @@ class LLMClient:
                     provider_str = str(prefs.get("provider", "default"))
                 if not model_str:
                     model_str = str(prefs.get("model", ""))
+                    if model_str:
+                        model_locked = True
                 effective_provider = (
                     provider_str if provider_str not in ("default", "") else settings.default_provider
                 )
@@ -145,6 +186,15 @@ class LLMClient:
             # Non-authenticated/background contexts continue using backend settings.
             credential_source = "backend"
 
+        resolved_task = str(task or "").strip().lower() or _infer_task_from_prompt(prompt)
+        if resolved_task not in _TASK_ROUTE_KEYS:
+            resolved_task = "final"
+        if settings.llm_task_routing_enabled and not model_locked:
+            route_map = _load_task_route_map(settings.llm_task_route_map_json)
+            routed_model = route_map.get(resolved_task, "")
+            if routed_model:
+                model_str = routed_model
+
         resolved_model = _resolve_model(provider_str, model_str)
         actual_provider = (
             provider_str if provider_str not in ("default", "") else settings.default_provider
@@ -157,6 +207,7 @@ class LLMClient:
                 "metadata": {
                     "provider": actual_provider,
                     "model": resolved_model,
+                    "task": resolved_task,
                     "credential_source": (
                         "blocked_unapproved" if policy_error_code == APPROVAL_REQUIRED_CODE else credential_source
                     ),
@@ -201,6 +252,7 @@ class LLMClient:
                 "metadata": {
                     "provider": actual_provider,
                     "model": resolved_model,
+                    "task": resolved_task,
                     "credential_source": credential_source,
                 },
                 "error": "",
@@ -213,6 +265,7 @@ class LLMClient:
                 "metadata": {
                     "provider": actual_provider,
                     "model": resolved_model,
+                    "task": resolved_task,
                     "credential_source": credential_source,
                 },
                 "error": str(e),

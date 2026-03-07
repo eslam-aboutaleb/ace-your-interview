@@ -38,6 +38,7 @@ from app.services.llm_policy import (
 )
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
+from app.services.prompt_blocks import optional_context_block, render_contract
 from app.services.topic_catalog import (
     PROBLEM_SOLVING_DEFAULT_LANGUAGE,
     is_problem_solving_topic,
@@ -214,10 +215,10 @@ def _build_prompt(
         )
     elif not requires_programming:
         code_clause = "Avoid code blocks unless code is explicitly required by the question."
-    mcp_block = (
-        f"\n\nExternal context (optional, use only if relevant and factual):\n{mcp_context[:2500]}"
-        if mcp_context
-        else ""
+    mcp_block = optional_context_block(
+        "External context (optional, use only if relevant and factual)",
+        mcp_context,
+        2500,
     )
 
     role_clause = (
@@ -226,17 +227,16 @@ def _build_prompt(
         else "You are an expert technical interviewer and educator."
     )
     problem_scope_rules = (
-        """
-- Questions must be true problem-solving prompts (algorithmic/coding style), not generic theory prompts.
-- Answers should explain:
-  - problem understanding and constraints,
-  - solution strategy and why it works,
-  - complexity analysis and tradeoffs.
-- Code is optional; if included, keep it practical and commented.
-"""
+        [
+            "Questions must be true problem-solving prompts (algorithmic/coding style), not generic theory prompts.",
+            "Answers should explain problem understanding and constraints.",
+            "Answers should explain solution strategy and why it works.",
+            "Answers should explain complexity analysis and tradeoffs.",
+            "Code is optional; if included, keep it practical and commented.",
+        ]
         if problem_solving_mode
-        else "- Questions must cover conceptual + practical angles."
-    ).strip()
+        else ["Questions must cover conceptual + practical angles."]
+    )
     uniqueness_block = ""
     if existing_seed:
         existing_blob = "\n".join([f"- {q}" for q in existing_seed[:60]])
@@ -244,6 +244,45 @@ def _build_prompt(
             "\nAlready generated questions for this checkpoint. Do NOT repeat or rephrase these:\n"
             f"{existing_blob}\n"
         )
+    prompt_contract = render_contract(
+        schema_label="Return ONLY valid JSON in this shape",
+        schema_block=f"""[
+  {{
+    "question": "Question text",
+    "answer": "3-8 sentence educational answer",
+    "difficulty": "easy|medium|hard"
+  }}
+]""",
+        rules=[
+            f"Return exactly {count} items; never return fewer.",
+            "Questions must be standalone and non-duplicative.",
+            "Questions must be NEW relative to already generated checkpoint questions listed above.",
+            *problem_scope_rules,
+            "Answers must be grounded in the provided documentation.",
+            detail_clause,
+            "Format answers as markdown, but keep structure adaptive.",
+            "long answers must be split into short readable paragraphs with blank lines.",
+            "use bullets only when listing steps/checklists/categories.",
+            "use headings only when the answer naturally has sections.",
+            "use tables only for direct comparisons/category matrices.",
+            "If you use a table, output valid GFM table syntax.",
+            "one row per line.",
+            "include a separator row (e.g. `| --- | --- |`).",
+            "You may include fenced code blocks when code clarifies an implementation detail.",
+            code_clause if code_clause else "Use code examples only when they materially improve clarity.",
+            "You may include fenced Mermaid diagrams when architecture or flows are better shown visually.",
+            "If you include fences, always use explicit language tags (for example: ```python, ```mermaid).",
+            "Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.",
+            "source_quote must be factual text from provided docs.",
+            f'target_level must match "{target_level}" exactly.',
+            "Do not wrap JSON with prose; return raw JSON only.",
+            "Complexity must match target_level.",
+            "junior: fundamentals, definitions, and straightforward tradeoffs.",
+            "mid: implementation details, constraints, and moderate tradeoffs.",
+            "senior: architecture, scaling, risk, and deep tradeoff decisions.",
+            "Keep markdown compact and practical.",
+        ],
+    )
     return f"""{role_clause}
 
 Given documentation about {scope}, generate exactly {count} interview-style questions with detailed educational answers.{diff_clause}
@@ -252,46 +291,10 @@ User requested total questions for this checkpoint: {requested_total}.
 This call is generating {count} new questions to fill remaining slots.
 {uniqueness_block}
 
-Return ONLY valid JSON in this shape:
-[
-  {{
-    "question": "Question text",
-    "answer": "3-8 sentence educational answer",
-    "difficulty": "easy|medium|hard"
-  }}
-]
+{prompt_contract}
 
 Optional fields (recommended when available): learning_objective, source_section, source_quote,
 misconception_trap, reasoning_summary, target_level.
-
-Rules:
-- Return exactly {count} items; never return fewer.
-- Questions must be standalone and non-duplicative.
-- Questions must be NEW relative to already generated checkpoint questions listed above.
-{problem_scope_rules}
-- Answers must be grounded in the provided documentation.
-- {detail_clause}
-- Format answers as markdown, but keep structure adaptive:
-  - long answers must be split into short readable paragraphs with blank lines,
-  - use bullets only when listing steps/checklists/categories,
-  - use headings only when the answer naturally has sections,
-  - use tables only for direct comparisons/category matrices.
-- If you use a table, output valid GFM table syntax:
-  - one row per line,
-  - include a separator row (e.g. `| --- | --- |`).
-- You may include fenced code blocks when code clarifies an implementation detail.
-- {code_clause if code_clause else "Use code examples only when they materially improve clarity."}
-- You may include fenced Mermaid diagrams when architecture or flows are better shown visually.
-- If you include fences, always use explicit language tags (for example: ```python, ```mermaid).
-- Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.
-- source_quote must be factual text from provided docs.
-- target_level must match "{target_level}" exactly.
-- Do not wrap JSON with prose; return raw JSON only.
-- Complexity must match target_level:
-  - junior: fundamentals, definitions, and straightforward tradeoffs.
-  - mid: implementation details, constraints, and moderate tradeoffs.
-  - senior: architecture, scaling, risk, and deep tradeoff decisions.
-- Keep markdown compact and practical.
 
 Documentation:
 {content}{mcp_block}"""
@@ -337,29 +340,17 @@ def _build_quiz_prompt(
             f"\n\n--- Topic: {tc['title']} (id: {tc['id']}) [{', '.join(topic_notes)}] ---\n"
             f"{tc['content'][:_MAX_TOPIC_CONTEXT]}"
         )
-    mcp_block = (
-        f"\n\nExternal context (optional, use only if relevant and factual):\n{mcp_context[:2500]}"
-        if mcp_context
-        else ""
+    mcp_block = optional_context_block(
+        "External context (optional, use only if relevant and factual)",
+        mcp_context,
+        2500,
     )
-    code_clause = ""
-    if preferred_language:
-        code_clause = (
-            f'\n- If code materially clarifies an explanation, prefer fenced "{preferred_language}" snippets.'
-        )
-
-    return f"""You are an expert technical quiz creator.
-
-Create exactly {count} quiz questions from the documentation below.{diff_clause}
-Target candidate level: "{target_level}".
-{type_instructions}
-
-Return ONLY valid JSON:
-[
-  {{
+    prompt_contract = render_contract(
+        schema_block="""[
+  {
     "question": "Question text",
     "type": "mcq|true_false",
-    "choices": [{{"label":"A","text":"..."}}, {{"label":"B","text":"..."}}, ...],
+    "choices": [{"label":"A","text":"..."}, {"label":"B","text":"..."}, ...],
     "correct_answer": "A|B|C|D",
     "explanation": "2-4 sentence explanation",
     "difficulty": "easy|medium|hard",
@@ -367,35 +358,48 @@ Return ONLY valid JSON:
     "source_quote": "short direct quote from docs",
     "reasoning_summary": "1-2 sentence why answer is correct",
     "target_level": "junior|mid|senior"
-  }}
-]
+  }
+]""",
+        rules=[
+            f"Return exactly {count} items; never return fewer.",
+            "topic_id must be one of the provided ids.",
+            "correct_answer must match one choice label.",
+            "Avoid trick ambiguity; one clearly correct answer.",
+            "Distribute questions across topics as evenly as possible.",
+            detail_clause,
+            "Format explanations as markdown, but keep structure adaptive.",
+            "long explanations must be split into short readable paragraphs with blank lines.",
+            "use bullets only when listing steps/checklists/categories.",
+            "use headings only when the explanation naturally has sections.",
+            "use tables only for direct comparisons/category matrices.",
+            "If you use a table, output valid GFM table syntax.",
+            "one row per line.",
+            "include a separator row (e.g. `| --- | --- |`).",
+            "You may include fenced code blocks when code clarifies an implementation detail.",
+            "Avoid unnecessary code blocks for non-programming topics.",
+            (
+                f'If code materially clarifies an explanation, prefer fenced "{preferred_language}" snippets.'
+                if preferred_language
+                else ""
+            ),
+            "You may include fenced Mermaid diagrams when architecture or flows are better shown visually.",
+            "If you include fences, always use explicit language tags (for example: ```yaml, ```mermaid).",
+            "Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.",
+            f'target_level must match "{target_level}" exactly.',
+            "Complexity must match target_level.",
+            "junior: direct recall and simple application.",
+            "mid: applied reasoning with concrete constraints.",
+            "senior: architecture-level reasoning and tradeoff depth.",
+            "Keep markdown compact and practical.",
+        ],
+    )
+    return f"""You are an expert technical quiz creator.
 
-Rules:
-- Return exactly {count} items; never return fewer.
-- topic_id must be one of the provided ids.
-- correct_answer must match one choice label.
-- Avoid trick ambiguity; one clearly correct answer.
-- Distribute questions across topics as evenly as possible.
-- {detail_clause}
-- Format explanations as markdown, but keep structure adaptive:
-  - long explanations must be split into short readable paragraphs with blank lines,
-  - use bullets only when listing steps/checklists/categories,
-  - use headings only when the explanation naturally has sections,
-  - use tables only for direct comparisons/category matrices.
-- If you use a table, output valid GFM table syntax:
-  - one row per line,
-  - include a separator row (e.g. `| --- | --- |`).
-- You may include fenced code blocks when code clarifies an implementation detail.
-- Avoid unnecessary code blocks for non-programming topics.{code_clause}
-- You may include fenced Mermaid diagrams when architecture or flows are better shown visually.
-- If you include fences, always use explicit language tags (for example: ```yaml, ```mermaid).
-- Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.
-- target_level must match "{target_level}" exactly.
-- Complexity must match target_level:
-  - junior: direct recall and simple application.
-  - mid: applied reasoning with concrete constraints.
-  - senior: architecture-level reasoning and tradeoff depth.
-- Keep markdown compact and practical.
+Create exactly {count} quiz questions from the documentation below.{diff_clause}
+Target candidate level: "{target_level}".
+{type_instructions}
+
+{prompt_contract}
 
 Documentation:
 {docs_text[:_MAX_DOC_CONTEXT]}{mcp_block}"""
