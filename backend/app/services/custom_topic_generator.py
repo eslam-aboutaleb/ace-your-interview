@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 _VALID_TRACKS = {"backend", "frontend", "system_design", "ai_stack"}
 _VALID_LEVELS = {"junior", "mid", "senior"}
 _DEFAULT_LEVELS = ["junior", "mid", "senior"]
-_MIN_SECTIONS = 100
-_MAX_SECTIONS = 150
+_MIN_SECTIONS = 50
+_MAX_SECTIONS = 300
 _DEFAULT_SECTIONS = 120
 _MAX_ATTEMPTS = 4
 _GENERIC_HEADING_PATTERNS = [
@@ -62,6 +62,68 @@ _DIMENSION_LABELS = {
     "architecture": "Architecture Tradeoffs and System Design",
     "operations": "Operations, Observability, and Runbooks",
 }
+
+
+# Keyword sets used by the topic-complexity estimator to gauge breadth.
+_BROAD_QUALIFIERS = {
+    "roadmap", "full stack", "fullstack", "full-stack", "interview",
+    "system design", "distributed", "comprehensive", "complete",
+    "mastery", "deep dive", "advanced", "end to end", "end-to-end",
+    "platform", "ecosystem", "architecture", "infrastructure",
+}
+_NARROW_QUALIFIERS = {
+    "basics", "intro", "introduction", "fundamentals", "beginner",
+    "primer", "getting started", "101", "overview", "quick start",
+    "cheat sheet", "cheatsheet", "summary", "refresher",
+}
+
+
+def _estimate_target_sections(topic: str) -> int:
+    """Estimate a sensible section count based on topic breadth.
+
+    Uses keyword analysis against coverage dimensions, broad/narrow
+    qualifiers, and word count to produce a value in [_MIN_SECTIONS, _MAX_SECTIONS].
+    """
+    text = topic.lower()
+    words = text.split()
+    word_count = len(words)
+
+    # Count how many coverage dimensions the topic touches.
+    dimension_hits = 0
+    for _dim, keywords in _REQUIRED_COVERAGE_DIMENSIONS.items():
+        if any(kw in text for kw in keywords):
+            dimension_hits += 1
+
+    # Score: start at a base, add for breadth signals, subtract for narrow signals.
+    score = 120  # baseline
+
+    # Broad qualifier bonus
+    broad_hits = sum(1 for q in _BROAD_QUALIFIERS if q in text)
+    score += broad_hits * 20
+
+    # Narrow qualifier penalty
+    narrow_hits = sum(1 for q in _NARROW_QUALIFIERS if q in text)
+    score -= narrow_hits * 25
+
+    # Dimension coverage bonus: more dimensions touched → broader topic
+    score += dimension_hits * 10
+
+    # Word count heuristic: longer topic descriptions tend to be broader
+    if word_count >= 6:
+        score += 30
+    elif word_count >= 4:
+        score += 15
+    elif word_count <= 2:
+        score -= 15
+
+    # Track-based adjustment: system_design topics tend to be broader
+    track = _infer_track(topic)
+    if track == "system_design":
+        score += 20
+    elif track == "ai_stack":
+        score += 10
+
+    return max(_MIN_SECTIONS, min(_MAX_SECTIONS, score))
 
 
 def _slugify_topic(topic: str) -> str:
@@ -338,9 +400,22 @@ def _autofill_section(topic: str, index: int, total: int) -> dict[str, str]:
     cycle = level_offset // len(templates)
     lens = depth_lenses[cycle % len(depth_lenses)]
     heading = _format_heading(level, f"{topic}: {template} ({lens})")
+
+    # Produce genuine educational stub content rather than LLM-instruction text.
+    level_context = {
+        "junior": "At a foundational level",
+        "mid": "At an intermediate level",
+        "senior": "At an advanced level",
+    }
+    level_intro = level_context.get(level, "At a practical level")
+
     content = (
-        f"Teach {template.lower()} in the context of {topic}, including hands-on implementation details, "
-        "typical mistakes, and interview-ready tradeoff reasoning for this level."
+        f"{level_intro}, {template.lower()} in {topic} covers the core principles, "
+        f"key terminology, and practical patterns you need to understand. "
+        f"Focus area: {lens.lower()}. "
+        f"Key concepts include how {template.lower()} integrates with the broader {topic} ecosystem, "
+        f"what common mistakes practitioners make at this stage, and which tradeoffs matter most "
+        f"when applying {template.lower()} in production systems."
     )
     return {"heading": heading, "content": content[:1800]}
 
@@ -368,10 +443,64 @@ def _covered_dimensions(sections: list[dict[str, str]]) -> set[str]:
 def _build_dimension_section(topic: str, *, level: str, dimension: str) -> dict[str, str]:
     label = _DIMENSION_LABELS.get(dimension, dimension.replace("_", " ").title())
     heading = _format_heading(level, f"{topic}: {label}")
-    content = (
-        f"Cover {label.lower()} for {topic} with practical implementation details, "
-        "common failure patterns, and interview-ready tradeoff reasoning. Include how priorities "
-        "change across project scale, production constraints, and team ownership boundaries."
+
+    dimension_guidance = {
+        "fundamentals": (
+            f"{label} for {topic} establishes the foundational vocabulary, mental models, "
+            f"and core abstractions that every practitioner must internalise. This includes "
+            f"understanding the 'why' behind {topic}, its primary use cases, and how its "
+            f"building blocks relate to one another."
+        ),
+        "workflow": (
+            f"{label} for {topic} covers the day-to-day development cycle: environment setup, "
+            f"tooling choices, build pipelines, and delivery practices. Understanding these "
+            f"workflows helps you move from theory to productive, repeatable work."
+        ),
+        "implementation": (
+            f"{label} for {topic} dives into real-world coding and integration patterns. "
+            f"You will learn how data flows through the system, how APIs are structured, "
+            f"and which design patterns are most effective for common scenarios."
+        ),
+        "debugging": (
+            f"{label} for {topic} teaches systematic approaches to finding and fixing issues. "
+            f"This includes diagnostic techniques, common root causes, and how to build "
+            f"mental models that speed up troubleshooting."
+        ),
+        "testing": (
+            f"{label} for {topic} covers strategies for verifying correctness at every level: "
+            f"unit tests, integration tests, and end-to-end validation. You will learn what "
+            f"to test, how to structure test suites, and how to catch regressions early."
+        ),
+        "performance": (
+            f"{label} for {topic} examines how to measure, profile, and optimise key metrics "
+            f"like latency, throughput, and resource utilisation. Understanding bottlenecks "
+            f"and knowing when optimisation is worthwhile is critical."
+        ),
+        "security": (
+            f"{label} for {topic} addresses authentication, authorisation, data protection, "
+            f"and common vulnerability patterns. You will learn how to apply defence-in-depth "
+            f"principles appropriate to the technology."
+        ),
+        "reliability": (
+            f"{label} for {topic} focuses on building systems that tolerate faults gracefully. "
+            f"This includes redundancy strategies, graceful degradation, circuit breakers, "
+            f"and recovery planning."
+        ),
+        "architecture": (
+            f"{label} for {topic} explores high-level design decisions, scalability patterns, "
+            f"and the tradeoffs between different architectural approaches. You will learn "
+            f"how to evaluate designs and communicate decisions effectively."
+        ),
+        "operations": (
+            f"{label} for {topic} covers observability, monitoring, alerting, incident response, "
+            f"and operational runbooks. These skills ensure that systems remain healthy in "
+            f"production and issues are resolved quickly."
+        ),
+    }
+    content = dimension_guidance.get(
+        dimension,
+        f"{label} for {topic} is a critical area of study. It covers the practical techniques, "
+        f"common challenges, and best practices that professionals need to master at this level.",
     )
     return {"heading": heading, "content": content[:1800]}
 
@@ -576,8 +705,10 @@ Create a deep learning roadmap for the custom topic: "{topic}".
 def _fallback_topic_detail(topic: str, topic_id: str, target_sections: int) -> TopicDetail:
     title = f"{topic.strip().title()} Interview Roadmap"
     description = (
-        f"Comprehensive custom roadmap for {topic} covering fundamentals, implementation, "
-        "architecture, performance, and interview-oriented tradeoffs."
+        f"A structured learning path for {topic} that progresses from foundational concepts "
+        f"through intermediate implementation patterns to advanced architecture and system "
+        f"design considerations. Each section builds on the previous one, preparing you for "
+        f"both practical work and technical interviews."
     )
     track = _infer_track(topic)
     levels = list(_DEFAULT_LEVELS)
@@ -604,14 +735,18 @@ class CustomTopicGenerator:
         self,
         *,
         topic: str,
-        target_sections: int = _DEFAULT_SECTIONS,
+        target_sections: Optional[int] = None,
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
     ) -> TopicDetail:
         source_topic = (topic or "").strip()
         if not source_topic:
             source_topic = "Custom Topic"
-        target = _clamp_target_sections(target_sections)
+        # Use the complexity estimator when the caller does not specify a value.
+        if target_sections is None:
+            target = _estimate_target_sections(source_topic)
+        else:
+            target = _clamp_target_sections(target_sections)
         topic_id = f"custom-{_slugify_topic(source_topic)}"
         mcp_context = ""
         if self.mcp:

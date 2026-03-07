@@ -24,13 +24,13 @@ class ModelContractTests(unittest.TestCase):
         req = GenerateQuizRequest(topic_ids=["backend-core"])
         self.assertEqual(req.level, "mid")
 
-    def test_custom_topic_target_sections_defaults_to_120(self):
+    def test_custom_topic_target_sections_defaults_to_none(self):
         req = CreateCustomTopicRequest(topic="Java")
-        self.assertEqual(req.target_sections, 120)
+        self.assertIsNone(req.target_sections)
 
-    def test_dynamic_topic_content_target_sections_defaults_to_120(self):
+    def test_dynamic_topic_content_target_sections_defaults_to_none(self):
         req = GenerateTopicContentRequest(preferred_language="python")
-        self.assertEqual(req.target_sections, 120)
+        self.assertIsNone(req.target_sections)
 
     def test_interview_type_supports_coding(self):
         self.assertEqual(InterviewTypeEnum.CODING.value, "coding")

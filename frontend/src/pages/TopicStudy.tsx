@@ -82,15 +82,19 @@ export default function TopicStudy() {
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [revealedAnswers, setRevealedAnswers] = useState<Set<number>>(new Set());
+  const [revealedAnswers, setRevealedAnswers] = useState<Set<number>>(
+    new Set(),
+  );
   const [submittedAttempts, setSubmittedAttempts] = useState<Set<number>>(
     new Set(),
   );
   const [answerDrafts, setAnswerDrafts] = useState<Record<number, string>>({});
-  const [confidenceByIdx, setConfidenceByIdx] = useState<Record<number, number>>({});
-  const [questionStartMs, setQuestionStartMs] = useState<Record<number, number>>(
-    {},
-  );
+  const [confidenceByIdx, setConfidenceByIdx] = useState<
+    Record<number, number>
+  >({});
+  const [questionStartMs, setQuestionStartMs] = useState<
+    Record<number, number>
+  >({});
   const [submittingIdx, setSubmittingIdx] = useState<number | null>(null);
   const [activeSection, setActiveSection] = useState(0);
   const [courseSearchInput, setCourseSearchInput] = useState("");
@@ -107,7 +111,8 @@ export default function TopicStudy() {
     malformed: 0,
   });
   const [errorMsg, setErrorMsg] = useState("");
-  const [responseDetail, setResponseDetail] = useState<ResponseDetail>("concise");
+  const [responseDetail, setResponseDetail] =
+    useState<ResponseDetail>("concise");
   const [requiresProgramming, setRequiresProgramming] = useState(false);
   const [languageOptions, setLanguageOptions] = useState<string[]>([]);
   const [preferredLanguage, setPreferredLanguage] = useState("");
@@ -252,7 +257,10 @@ export default function TopicStudy() {
   ]);
 
   const saveTopicPreferences = useCallback(
-    async (next: { response_detail?: ResponseDetail; preferred_language?: string }) => {
+    async (next: {
+      response_detail?: ResponseDetail;
+      preferred_language?: string;
+    }) => {
       if (!topicId) return;
       setSavingTopicPrefs(true);
       try {
@@ -295,9 +303,9 @@ export default function TopicStudy() {
       setErrorMsg("");
 
       const selected =
-        (preferredLanguage || "").trim().toLowerCase()
-        || languageOptions[0]
-        || "python";
+        (preferredLanguage || "").trim().toLowerCase() ||
+        languageOptions[0] ||
+        "python";
 
       try {
         await saveTopicPreferences({ preferred_language: selected });
@@ -305,7 +313,7 @@ export default function TopicStudy() {
           topicId,
           {
             preferred_language: selected,
-            target_sections: 120,
+            ...(topic?.sections?.length ? { target_sections: topic.sections.length } : {}),
             force_regenerate: forceRegenerate,
             llm_config: {
               provider: settings.provider,
@@ -316,7 +324,9 @@ export default function TopicStudy() {
           },
           {
             onStart: () => {
-              setCurriculumProgress("Starting language-specific roadmap generation...");
+              setCurriculumProgress(
+                "Starting language-specific roadmap generation...",
+              );
             },
             onProgress: (event) => {
               setCurriculumProgress(event.message || "Generating roadmap...");
@@ -450,10 +460,14 @@ export default function TopicStudy() {
           difficulty: q.difficulty,
           learning_objective: "Understand the concept and apply it in context.",
           source_section:
-            activeS?.heading || topic.sections[activeSection]?.heading || "Topic",
+            activeS?.heading ||
+            topic.sections[activeSection]?.heading ||
+            "Topic",
           source_quote: "Legacy mode response did not include source quote.",
-          misconception_trap: "Confusing terms without checking documentation context.",
-          reasoning_summary: "Review the answer and compare with your own reasoning.",
+          misconception_trap:
+            "Confusing terms without checking documentation context.",
+          reasoning_summary:
+            "Review the answer and compare with your own reasoning.",
         }));
 
       const topUpMissingQuestions = async (
@@ -465,19 +479,27 @@ export default function TopicStudy() {
           : ["topic"];
 
         for (const mode of retryModes) {
-          if (controller.signal.aborted || merged.length >= questionCount) break;
+          if (controller.signal.aborted || merged.length >= questionCount)
+            break;
           const includeSection = mode === "section";
 
           for (let attempt = 0; attempt < 4; attempt += 1) {
-            if (controller.signal.aborted || merged.length >= questionCount) break;
+            if (controller.signal.aborted || merged.length >= questionCount)
+              break;
             const remaining = questionCount - merged.length;
             const existingQuestions = merged.map((q) => q.question);
 
             try {
               const res = await generateQuestionsV2(
-                payloadWithCount(remaining, { includeSection, existingQuestions }),
+                payloadWithCount(remaining, {
+                  includeSection,
+                  existingQuestions,
+                }),
               );
-              merged = mergeUniqueQuestions(merged, res.questions).slice(0, questionCount);
+              merged = mergeUniqueQuestions(merged, res.questions).slice(
+                0,
+                questionCount,
+              );
               setProviderInfo({
                 provider: res.provider_used,
                 model: res.model_used,
@@ -488,7 +510,8 @@ export default function TopicStudy() {
               // Best-effort v2 top-up. Legacy fallback below.
             }
 
-            if (controller.signal.aborted || merged.length >= questionCount) break;
+            if (controller.signal.aborted || merged.length >= questionCount)
+              break;
 
             try {
               const legacy = await generateQuestions(
@@ -498,7 +521,10 @@ export default function TopicStudy() {
                 }),
               );
               const upgraded = mapLegacyQuestions(legacy, merged.length);
-              merged = mergeUniqueQuestions(merged, upgraded).slice(0, questionCount);
+              merged = mergeUniqueQuestions(merged, upgraded).slice(
+                0,
+                questionCount,
+              );
               setProviderInfo({
                 provider: legacy.provider_used,
                 model: legacy.model_used,
@@ -520,7 +546,9 @@ export default function TopicStudy() {
           payloadWithCount(questionCount, { existingQuestions: [] }),
           {
             onQuestion: (event) => {
-              const merged = mergeUniqueQuestions(streamedQuestions, [event.question]);
+              const merged = mergeUniqueQuestions(streamedQuestions, [
+                event.question,
+              ]);
               streamedQuestions.splice(0, streamedQuestions.length, ...merged);
               setQuestions([...streamedQuestions]);
             },
@@ -620,7 +648,10 @@ export default function TopicStudy() {
     setErrorMsg("");
 
     const confidence = confidenceByIdx[idx] || 3;
-    const responseTime = Math.max(0, Date.now() - (questionStartMs[idx] || Date.now()));
+    const responseTime = Math.max(
+      0,
+      Date.now() - (questionStartMs[idx] || Date.now()),
+    );
     const learnerAnswer = answerDrafts[idx] || "";
 
     try {
@@ -655,8 +686,12 @@ export default function TopicStudy() {
   }, [allSubmitted, topicId, markTopicComplete]);
 
   const progress = topicId ? getTopicProgress(topicId) : 0;
-  const normalizedTopicTitle = normalizeEscapedSingleLineText(topic?.title || "");
-  const normalizedTopicDescription = normalizeEscapedMultilineText(topic?.description || "");
+  const normalizedTopicTitle = normalizeEscapedSingleLineText(
+    topic?.title || "",
+  );
+  const normalizedTopicDescription = normalizeEscapedMultilineText(
+    topic?.description || "",
+  );
   const formatVideoDuration = (seconds: number): string => {
     const safe = Math.max(0, Number(seconds || 0));
     const mins = Math.floor(safe / 60);
@@ -690,7 +725,8 @@ export default function TopicStudy() {
         index,
         heading: normalizeEscapedSingleLineText(sec.heading),
         content: normalizeEscapedMultilineText(sec.content),
-        searchable: `${normalizeEscapedSingleLineText(sec.heading)} ${normalizeEscapedMultilineText(sec.content)}`.toLowerCase(),
+        searchable:
+          `${normalizeEscapedSingleLineText(sec.heading)} ${normalizeEscapedMultilineText(sec.content)}`.toLowerCase(),
       })),
     [topic],
   );
@@ -699,7 +735,9 @@ export default function TopicStudy() {
     () =>
       !courseSearchQuery
         ? indexedSections
-        : indexedSections.filter((sec) => sec.searchable.includes(courseSearchQuery)),
+        : indexedSections.filter((sec) =>
+            sec.searchable.includes(courseSearchQuery),
+          ),
     [indexedSections, courseSearchQuery],
   );
 
@@ -734,14 +772,18 @@ export default function TopicStudy() {
     ? Math.max(0, Math.floor(navScrollTop / sectionRowHeight) - sectionOverscan)
     : 0;
   const virtualVisibleCount = useVirtualizedSections
-    ? Math.ceil(Math.max(navViewportHeight, sectionRowHeight) / sectionRowHeight) +
+    ? Math.ceil(
+        Math.max(navViewportHeight, sectionRowHeight) / sectionRowHeight,
+      ) +
       sectionOverscan * 2
     : matchedSections;
   const virtualEnd = useVirtualizedSections
     ? Math.min(matchedSections, virtualStart + virtualVisibleCount)
     : matchedSections;
   const renderedSections = filteredSections.slice(virtualStart, virtualEnd);
-  const topSpacerHeight = useVirtualizedSections ? virtualStart * sectionRowHeight : 0;
+  const topSpacerHeight = useVirtualizedSections
+    ? virtualStart * sectionRowHeight
+    : 0;
   const bottomSpacerHeight = useVirtualizedSections
     ? Math.max(0, (matchedSections - virtualEnd) * sectionRowHeight)
     : 0;
@@ -782,7 +824,9 @@ export default function TopicStudy() {
             <ChevronLeft className="w-4 h-4" />
             Back to all topics
           </Link>
-          <h1 className="text-2xl md:text-3xl font-bold mb-2">{normalizedTopicTitle}</h1>
+          <h1 className="text-2xl md:text-3xl font-bold mb-2">
+            {normalizedTopicTitle}
+          </h1>
           <div className="mb-2">
             <span className="inline-flex items-center rounded-full bg-udemy-purple/20 px-2.5 py-1 text-xs font-semibold text-udemy-purple-light">
               {TRACK_LABELS[topic.track] || topic.track || "Topic"}
@@ -837,7 +881,9 @@ export default function TopicStudy() {
                       : "No matching sections."}
                   </div>
                 )}
-                {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} aria-hidden />}
+                {topSpacerHeight > 0 && (
+                  <div style={{ height: topSpacerHeight }} aria-hidden />
+                )}
                 {renderedSections.map((sec) => (
                   <button
                     key={sec.index}
@@ -874,10 +920,12 @@ export default function TopicStudy() {
           <div className="flex-1 min-w-0">
             {topic.is_dynamic_topic && (
               <div className="udemy-card p-4 sm:p-6 mb-6">
-                <h2 className="text-lg font-bold mb-2">Problem Solving Roadmap</h2>
+                <h2 className="text-lg font-bold mb-2">
+                  Problem Solving Roadmap
+                </h2>
                 <p className="text-sm text-udemy-text-muted mb-4">
-                  Generate a language-specific curriculum with 120 sections from beginner to
-                  senior.
+                  Generate a language-specific curriculum with 120 sections from
+                  beginner to senior.
                 </p>
                 <div className="flex flex-wrap items-end gap-3">
                   <div>
@@ -906,7 +954,9 @@ export default function TopicStudy() {
                     disabled={generatingCurriculum}
                     className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {topic.content_ready ? "Load or Regenerate" : "Generate Problem Solving Roadmap"}
+                    {topic.content_ready
+                      ? "Load or Regenerate"
+                      : "Generate Problem Solving Roadmap"}
                   </button>
                   {topic.content_ready && (
                     <button
@@ -937,7 +987,8 @@ export default function TopicStudy() {
                         key={`${sec.index}-${sec.heading}`}
                         className="text-xs border border-udemy-border rounded px-2 py-1"
                       >
-                        {sec.index}. {normalizeEscapedSingleLineText(sec.heading)}
+                        {sec.index}.{" "}
+                        {normalizeEscapedSingleLineText(sec.heading)}
                       </div>
                     ))}
                   </div>
@@ -959,7 +1010,9 @@ export default function TopicStudy() {
               >
                 <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-udemy-purple" />
-                  {normalizeEscapedSingleLineText(topic.sections[activeSection].heading)}
+                  {normalizeEscapedSingleLineText(
+                    topic.sections[activeSection].heading,
+                  )}
                 </h2>
                 <MarkdownRenderer
                   content={topic.sections[activeSection].content}
@@ -968,53 +1021,61 @@ export default function TopicStudy() {
               </motion.div>
             )}
 
-            {topicVideosStatusLoaded && topicVideosEnabled && topic.sections[activeSection] && (
-              <div className="udemy-card p-4 sm:p-6 mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-bold text-udemy-text-muted uppercase tracking-wide">
-                    Recommended Videos
-                  </h3>
-                  {videosLoading && <Loader2 className="w-4 h-4 animate-spin text-udemy-text-muted" />}
-                </div>
-
-                {videosError && (
-                  <div className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    {videosError}
+            {topicVideosStatusLoaded &&
+              topicVideosEnabled &&
+              topic.sections[activeSection] && (
+                <div className="udemy-card p-4 sm:p-6 mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold text-udemy-text-muted uppercase tracking-wide">
+                      Recommended Videos
+                    </h3>
+                    {videosLoading && (
+                      <Loader2 className="w-4 h-4 animate-spin text-udemy-text-muted" />
+                    )}
                   </div>
-                )}
 
-                {!videosLoading && sectionVideos.length === 0 && !videosError && (
-                  <p className="text-sm text-udemy-text-muted">
-                    No video recommendations were found for this section yet.
-                  </p>
-                )}
+                  {videosError && (
+                    <div className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      {videosError}
+                    </div>
+                  )}
 
-                <div className="space-y-2">
-                  {sectionVideos.map((video) => (
-                    <a
-                      key={video.video_id}
-                      href={video.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() => handleVideoClick(video)}
-                      className="block rounded-lg border border-udemy-border p-3 hover:bg-gray-50 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold line-clamp-2">
-                            {normalizeEscapedSingleLineText(video.title)}
-                          </p>
-                          <p className="text-xs text-udemy-text-muted mt-1">
-                            {normalizeEscapedSingleLineText(video.channel)} · {formatVideoDuration(video.duration_seconds)}
-                          </p>
+                  {!videosLoading &&
+                    sectionVideos.length === 0 &&
+                    !videosError && (
+                      <p className="text-sm text-udemy-text-muted">
+                        No video recommendations were found for this section
+                        yet.
+                      </p>
+                    )}
+
+                  <div className="space-y-2">
+                    {sectionVideos.map((video) => (
+                      <a
+                        key={video.video_id}
+                        href={video.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => handleVideoClick(video)}
+                        className="block rounded-lg border border-udemy-border p-3 hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold line-clamp-2">
+                              {normalizeEscapedSingleLineText(video.title)}
+                            </p>
+                            <p className="text-xs text-udemy-text-muted mt-1">
+                              {normalizeEscapedSingleLineText(video.channel)} ·{" "}
+                              {formatVideoDuration(video.duration_seconds)}
+                            </p>
+                          </div>
+                          <ExternalLink className="w-4 h-4 text-udemy-text-muted flex-shrink-0 mt-0.5" />
                         </div>
-                        <ExternalLink className="w-4 h-4 text-udemy-text-muted flex-shrink-0 mt-0.5" />
-                      </div>
-                    </a>
-                  ))}
+                      </a>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             <div className="udemy-card p-4 sm:p-6 mb-6">
               <div className="flex flex-wrap items-end gap-4 mb-4">
@@ -1112,7 +1173,10 @@ export default function TopicStudy() {
 
                 <button
                   onClick={handleGenerate}
-                  disabled={generating || (topic.is_dynamic_topic && !topic.content_ready)}
+                  disabled={
+                    generating ||
+                    (topic.is_dynamic_topic && !topic.content_ready)
+                  }
                   className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {generating ? (
@@ -1126,7 +1190,8 @@ export default function TopicStudy() {
 
               {providerInfo.provider && (
                 <p className="text-xs text-udemy-text-muted">
-                  Powered by <span className="font-medium">{providerInfo.provider}</span>
+                  Powered by{" "}
+                  <span className="font-medium">{providerInfo.provider}</span>
                   {providerInfo.model && ` / ${providerInfo.model}`}
                   {` · retries: ${providerInfo.retries} · dropped malformed: ${providerInfo.malformed}`}
                 </p>
@@ -1150,22 +1215,25 @@ export default function TopicStudy() {
               </div>
             )}
 
-            {generating && Math.max(0, questionCount - questions.length) > 0 && (
-              <div className="space-y-3">
-                {Array.from({ length: Math.max(0, questionCount - questions.length) }).map((_, i) => (
-                  <motion.div
-                    key={`skeleton-${i}`}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    className="udemy-card p-5"
-                  >
-                    <div className="skeleton h-4 w-3/4 mb-2" />
-                    <div className="skeleton h-3 w-1/4" />
-                  </motion.div>
-                ))}
-              </div>
-            )}
+            {generating &&
+              Math.max(0, questionCount - questions.length) > 0 && (
+                <div className="space-y-3">
+                  {Array.from({
+                    length: Math.max(0, questionCount - questions.length),
+                  }).map((_, i) => (
+                    <motion.div
+                      key={`skeleton-${i}`}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      className="udemy-card p-5"
+                    >
+                      <div className="skeleton h-4 w-3/4 mb-2" />
+                      <div className="skeleton h-3 w-1/4" />
+                    </motion.div>
+                  ))}
+                </div>
+              )}
 
             {questions.length > 0 && (
               <motion.div
@@ -1180,22 +1248,28 @@ export default function TopicStudy() {
                   return (
                     <motion.div key={qa.question_id} variants={cardVariants}>
                       <WordHighlightChat
-                        contextQuestion={normalizeEscapedSingleLineText(qa.question)}
+                        contextQuestion={normalizeEscapedSingleLineText(
+                          qa.question,
+                        )}
                         contextAnswer={qa.answer}
                         sessionKey={`study:${topic.id}`}
                         topicId={topic.id}
                         topicTitle={normalizedTopicTitle}
                         topicTrack={topic.track}
                         sectionTitle={normalizeEscapedSingleLineText(
-                          qa.source_section || topic.sections[activeSection]?.heading || "",
+                          qa.source_section ||
+                            topic.sections[activeSection]?.heading ||
+                            "",
                         )}
                         mode="study"
-                        showFloatingTrigger={expandedQ === null ? idx === 0 : expandedQ === idx}
-                        floatingTriggerWord={
-                          normalizeEscapedSingleLineText(
-                            qa.source_section || topic.sections[activeSection]?.heading || normalizedTopicTitle,
-                          )
+                        showFloatingTrigger={
+                          expandedQ === null ? idx === 0 : expandedQ === idx
                         }
+                        floatingTriggerWord={normalizeEscapedSingleLineText(
+                          qa.source_section ||
+                            topic.sections[activeSection]?.heading ||
+                            normalizedTopicTitle,
+                        )}
                         floatingTriggerPrompt="Explain this section in an organized way with practical examples and key tradeoffs."
                         responseDetail={responseDetail}
                         preferredLanguage={preferredLanguage}
@@ -1204,160 +1278,173 @@ export default function TopicStudy() {
                         qaKey={`${topicId}-${qa.question_id}`}
                       >
                         <div className="udemy-card overflow-hidden">
-                        <button
-                          onClick={() => {
-                            const highlighted = window.getSelection()?.toString().trim();
-                            if (highlighted) return;
-                            toggleQuestion(idx);
-                          }}
-                          className="w-full p-5 text-left flex items-start gap-3 hover:bg-gray-50 transition-colors"
-                        >
-                          <span className="flex-shrink-0 w-7 h-7 bg-udemy-purple/10 rounded-full flex items-center justify-center text-sm font-bold text-udemy-purple">
-                            {idx + 1}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p
-                              data-word-chat-target="true"
-                              className="font-medium text-[15px] leading-relaxed"
-                            >
-                              {normalizeEscapedSingleLineText(qa.question)}
-                            </p>
-                            <div className="flex items-center gap-2 mt-2">
-                              <DifficultyBadge difficulty={qa.difficulty} />
-                              {submittedAttempts.has(idx) && (
-                                <span className="text-udemy-success text-xs flex items-center gap-1">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  Attempt Saved
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <motion.div
-                            animate={{ rotate: expandedQ === idx ? 180 : 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="flex-shrink-0 mt-1"
+                          <button
+                            onClick={() => {
+                              const highlighted = window
+                                .getSelection()
+                                ?.toString()
+                                .trim();
+                              if (highlighted) return;
+                              toggleQuestion(idx);
+                            }}
+                            className="w-full p-5 text-left flex items-start gap-3 hover:bg-gray-50 transition-colors"
                           >
-                            <ChevronDown className="w-5 h-5 text-udemy-text-muted" />
-                          </motion.div>
-                        </button>
-
-                        <AnimatePresence>
-                          {expandedQ === idx && (
+                            <span className="flex-shrink-0 w-7 h-7 bg-udemy-purple/10 rounded-full flex items-center justify-center text-sm font-bold text-udemy-purple">
+                              {idx + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p
+                                data-word-chat-target="true"
+                                className="font-medium text-[15px] leading-relaxed"
+                              >
+                                {normalizeEscapedSingleLineText(qa.question)}
+                              </p>
+                              <div className="flex items-center gap-2 mt-2">
+                                <DifficultyBadge difficulty={qa.difficulty} />
+                                {submittedAttempts.has(idx) && (
+                                  <span className="text-udemy-success text-xs flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    Attempt Saved
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                             <motion.div
-                              variants={expandVariants}
-                              initial="collapsed"
-                              animate="expanded"
-                              exit="collapsed"
-                              className="overflow-hidden"
+                              animate={{ rotate: expandedQ === idx ? 180 : 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="flex-shrink-0 mt-1"
                             >
-                              <div className="px-5 pb-5 pt-0 border-t border-udemy-border">
-                                {settings.requireAnswerReveal && (
-                                  <div className="mt-4 bg-white rounded-lg p-4 border border-udemy-border">
-                                    <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
-                                      Your Attempt (Before Reveal)
-                                    </h4>
-                                    <textarea
-                                      value={answerDrafts[idx] || ""}
-                                      onChange={(e) =>
-                                        setAnswerDrafts((prev) => ({
-                                          ...prev,
-                                          [idx]: e.target.value,
-                                        }))
-                                      }
-                                      rows={4}
-                                      placeholder="Type your answer in your own words..."
-                                      className="w-full border border-udemy-border rounded p-3 text-sm"
-                                    />
-                                    <div className="mt-3">
-                                      <label className="text-xs font-medium text-udemy-text-muted block mb-1">
-                                        Confidence: {confidenceByIdx[idx] || 3}/5
-                                      </label>
-                                      <input
-                                        type="range"
-                                        min={1}
-                                        max={5}
-                                        step={1}
-                                        value={confidenceByIdx[idx] || 3}
+                              <ChevronDown className="w-5 h-5 text-udemy-text-muted" />
+                            </motion.div>
+                          </button>
+
+                          <AnimatePresence>
+                            {expandedQ === idx && (
+                              <motion.div
+                                variants={expandVariants}
+                                initial="collapsed"
+                                animate="expanded"
+                                exit="collapsed"
+                                className="overflow-hidden"
+                              >
+                                <div className="px-5 pb-5 pt-0 border-t border-udemy-border">
+                                  {settings.requireAnswerReveal && (
+                                    <div className="mt-4 bg-white rounded-lg p-4 border border-udemy-border">
+                                      <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
+                                        Your Attempt (Before Reveal)
+                                      </h4>
+                                      <textarea
+                                        value={answerDrafts[idx] || ""}
                                         onChange={(e) =>
-                                          setConfidenceByIdx((prev) => ({
+                                          setAnswerDrafts((prev) => ({
                                             ...prev,
-                                            [idx]: Number(e.target.value),
+                                            [idx]: e.target.value,
                                           }))
                                         }
-                                        className="w-full accent-udemy-purple"
+                                        rows={4}
+                                        placeholder="Type your answer in your own words..."
+                                        className="w-full border border-udemy-border rounded p-3 text-sm"
                                       />
-                                    </div>
-                                  </div>
-                                )}
-
-                                {!isAnswerVisible && (
-                                  <button
-                                    onClick={() => handleReveal(idx)}
-                                    className="btn-secondary mt-3"
-                                  >
-                                    Reveal Official Answer
-                                  </button>
-                                )}
-
-                                {isAnswerVisible && (
-                                  <>
-                                    <div className="mt-3 bg-udemy-bg rounded-lg p-4">
-                                      <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
-                                        Official Answer
-                                      </h4>
-                                      <div data-word-chat-target="true">
-                                        <MarkdownRenderer
-                                          content={qa.answer}
-                                          className="text-[14px]"
+                                      <div className="mt-3">
+                                        <label className="text-xs font-medium text-udemy-text-muted block mb-1">
+                                          Confidence:{" "}
+                                          {confidenceByIdx[idx] || 3}/5
+                                        </label>
+                                        <input
+                                          type="range"
+                                          min={1}
+                                          max={5}
+                                          step={1}
+                                          value={confidenceByIdx[idx] || 3}
+                                          onChange={(e) =>
+                                            setConfidenceByIdx((prev) => ({
+                                              ...prev,
+                                              [idx]: Number(e.target.value),
+                                            }))
+                                          }
+                                          className="w-full accent-udemy-purple"
                                         />
                                       </div>
                                     </div>
+                                  )}
 
-                                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                                      <div className="bg-white border border-udemy-border rounded-lg p-3">
-                                        <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
-                                          Learning Objective
-                                        </h4>
-                                        <p className="text-sm">
-                                          {normalizeEscapedSingleLineText(qa.learning_objective)}
-                                        </p>
-                                      </div>
-                                      <div className="bg-white border border-udemy-border rounded-lg p-3">
-                                        <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
-                                          Misconception Trap
-                                        </h4>
-                                        <p className="text-sm">
-                                          {normalizeEscapedSingleLineText(qa.misconception_trap)}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </>
-                                )}
+                                  {!isAnswerVisible && (
+                                    <button
+                                      onClick={() => handleReveal(idx)}
+                                      className="btn-secondary mt-3"
+                                    >
+                                      Reveal Official Answer
+                                    </button>
+                                  )}
 
-                                {isAnswerVisible && !submittedAttempts.has(idx) && (
-                                  <div className="mt-3 flex flex-wrap gap-2">
-                                    <button
-                                      onClick={() => submitAttempt(idx, true)}
-                                      disabled={submittingIdx === idx}
-                                      className="btn-primary disabled:opacity-60"
-                                    >
-                                      {submittingIdx === idx
-                                        ? "Saving..."
-                                        : "I got this mostly right"}
-                                    </button>
-                                    <button
-                                      onClick={() => submitAttempt(idx, false)}
-                                      disabled={submittingIdx === idx}
-                                      className="btn-secondary disabled:opacity-60"
-                                    >
-                                      I need more practice
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                                  {isAnswerVisible && (
+                                    <>
+                                      <div className="mt-3 bg-udemy-bg rounded-lg p-4">
+                                        <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
+                                          Official Answer
+                                        </h4>
+                                        <div data-word-chat-target="true">
+                                          <MarkdownRenderer
+                                            content={qa.answer}
+                                            className="text-[14px]"
+                                          />
+                                        </div>
+                                      </div>
+
+                                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div className="bg-white border border-udemy-border rounded-lg p-3">
+                                          <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
+                                            Learning Objective
+                                          </h4>
+                                          <p className="text-sm">
+                                            {normalizeEscapedSingleLineText(
+                                              qa.learning_objective,
+                                            )}
+                                          </p>
+                                        </div>
+                                        <div className="bg-white border border-udemy-border rounded-lg p-3">
+                                          <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
+                                            Misconception Trap
+                                          </h4>
+                                          <p className="text-sm">
+                                            {normalizeEscapedSingleLineText(
+                                              qa.misconception_trap,
+                                            )}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </>
+                                  )}
+
+                                  {isAnswerVisible &&
+                                    !submittedAttempts.has(idx) && (
+                                      <div className="mt-3 flex flex-wrap gap-2">
+                                        <button
+                                          onClick={() =>
+                                            submitAttempt(idx, true)
+                                          }
+                                          disabled={submittingIdx === idx}
+                                          className="btn-primary disabled:opacity-60"
+                                        >
+                                          {submittingIdx === idx
+                                            ? "Saving..."
+                                            : "I got this mostly right"}
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            submitAttempt(idx, false)
+                                          }
+                                          disabled={submittingIdx === idx}
+                                          className="btn-secondary disabled:opacity-60"
+                                        >
+                                          I need more practice
+                                        </button>
+                                      </div>
+                                    )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       </WordHighlightChat>
                     </motion.div>
@@ -1377,10 +1464,14 @@ export default function TopicStudy() {
                       </div>
                       <h3 className="text-lg font-bold mb-1">Topic Complete</h3>
                       <p className="text-sm text-udemy-text-muted mb-4">
-                        You submitted learning attempts for all {questions.length} questions.
+                        You submitted learning attempts for all{" "}
+                        {questions.length} questions.
                       </p>
                       <div className="flex items-center justify-center gap-3">
-                        <button onClick={handleGenerate} className="btn-primary">
+                        <button
+                          onClick={handleGenerate}
+                          className="btn-primary"
+                        >
                           Generate More
                         </button>
                         <Link to={`/quiz/${topicId}`} className="btn-secondary">

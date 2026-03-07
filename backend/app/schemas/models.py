@@ -177,14 +177,14 @@ class TopicDetail(BaseModel):
 
 
 class CreateCustomTopicRequest(BaseModel):
-    topic: str = Field(..., min_length=2, max_length=120)
-    target_sections: int = Field(default=120, ge=100, le=150)
+    topic: str = Field(..., min_length=2, max_length=200)
+    target_sections: Optional[int] = Field(default=None, ge=50, le=300)
     llm_config: Optional[LLMConfigRequest] = None
 
 
 class GenerateTopicContentRequest(BaseModel):
     preferred_language: str = Field(..., min_length=2, max_length=40)
-    target_sections: int = Field(default=120, ge=100, le=150)
+    target_sections: Optional[int] = Field(default=None, ge=50, le=300)
     force_regenerate: bool = False
     llm_config: Optional[LLMConfigRequest] = None
 
