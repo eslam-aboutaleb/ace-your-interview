@@ -181,7 +181,7 @@ async def connect_google(user: dict = Depends(require_auth)):
             "client_id": settings.google_client_id,
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "scope": "https://www.googleapis.com/auth/cloud-platform",
+            "scope": "https://www.googleapis.com/auth/generative-language.retriever https://www.googleapis.com/auth/cloud-platform",
             "access_type": "offline",
             "prompt": "consent",
             "state": state,
