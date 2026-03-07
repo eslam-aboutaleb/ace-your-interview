@@ -226,7 +226,7 @@ export default function UserSettingsPage() {
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1100px] mx-auto px-6 py-8">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1100px] mx-auto px-4 sm:px-6 py-8">
       <div className="udemy-card p-6 mb-6">
         <h1 className="text-2xl font-bold mb-2">User Settings</h1>
         <p className="text-sm text-udemy-text-muted">
@@ -299,7 +299,7 @@ export default function UserSettingsPage() {
           ) : (
             <>
               <h2 className="text-lg font-bold mb-4">Personal Provider & Model</h2>
-              <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
                 {data?.providers.map((p) => (
                   <button
                     key={p.provider}
@@ -438,7 +438,7 @@ export default function UserSettingsPage() {
                   onChange={(e) => setApiKeyInput(e.target.value)}
                   className="w-full border border-udemy-border rounded px-3 py-2 mb-3"
                 />
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <button
                     onClick={handleSaveApiKey}
                     disabled={savingKey || !apiKeyInput.trim()}

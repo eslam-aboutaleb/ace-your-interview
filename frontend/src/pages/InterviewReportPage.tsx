@@ -31,7 +31,7 @@ export default function InterviewReportPage() {
 
   if (errorMsg || !data) {
     return (
-      <div className="max-w-[1000px] mx-auto px-6 py-12">
+      <div className="max-w-[1000px] mx-auto px-4 sm:px-6 py-12">
         <p className="text-udemy-text-muted">{errorMsg || "No report available."}</p>
       </div>
     );
@@ -48,7 +48,7 @@ export default function InterviewReportPage() {
       transition={pageTransition}
     >
       <div className="bg-udemy-dark text-white">
-        <div className="max-w-[1000px] mx-auto px-6 py-8">
+        <div className="max-w-[1000px] mx-auto px-4 sm:px-6 py-8">
           <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
             <Trophy className="w-7 h-7 text-udemy-purple-light" />
             Interview Report
@@ -59,7 +59,7 @@ export default function InterviewReportPage() {
         </div>
       </div>
 
-      <div className="max-w-[1000px] mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-[1000px] mx-auto px-4 sm:px-6 py-8 space-y-6">
         <div className="udemy-card p-6">
           <h2 className="font-bold mb-2">Summary</h2>
           <MarkdownRenderer content={report.summary} className="text-sm text-udemy-text-muted" />
@@ -67,7 +67,7 @@ export default function InterviewReportPage() {
 
         <div className="udemy-card p-6">
           <h2 className="font-bold mb-3">Rubric Averages</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             {Object.entries(report.rubric_averages).map(([k, v]) => (
               <div key={k} className="bg-udemy-bg rounded px-3 py-2">
                 <p className="text-[11px] text-udemy-text-muted uppercase">{k.replace(/_/g, " ")}</p>
@@ -118,11 +118,11 @@ export default function InterviewReportPage() {
             ))}
           </ol>
 
-          <div className="mt-5 flex items-center gap-3">
-            <Link to="/interview" className="btn-secondary">
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <Link to="/interview" className="btn-secondary w-full sm:w-auto text-center">
               New Mock Interview
             </Link>
-            <Link to="/quiz" className="btn-primary inline-flex items-center gap-2">
+            <Link to="/quiz" className="btn-primary w-full sm:w-auto inline-flex items-center justify-center gap-2">
               Start Quiz
               <ArrowRight className="w-4 h-4" />
             </Link>

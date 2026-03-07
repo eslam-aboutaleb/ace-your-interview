@@ -319,7 +319,7 @@ export default function QuizMode() {
       {quizState === "setup" && (
         <>
           <div className="bg-udemy-dark text-white">
-            <div className="max-w-[1340px] mx-auto px-6 py-8">
+            <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8">
               <Link
                 to={preselectedTopic ? `/topics/${preselectedTopic}` : "/"}
                 className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-white mb-3 transition-colors"
@@ -337,7 +337,7 @@ export default function QuizMode() {
             </div>
           </div>
 
-          <div className="max-w-[1340px] mx-auto px-6 py-8 flex-1">
+          <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8 flex-1">
             {errorMsg && (
               <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -425,7 +425,7 @@ export default function QuizMode() {
                     <label className="block text-sm font-medium mb-2">
                       Question Types
                     </label>
-                    <div className="flex gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <button
                         onClick={() => toggleQuestionType("mcq")}
                         className={`flex-1 py-2 px-3 rounded-lg border-2 text-sm font-medium transition-all ${
@@ -508,14 +508,14 @@ export default function QuizMode() {
       {quizState === "playing" && current && (
         <>
           <div className="bg-udemy-dark text-white">
-            <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-2">
               <button
                 onClick={() => {
                   if (confirm("Exit quiz? Your progress will be lost.")) {
                     handleRestart();
                   }
                 }}
-                className="flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors"
+                className="w-full sm:w-auto flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors"
               >
                 <X className="w-4 h-4" />
                 Exit Quiz
@@ -536,7 +536,7 @@ export default function QuizMode() {
             </div>
           </div>
 
-          <div className="flex-1 flex items-center justify-center px-6 py-10">
+          <div className="flex-1 flex items-center justify-center px-4 sm:px-6 py-10">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentIdx}
@@ -734,7 +734,7 @@ export default function QuizMode() {
       )}
 
       {quizState === "results" && (
-        <div className="flex-1 flex flex-col items-center px-6 py-10">
+        <div className="flex-1 flex flex-col items-center px-4 sm:px-6 py-10">
           <motion.div
             variants={scaleInVariants}
             initial="hidden"
@@ -798,7 +798,7 @@ export default function QuizMode() {
               {` · retries: ${providerInfo.retries} · dropped malformed: ${providerInfo.malformed}`}
             </p>
 
-            <div className="flex items-center justify-center gap-3">
+            <div className="flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={handleRestart}
                 className="btn-secondary flex items-center gap-2"
@@ -830,9 +830,9 @@ export default function QuizMode() {
                   {weakAreas.slice(0, 3).map((w) => (
                     <div
                       key={w.topic_id}
-                      className="flex items-center justify-between text-sm bg-udemy-bg rounded p-2"
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm bg-udemy-bg rounded p-2"
                     >
-                      <div>
+                      <div className="min-w-0">
                         <span className="font-medium">{w.topic_id}</span>
                         <span className="text-udemy-text-muted ml-2">
                           mastery {Math.round(w.mastery_score * 100)}% · due {w.due_count}

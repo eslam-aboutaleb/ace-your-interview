@@ -1,16 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { BookOpen, Search, ChevronRight, Filter, Loader2 } from "lucide-react";
+import { BookOpen, Search, ChevronRight, Filter } from "lucide-react";
 import {
   pageVariants,
   pageTransition,
   containerVariants,
   cardVariants,
 } from "@/utils/animations";
-import { createCustomTopic, fetchTopics } from "@/services/api";
+import { fetchTopics } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
-import { useSettingsStore } from "@/store/settingsStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
 import type { InterviewLevel, LearningTrack, TopicSummary } from "@/types";
@@ -36,9 +35,7 @@ export default function TopicsList() {
   const [track, setTrack] = useState<LearningTrack | "">("");
   const [level, setLevel] = useState<InterviewLevel | "">("");
   const [customTopic, setCustomTopic] = useState("");
-  const [creatingCustom, setCreatingCustom] = useState(false);
   const [customError, setCustomError] = useState("");
-  const settings = useSettingsStore();
   const completedTopics = useProgressStore((s) => s.completedTopics);
   const getTopicProgress = useProgressStore((s) => s.getTopicProgress);
 
@@ -62,33 +59,15 @@ export default function TopicsList() {
     loadTopics();
   }, [loadTopics]);
 
-  const handleCreateCustomTopic = async () => {
+  const handleCreateCustomTopic = () => {
     const topic = customTopic.trim();
     if (topic.length < 2) {
       setCustomError("Please enter at least 2 characters for the custom topic.");
       return;
     }
-    setCreatingCustom(true);
     setCustomError("");
-    try {
-      const created = await createCustomTopic({
-        topic,
-        llm_config: {
-          provider: settings.provider,
-          model: settings.model,
-          temperature: settings.temperature,
-          max_tokens: settings.maxTokens,
-        },
-      });
-      await loadTopics();
-      setCustomTopic("");
-      navigate(`/topics/${created.id}`);
-    } catch (err) {
-      console.error(err);
-      setCustomError("Could not generate the custom topic roadmap. Please try again.");
-    } finally {
-      setCreatingCustom(false);
-    }
+    setCustomTopic("");
+    navigate(`/topics/custom/build?topic=${encodeURIComponent(topic)}`);
   };
 
   return (
@@ -100,7 +79,7 @@ export default function TopicsList() {
       transition={pageTransition}
     >
       <div className="bg-udemy-dark text-white">
-        <div className="max-w-[1340px] mx-auto px-6 py-8">
+        <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8">
           <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
             <BookOpen className="w-7 h-7 text-udemy-purple-light" />
             Interview Topics
@@ -111,7 +90,7 @@ export default function TopicsList() {
         </div>
       </div>
 
-      <div className="max-w-[1340px] mx-auto px-6 py-6">
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-6">
         {/* Search */}
         <div className="relative mb-6">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-udemy-text-muted" />
@@ -122,7 +101,7 @@ export default function TopicsList() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full border border-udemy-border rounded-lg pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-udemy-purple transition-colors"
           />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-udemy-text-muted flex items-center gap-1">
+          <span className="hidden sm:flex absolute right-3 top-1/2 -translate-y-1/2 text-xs text-udemy-text-muted items-center gap-1">
             <Filter className="w-3.5 h-3.5" />
             {topics.length} results
           </span>
@@ -167,11 +146,9 @@ export default function TopicsList() {
             />
             <button
               onClick={handleCreateCustomTopic}
-              disabled={creatingCustom}
-              className="btn-primary min-w-[220px] disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              className="btn-primary w-full sm:w-auto sm:min-w-[220px] inline-flex items-center justify-center gap-2"
             >
-              {creatingCustom && <Loader2 className="w-4 h-4 animate-spin" />}
-              {creatingCustom ? "Analyzing..." : "Analyze & Build Roadmap"}
+              Analyze & Build Roadmap
             </button>
           </div>
           {customError && (
@@ -199,7 +176,7 @@ export default function TopicsList() {
                     to={`/topics/${topic.id}`}
                     className="block group udemy-card hover:-translate-y-0.5 transition-transform duration-200"
                   >
-                    <div className="flex items-center gap-5 p-5">
+                    <div className="flex items-center gap-3 sm:gap-5 p-4 sm:p-5">
                       {/* Number */}
                       <div
                         className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
@@ -229,14 +206,14 @@ export default function TopicsList() {
                               .join(" / ")}
                           </span>
                         </div>
-                        <div className="flex items-center gap-4 mt-2">
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-2">
                           <span className="text-xs text-udemy-text-muted">
                             {topic.section_count} sections
                           </span>
                           <span className="text-xs text-udemy-text-muted">
                             ~{topic.estimated_questions} questions
                           </span>
-                          <div className="flex-1 max-w-[200px]">
+                          <div className="w-full sm:w-auto flex-1 sm:max-w-[200px]">
                             <ProgressBar percent={progress} />
                           </div>
                         </div>

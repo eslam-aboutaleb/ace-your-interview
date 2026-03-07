@@ -169,7 +169,7 @@ export default function InterviewSessionPage() {
 
   if (!data) {
     return (
-      <div className="max-w-[1340px] mx-auto px-6 py-12">
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-12">
         <p className="text-udemy-text-muted">Interview session not found.</p>
       </div>
     );
@@ -184,7 +184,7 @@ export default function InterviewSessionPage() {
       transition={pageTransition}
     >
       <div className="bg-udemy-dark text-white">
-        <div className="max-w-[1000px] mx-auto px-6 py-6">
+        <div className="max-w-[1000px] mx-auto px-4 sm:px-6 py-6">
           <h1 className="text-2xl font-bold">Live Mock Interview</h1>
           <p className="text-gray-400 text-sm mt-1">
             {data.session.track} · {data.session.level} · {data.session.interview_type}
@@ -201,7 +201,7 @@ export default function InterviewSessionPage() {
         </div>
       </div>
 
-      <div className="max-w-[1000px] mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-[1000px] mx-auto px-4 sm:px-6 py-8 space-y-6">
         {errorMsg && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -226,11 +226,11 @@ export default function InterviewSessionPage() {
             className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
           />
 
-          <div className="mt-4 flex items-center gap-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
               onClick={handleSubmit}
               disabled={submitting || loadingNext || !answerDraft.trim() || !data.session.current_question}
-              className="btn-primary flex items-center gap-2 disabled:opacity-50"
+              className="btn-primary w-full sm:w-auto flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {submitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -243,7 +243,7 @@ export default function InterviewSessionPage() {
             <button
               onClick={handleNext}
               disabled={loadingNext || submitting || data.session.status !== "active"}
-              className="btn-secondary flex items-center gap-2 disabled:opacity-50"
+              className="btn-secondary w-full sm:w-auto flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {loadingNext ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -256,7 +256,7 @@ export default function InterviewSessionPage() {
             {data.session.report_ready && (
               <Link
                 to={`/interview/${data.session.session_id}/report`}
-                className="btn-secondary inline-flex items-center gap-2"
+                className="btn-secondary w-full sm:w-auto inline-flex items-center justify-center gap-2"
               >
                 <FileText className="w-4 h-4" />
                 View Report
@@ -268,7 +268,7 @@ export default function InterviewSessionPage() {
         {lastTurn && (
           <div className="udemy-card p-6">
             <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-3">Rubric Feedback</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
               {Object.entries(lastTurn.turn.rubric).map(([k, v]) => (
                 <div key={k} className="bg-udemy-bg rounded px-3 py-2">
                   <p className="text-[11px] text-udemy-text-muted uppercase">{k.replace(/_/g, " ")}</p>

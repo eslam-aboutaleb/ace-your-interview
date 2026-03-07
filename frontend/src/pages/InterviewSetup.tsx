@@ -97,7 +97,7 @@ export default function InterviewSetup() {
       transition={pageTransition}
     >
       <div className="bg-udemy-dark text-white">
-        <div className="max-w-[1340px] mx-auto px-6 py-8">
+        <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8">
           <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
             <MessageSquare className="w-7 h-7 text-udemy-purple-light" />
             Mock Interview
@@ -108,7 +108,7 @@ export default function InterviewSetup() {
         </div>
       </div>
 
-      <div className="max-w-[1340px] mx-auto px-6 py-8">
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8">
         {errorMsg && (
           <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             {errorMsg}
@@ -231,7 +231,7 @@ export default function InterviewSetup() {
               <button
                 onClick={handleStart}
                 disabled={starting}
-                className="btn-primary flex items-center gap-2 disabled:opacity-50"
+                className="btn-primary w-full sm:w-auto flex items-center gap-2 disabled:opacity-50"
               >
                 {starting ? (
                   <Loader2 className="w-4 h-4 animate-spin" />

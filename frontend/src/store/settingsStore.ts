@@ -53,7 +53,7 @@ export const useSettingsStore = create<SettingsState>()(
       model: "gpt-4o-mini",
       temperature: 0.7,
       maxTokens: 0,
-      requireAnswerReveal: true,
+      requireAnswerReveal: false,
       hydrateFromServer: ({
         llmSource,
         provider,

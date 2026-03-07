@@ -44,6 +44,57 @@ export interface CreateCustomTopicRequest {
   llm_config?: LLMConfig;
 }
 
+export interface CustomTopicStreamStartEvent {
+  type: "start";
+  topic: string;
+  target_sections: number;
+}
+
+export interface CustomTopicStreamProgressEvent {
+  type: "progress";
+  stage: "analyzing";
+  message: string;
+  elapsed_seconds: number;
+}
+
+export interface CustomTopicStreamSectionEvent {
+  type: "section";
+  index: number;
+  total_sections: number;
+  heading: string;
+  content: string;
+}
+
+export interface CustomTopicStreamDoneEvent {
+  type: "done";
+  topic: TopicDetail;
+}
+
+export interface CustomTopicStreamErrorEvent {
+  type: "error";
+  code:
+    | "llm_service_approval_required"
+    | "study_app_llm_not_assigned"
+    | "personal_credential_required"
+    | "generation_failed";
+  message: string;
+}
+
+export type CustomTopicStreamEvent =
+  | CustomTopicStreamStartEvent
+  | CustomTopicStreamProgressEvent
+  | CustomTopicStreamSectionEvent
+  | CustomTopicStreamDoneEvent
+  | CustomTopicStreamErrorEvent;
+
+export interface CustomTopicStreamHandlers {
+  onStart?: (event: CustomTopicStreamStartEvent) => void;
+  onProgress?: (event: CustomTopicStreamProgressEvent) => void;
+  onSection?: (event: CustomTopicStreamSectionEvent) => void;
+  onDone?: (event: CustomTopicStreamDoneEvent) => void;
+  onError?: (event: CustomTopicStreamErrorEvent) => void;
+}
+
 export interface QuestionAnswer {
   question: string;
   answer: string;
@@ -96,6 +147,52 @@ export interface GenerateQuestionsV2Response {
   model_used: string;
   retries_used: number;
   malformed_items_dropped: number;
+}
+
+export interface GenerateQuestionsStreamStartEvent {
+  type: "start";
+  topic_id: string;
+  topic_title: string;
+  target_count: number;
+}
+
+export interface GenerateQuestionsStreamQuestionEvent {
+  type: "question";
+  question: QuestionAnswerV2;
+}
+
+export interface GenerateQuestionsStreamDoneEvent {
+  type: "done";
+  topic_id: string;
+  topic_title: string;
+  generated_count: number;
+  provider_used: string;
+  model_used: string;
+  retries_used: number;
+  malformed_items_dropped: number;
+}
+
+export interface GenerateQuestionsStreamErrorEvent {
+  type: "error";
+  code:
+    | "llm_service_approval_required"
+    | "study_app_llm_not_assigned"
+    | "personal_credential_required"
+    | "generation_failed";
+  message: string;
+}
+
+export type GenerateQuestionsStreamEvent =
+  | GenerateQuestionsStreamStartEvent
+  | GenerateQuestionsStreamQuestionEvent
+  | GenerateQuestionsStreamDoneEvent
+  | GenerateQuestionsStreamErrorEvent;
+
+export interface GenerateQuestionsStreamHandlers {
+  onStart?: (event: GenerateQuestionsStreamStartEvent) => void;
+  onQuestion?: (event: GenerateQuestionsStreamQuestionEvent) => void;
+  onDone?: (event: GenerateQuestionsStreamDoneEvent) => void;
+  onError?: (event: GenerateQuestionsStreamErrorEvent) => void;
 }
 
 export interface ProviderStatus {

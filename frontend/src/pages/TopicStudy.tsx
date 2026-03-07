@@ -24,6 +24,8 @@ import {
   fetchTopic,
   generateQuestions,
   generateQuestionsV2,
+  generateQuestionsV2Stream,
+  isQuestionsStreamError,
   recordLearningAttempt,
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -93,6 +95,7 @@ export default function TopicStudy() {
   });
   const [errorMsg, setErrorMsg] = useState("");
   const navRef = useRef<HTMLElement | null>(null);
+  const generationAbortRef = useRef<AbortController | null>(null);
 
   const settings = useSettingsStore();
   const {
@@ -117,6 +120,13 @@ export default function TopicStudy() {
   }, [topicId]);
 
   useEffect(() => {
+    return () => {
+      generationAbortRef.current?.abort();
+      generationAbortRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     const handle = window.setTimeout(
       () => setCourseSearchQuery(courseSearchInput.trim().toLowerCase()),
       150,
@@ -126,6 +136,9 @@ export default function TopicStudy() {
 
   const handleGenerate = useCallback(async () => {
     if (!topicId || !topic) return;
+    generationAbortRef.current?.abort();
+    const controller = new AbortController();
+    generationAbortRef.current = controller;
     setGenerating(true);
     setErrorMsg("");
     setQuestions([]);
@@ -155,8 +168,7 @@ export default function TopicStudy() {
             }
           : {}),
       };
-      try {
-        const res = await generateQuestionsV2(payload);
+      const applyV2Result = (res: Awaited<ReturnType<typeof generateQuestionsV2>>) => {
         setQuestions(res.questions);
         setProviderInfo({
           provider: res.provider_used,
@@ -164,8 +176,10 @@ export default function TopicStudy() {
           retries: res.retries_used,
           malformed: res.malformed_items_dropped,
         });
-      } catch {
-        const legacy = await generateQuestions(payload);
+      };
+      const applyLegacyResult = (
+        legacy: Awaited<ReturnType<typeof generateQuestions>>,
+      ) => {
         const upgraded: QuestionAnswerV2[] = legacy.questions.map((q, idx) => ({
           question_id: `${topicId}:legacy:${idx}`,
           topic_id: topicId,
@@ -186,14 +200,68 @@ export default function TopicStudy() {
           retries: 0,
           malformed: 0,
         });
+      };
+
+      const runFallbackGeneration = async () => {
+        try {
+          const res = await generateQuestionsV2(payload);
+          applyV2Result(res);
+        } catch {
+          const legacy = await generateQuestions(payload);
+          applyLegacyResult(legacy);
+        }
+      };
+
+      let streamedCount = 0;
+      try {
+        await generateQuestionsV2Stream(
+          payload,
+          {
+            onQuestion: (event) => {
+              streamedCount += 1;
+              setQuestions((prev) => [...prev, event.question]);
+            },
+            onDone: (event) => {
+              setProviderInfo({
+                provider: event.provider_used,
+                model: event.model_used,
+                retries: event.retries_used,
+                malformed: event.malformed_items_dropped,
+              });
+            },
+            onError: (event) => {
+              setErrorMsg(event.message || "Question generation failed.");
+            },
+          },
+          controller.signal,
+        );
+      } catch (streamErr) {
+        if (controller.signal.aborted) return;
+        if (
+          isQuestionsStreamError(streamErr)
+          && streamErr.fallbackEligible
+          && streamedCount === 0
+        ) {
+          await runFallbackGeneration();
+          return;
+        }
+        throw streamErr;
       }
     } catch (err) {
+      if (controller.signal.aborted) return;
       console.error(err);
+      if (isQuestionsStreamError(err)) {
+        setErrorMsg(err.message || "Question generation failed.");
+        return;
+      }
       setErrorMsg(
         "Question generation failed. Check LLM settings/connection and try again.",
       );
     } finally {
-      setGenerating(false);
+      if (generationAbortRef.current === controller) {
+        generationAbortRef.current = null;
+        setGenerating(false);
+      }
     }
   }, [topicId, topic, activeSection, questionCount, difficulty, level, settings]);
 
@@ -328,7 +396,7 @@ export default function TopicStudy() {
 
   if (!topic) {
     return (
-      <div className="max-w-[1340px] mx-auto px-6 py-12 text-center">
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-12 text-center">
         <p className="text-udemy-text-muted text-lg">Topic not found.</p>
         <Link to="/" className="btn-primary inline-block mt-4">
           Back to Dashboard
@@ -346,7 +414,7 @@ export default function TopicStudy() {
       transition={pageTransition}
     >
       <div className="bg-udemy-dark text-white">
-        <div className="max-w-[1340px] mx-auto px-6 py-6">
+        <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-6">
           <Link
             to="/"
             className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-white mb-3 transition-colors"
@@ -367,10 +435,10 @@ export default function TopicStudy() {
         </div>
       </div>
 
-      <div className="max-w-[1340px] mx-auto px-6 py-8">
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
           <aside className="lg:w-72 flex-shrink-0">
-            <div className="udemy-card p-4 sticky top-20">
+            <div className="udemy-card p-4 lg:sticky lg:top-20">
               <h3 className="text-sm font-bold text-udemy-text-muted uppercase tracking-wide mb-3">
                 Course Content
               </h3>
@@ -445,7 +513,7 @@ export default function TopicStudy() {
                 key={activeSection}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="udemy-card p-6 mb-6"
+                className="udemy-card p-4 sm:p-6 mb-6"
               >
                 <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-udemy-purple" />
@@ -458,7 +526,7 @@ export default function TopicStudy() {
               </motion.div>
             )}
 
-            <div className="udemy-card p-6 mb-6">
+            <div className="udemy-card p-4 sm:p-6 mb-6">
               <div className="flex flex-wrap items-end gap-4 mb-4">
                 <div>
                   <label className="block text-xs font-medium text-udemy-text-muted mb-1">
@@ -548,11 +616,11 @@ export default function TopicStudy() {
               </div>
             )}
 
-            {generating && (
+            {generating && Math.max(0, questionCount - questions.length) > 0 && (
               <div className="space-y-3">
-                {Array.from({ length: questionCount }).map((_, i) => (
+                {Array.from({ length: Math.max(0, questionCount - questions.length) }).map((_, i) => (
                   <motion.div
-                    key={i}
+                    key={`skeleton-${i}`}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
@@ -565,7 +633,7 @@ export default function TopicStudy() {
               </div>
             )}
 
-            {!generating && questions.length > 0 && (
+            {questions.length > 0 && (
               <motion.div
                 className="space-y-3"
                 variants={containerVariants}

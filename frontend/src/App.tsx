@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import Layout from "@/components/Layout/Layout";
 import Dashboard from "@/pages/Dashboard";
 import TopicsList from "@/pages/TopicsList";
+import CustomTopicBuild from "@/pages/CustomTopicBuild";
 import TopicStudy from "@/pages/TopicStudy";
 import QuizMode from "@/pages/QuizMode";
 import Settings from "@/pages/Settings";
@@ -129,6 +130,7 @@ export default function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<Dashboard />} />
             <Route path="topics" element={<TopicsList />} />
+            <Route path="topics/custom/build" element={<CustomTopicBuild />} />
             <Route path="topics/:topicId" element={<TopicStudy />} />
             <Route path="quiz" element={<QuizMode />} />
             <Route path="quiz/:topicId" element={<QuizMode />} />

@@ -9,7 +9,10 @@ export default function Layout() {
         <Outlet />
       </main>
       <footer className="bg-udemy-dark text-gray-400 text-center py-6 text-sm">
-        <p>Too lazy for this interview &mdash; Practice the skills that get offers</p>
+        <p>
+          Too lazy for this interview &mdash; Practice the skills that get
+          offers
+        </p>
       </footer>
     </div>
   );
