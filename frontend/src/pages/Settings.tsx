@@ -573,6 +573,32 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6">
+        {/* Available Models Reference */}
+        {providerOptions.length > 0 && (
+          <div className="udemy-card p-6">
+            <h2 className="text-lg font-bold mb-4">Available Models by Provider</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {providerOptions.map((provider) => (
+                <div key={provider} className="rounded-lg border border-udemy-border p-4">
+                  <h3 className="text-sm font-bold capitalize mb-2">
+                    {provider === "google" ? "Gemini" : provider}
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(assignmentProviderModels[provider] || []).map((model) => (
+                      <span
+                        key={model}
+                        className="text-xs bg-gray-100 text-udemy-text-muted px-2 py-0.5 rounded-full"
+                      >
+                        {model}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="udemy-card p-6">
           <h2 className="text-lg font-bold mb-2">Study App LLM Assignments</h2>
           <p className="text-xs text-udemy-text-muted mb-4">

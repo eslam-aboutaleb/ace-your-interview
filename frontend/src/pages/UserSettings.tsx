@@ -312,6 +312,20 @@ export default function UserSettingsPage() {
                   >
                     <div className="font-semibold capitalize">{p.provider === "google" ? "Gemini" : p.provider}</div>
                     <div className="text-xs text-udemy-text-muted mt-1">{p.models.length} models</div>
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {p.models.map((m) => (
+                        <span
+                          key={m}
+                          className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                            selectedProvider === p.provider && settings.model === m
+                              ? "bg-udemy-purple text-white"
+                              : "bg-gray-100 text-udemy-text-muted"
+                          }`}
+                        >
+                          {m}
+                        </span>
+                      ))}
+                    </div>
                   </button>
                 ))}
               </div>

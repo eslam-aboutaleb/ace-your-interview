@@ -7,6 +7,7 @@ import os
 import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 
 def _utc_now() -> datetime:
@@ -353,6 +354,170 @@ class LearningStore:
                 }
                 for row in rows
             ]
+        }
+
+    def build_study_plan(
+        self,
+        *,
+        user_id: str,
+        days: int = 7,
+        daily_items: int = 3,
+    ) -> dict[str, Any]:
+        target_days = max(1, min(int(days), 31))
+        target_daily_items = max(1, min(int(daily_items), 10))
+        now = _utc_now()
+        now_iso = _to_iso(now)
+        today_iso = now_iso
+        rows = self._conn.execute(
+            """
+            SELECT
+                topic_id,
+                SUM(attempts) AS attempts,
+                SUM(correct_attempts) AS correct_attempts,
+                AVG(mastery_score) AS mastery_score,
+                SUM(CASE WHEN due_at <= ? THEN 1 ELSE 0 END) AS due_count
+            FROM question_progress
+            WHERE user_id = ?
+            GROUP BY topic_id
+            ORDER BY topic_id ASC
+            """,
+            (today_iso, user_id),
+        ).fetchall()
+
+        days_plan: list[dict[str, Any]] = []
+        if not rows:
+            for idx in range(target_days):
+                day_date = (now + timedelta(days=idx)).date().isoformat()
+                label = "Today" if idx == 0 else f"Day {idx + 1}"
+                days_plan.append(
+                    {
+                        "day_index": idx + 1,
+                        "label": label,
+                        "date": day_date,
+                        "tasks": [],
+                    }
+                )
+            return {
+                "generated_at": now_iso,
+                "days": target_days,
+                "daily_items": target_daily_items,
+                "total_tasks": 0,
+                "days_plan": days_plan,
+            }
+
+        topic_rows: list[dict[str, Any]] = []
+        max_due = 0
+        for row in rows:
+            attempts = int(row["attempts"] or 0)
+            correct_attempts = int(row["correct_attempts"] or 0)
+            mastery = max(0.0, min(1.0, float(row["mastery_score"] or 0.0)))
+            due_count = max(0, int(row["due_count"] or 0))
+            max_due = max(max_due, due_count)
+            accuracy = (correct_attempts / attempts) if attempts > 0 else 0.0
+            topic_rows.append(
+                {
+                    "topic_id": str(row["topic_id"]),
+                    "attempts": attempts,
+                    "accuracy": max(0.0, min(1.0, accuracy)),
+                    "mastery": mastery,
+                    "due_count": due_count,
+                }
+            )
+
+        weak_topics: list[dict[str, Any]] = []
+        for item in topic_rows:
+            due_pressure = (item["due_count"] / max_due) if max_due > 0 else 0.0
+            score = (
+                0.5 * (1.0 - item["mastery"])
+                + 0.3 * due_pressure
+                + 0.2 * (1.0 - item["accuracy"])
+            )
+            weak_topics.append({**item, "score": score})
+
+        weak_topics.sort(
+            key=lambda x: (
+                -x["score"],
+                -x["due_count"],
+                x["mastery"],
+                x["topic_id"],
+            )
+        )
+        due_topics = [x for x in weak_topics if x["due_count"] > 0]
+        due_topics.sort(key=lambda x: (-x["due_count"], x["mastery"], x["topic_id"]))
+        weak_cursor = 0
+
+        def _build_task(task_type: str, topic: dict[str, Any]) -> dict[str, Any]:
+            topic_id = topic["topic_id"]
+            mastery_pct = round(topic["mastery"] * 100)
+            due_count = int(topic["due_count"])
+            if task_type == "review":
+                return {
+                    "task_type": "review",
+                    "topic_id": topic_id,
+                    "title": f"Review due questions for {topic_id}",
+                    "reason": f"{due_count} item(s) due now; current mastery {mastery_pct}%.",
+                    "estimated_minutes": 20,
+                    "cta_route": f"/topics/{topic_id}",
+                }
+            if task_type == "topic_study":
+                return {
+                    "task_type": "topic_study",
+                    "topic_id": topic_id,
+                    "title": f"Targeted study on {topic_id}",
+                    "reason": f"Weakness score priority; mastery {mastery_pct}%.",
+                    "estimated_minutes": 30,
+                    "cta_route": f"/topics/{topic_id}",
+                }
+            return {
+                "task_type": "quiz",
+                "topic_id": topic_id,
+                "title": f"Reinforce {topic_id} with quiz",
+                "reason": f"Validate retention and confidence after focused review.",
+                "estimated_minutes": 15,
+                "cta_route": f"/quiz/{topic_id}",
+            }
+
+        for idx in range(target_days):
+            tasks: list[dict[str, Any]] = []
+            used_topics: set[str] = set()
+
+            if due_topics:
+                due_topic = due_topics[idx % len(due_topics)]
+                tasks.append(_build_task("review", due_topic))
+                used_topics.add(due_topic["topic_id"])
+
+            guard = 0
+            while len(tasks) < target_daily_items and weak_topics and guard < (len(weak_topics) * 3):
+                guard += 1
+                topic = weak_topics[weak_cursor % len(weak_topics)]
+                weak_cursor += 1
+                if (
+                    topic["topic_id"] in used_topics
+                    and len(used_topics) < len(weak_topics)
+                ):
+                    continue
+                task_type = "topic_study" if ((idx + len(tasks)) % 2 == 0) else "quiz"
+                tasks.append(_build_task(task_type, topic))
+                used_topics.add(topic["topic_id"])
+
+            day_date = (now + timedelta(days=idx)).date().isoformat()
+            label = "Today" if idx == 0 else f"Day {idx + 1}"
+            days_plan.append(
+                {
+                    "day_index": idx + 1,
+                    "label": label,
+                    "date": day_date,
+                    "tasks": tasks,
+                }
+            )
+
+        total_tasks = sum(len(day["tasks"]) for day in days_plan)
+        return {
+            "generated_at": now_iso,
+            "days": target_days,
+            "daily_items": target_daily_items,
+            "total_tasks": total_tasks,
+            "days_plan": days_plan,
         }
 
     def upsert_custom_topic(

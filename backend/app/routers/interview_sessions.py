@@ -13,6 +13,7 @@ from app.schemas.models import (
     InterviewSessionResponse,
     InterviewSessionsListResponse,
     InterviewStatsResponse,
+    InterviewTrendsResponse,
     InterviewTurn,
     InterviewTurnResponse,
     NextInterviewQuestionRequest,
@@ -136,6 +137,17 @@ async def interview_stats(user: dict = Depends(require_auth)):
     _ensure_ready()
     assert _store is not None
     return InterviewStatsResponse(**_store.get_stats(user_id=user["user"]))
+
+
+@router.get("/trends", response_model=InterviewTrendsResponse)
+async def interview_trends(
+    limit: int = Query(default=50, ge=1, le=200),
+    user: dict = Depends(require_auth),
+):
+    _ensure_enabled()
+    _ensure_ready()
+    assert _store is not None
+    return InterviewTrendsResponse(**_store.get_trends(user_id=user["user"], limit=limit))
 
 
 @router.get("/{session_id}", response_model=InterviewSessionResponse)

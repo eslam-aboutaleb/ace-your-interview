@@ -84,11 +84,55 @@ class InterviewGenerator:
         return "\n".join(lines)
 
     @staticmethod
+    def _is_coding_session(session: dict[str, Any]) -> bool:
+        return str(session.get("interview_type", "")).strip().lower() == "coding"
+
+    @staticmethod
     def _question_prompt(
         session: dict[str, Any],
         turns: list[dict[str, Any]],
     ) -> str:
         asked = session.get("asked_questions") or []
+        if InterviewGenerator._is_coding_session(session):
+            return f"""You are a senior coding interviewer running a personalized mock interview.
+
+Generate the NEXT coding interview prompt as strict JSON.
+
+Session configuration:
+- track: {session.get('track')}
+- level: {session.get('level')}
+- interview_type: {session.get('interview_type')}
+- target_role: {session.get('target_role') or 'not specified'}
+- focus_areas: {', '.join(session.get('focus_areas') or []) or 'none'}
+- turn_count: {session.get('turn_count')}
+- turns_completed: {session.get('turns_completed')}
+- job_description_text: {(session.get('job_description_text') or '')[:2500]}
+- resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
+
+Recent turns:
+{InterviewGenerator._format_recent_turns(turns)}
+
+Already asked questions (do not repeat semantically):
+{json.dumps(asked[:30], ensure_ascii=True)}
+
+Return ONLY a JSON object:
+{{
+  "question": "string",
+  "competency_focus": "string",
+  "expected_signals": ["signal1", "signal2", "signal3"]
+}}
+
+Rules:
+- Question must be a coding problem statement suitable for live interviews.
+- Include explicit constraints or edge-case hints when useful.
+- Match complexity to level:
+  - junior: arrays/strings/hash maps and straightforward logic.
+  - mid: data structures, complexity tradeoffs, and robust edge handling.
+  - senior: architecture-aware coding, performance constraints, and maintainability.
+- Keep question <= 65 words.
+- expected_signals must contain 2-5 concise bullets and include algorithmic clarity + complexity awareness.
+- No markdown or extra text.
+"""
         return f"""You are a senior interviewer running a personalized mock interview.
 
 Generate the NEXT interview question as strict JSON.
@@ -132,6 +176,16 @@ Rules:
         answer: str,
         turn_index: int,
     ) -> str:
+        coding_rules = ""
+        if InterviewGenerator._is_coding_session(session):
+            coding_rules = """
+- This is a coding interview response. Score with emphasis on:
+  - correctness and edge-case handling,
+  - time/space complexity reasoning,
+  - code clarity and maintainability,
+  - practical tradeoff discussion.
+- If the candidate provides code, reference concrete code-level strengths and fixes.
+"""
         return f"""You are an interview evaluator.
 
 Evaluate the candidate answer and return strict JSON only.
@@ -166,6 +220,7 @@ Return ONLY this JSON object:
 
 Rules:
 - Keep scoring strict and evidence-based.
+- Use the provided question and answer only; do not invent missing implementation details.
 - strengths/improvements must each have 1-4 concise bullets.
 - If answer is weak or vague, score low rather than guessing intent.
 - strengths/improvements should remain plain short strings.
@@ -182,17 +237,20 @@ Rules:
 - If you include fences, always use explicit language tags (for example: ```python, ```mermaid).
 - Keep valid JSON string escaping for newlines, quotes, and backslashes.
 - No extra keys.
+{coding_rules}
 """
 
     @staticmethod
     def _validate_question_payload(
         payload: dict[str, Any],
         asked_questions: list[str],
+        *,
+        max_words: int = 45,
     ) -> tuple[bool, str]:
         q = str(payload.get("question", "")).strip()
         if len(q) < 10:
             return False, "question_too_short"
-        if len(q.split()) > 45:
+        if len(q.split()) > max_words:
             return False, "question_too_long"
 
         focus = str(payload.get("competency_focus", "")).strip()
@@ -296,6 +354,7 @@ Rules:
                 )
         asked = list(session.get("asked_questions") or [])
         prompt = base_prompt
+        max_words = 65 if self._is_coding_session(session) else 45
 
         for _ in range(_MAX_ATTEMPTS):
             result = await self.llm.completion(
@@ -305,7 +364,11 @@ Rules:
             )
             raise_if_policy_blocked_result(result)
             payload = _extract_json(result.get("analysis", "")) if result.get("success") else {}
-            ok, issue = self._validate_question_payload(payload, asked)
+            ok, issue = self._validate_question_payload(
+                payload,
+                asked,
+                max_words=max_words,
+            )
             if ok:
                 signals = payload.get("expected_signals") if isinstance(payload.get("expected_signals"), list) else []
                 return {
@@ -321,6 +384,19 @@ Rules:
         logger.warning("Falling back to deterministic question for session=%s", session.get("session_id"))
         track = session.get("track", "technical")
         level = session.get("level", "mid")
+        if self._is_coding_session(session):
+            return {
+                "question": (
+                    f"For a {level} coding round, implement an LRU cache with get/put operations in O(1), "
+                    "and explain edge cases and complexity tradeoffs."
+                ),
+                "competency_focus": "coding correctness, complexity analysis, and implementation clarity",
+                "expected_signals": [
+                    "Correct data-structure choice",
+                    "Edge-case handling",
+                    "Clear time/space complexity explanation",
+                ],
+            }
         return {
             "question": f"For a {level} {track} interview, explain a recent design decision you would make and one tradeoff you would accept.",
             "competency_focus": "structured reasoning and tradeoff analysis",

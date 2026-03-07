@@ -10,6 +10,7 @@ from app.schemas.models import (
     LearningAttemptRequest,
     LearningAttemptResponse,
     ReviewQueueResponse,
+    StudyPlanResponse,
     TopicMasteryResponse,
     WeakAreasResponse,
 )
@@ -84,3 +85,20 @@ async def topic_mastery(
         raise HTTPException(status_code=503, detail="Learning store not initialised")
     data = _store.get_topic_mastery(user_id=user["user"], limit=limit)
     return TopicMasteryResponse(**data)
+
+
+@router.get("/study-plan", response_model=StudyPlanResponse)
+async def study_plan(
+    days: int = Query(default=7, ge=1, le=31),
+    daily_items: int = Query(default=3, ge=1, le=10),
+    user: dict = Depends(require_auth),
+):
+    _ensure_enabled()
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Learning store not initialised")
+    data = _store.build_study_plan(
+        user_id=user["user"],
+        days=days,
+        daily_items=daily_items,
+    )
+    return StudyPlanResponse(**data)
