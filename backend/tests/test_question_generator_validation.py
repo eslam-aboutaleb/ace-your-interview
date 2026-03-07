@@ -6,6 +6,7 @@ from app.services.question_generator import (
     _build_prompt,
     _build_quiz_prompt,
     _collect_with_retries,
+    _parse_questions_json,
     _validate_question_item,
     _validate_quiz_item,
 )
@@ -154,6 +155,34 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
         )
         self.assertEqual(len(items), 1)
         self.assertIn("idempotency", items[0]["question"].lower())
+
+    def test_parse_questions_json_accepts_single_object_shape(self):
+        parsed = _parse_questions_json(
+            json.dumps(
+                {
+                    "question": "What is an API contract?",
+                    "answer": "An API contract defines request/response behavior and guarantees.",
+                    "difficulty": "easy",
+                }
+            )
+        )
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["question"], "What is an API contract?")
+
+    def test_parse_questions_json_recovers_from_plaintext_question_answer(self):
+        parsed = _parse_questions_json(
+            """
+Question 1: What is idempotency in backend APIs?
+Answer 1: Idempotency means repeating the same request results in the same side effect profile,
+which is essential for safe retries on network failures.
+
+Question 2: Why use pagination for list endpoints?
+Answer 2: Pagination controls payload size, improves latency, and avoids memory pressure for clients and servers.
+"""
+        )
+        self.assertEqual(len(parsed), 2)
+        self.assertIn("idempotency", parsed[0]["question"].lower())
+        self.assertIn("pagination", parsed[1]["question"].lower())
 
     def test_question_prompt_requires_adaptive_markdown_answers(self):
         prompt = _build_prompt(
