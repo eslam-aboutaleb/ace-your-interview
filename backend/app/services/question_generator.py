@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -82,6 +81,23 @@ def _recovery_budget(missing_count: int) -> int:
     return min(_MAX_RECOVERY_ATTEMPTS, max(3, missing * 3))
 
 
+def _normalise_existing_questions(existing_questions: list[str] | None) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in existing_questions or []:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        norm = _normalise_question(text)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        out.append(text)
+        if len(out) >= 80:
+            break
+    return out
+
+
 def _build_prompt(
     topic_id: str,
     topic_title: str,
@@ -94,10 +110,14 @@ def _build_prompt(
     response_detail: str = "concise",
     preferred_language: str = "",
     requires_programming: bool = False,
+    requested_total_count: Optional[int] = None,
+    existing_questions: Optional[list[str]] = None,
     mcp_context: str = "",
 ) -> str:
     problem_solving_mode = is_problem_solving_topic(topic_id)
     target_level = _normalise_level(level)
+    requested_total = max(1, int(requested_total_count or count or 1))
+    existing_seed = _normalise_existing_questions(existing_questions)
     diff_clause = ""
     if difficulty:
         diff_clause = f' All questions should be "{difficulty}" difficulty.'
@@ -151,10 +171,20 @@ def _build_prompt(
         if problem_solving_mode
         else "- Questions must cover conceptual + practical angles."
     ).strip()
+    uniqueness_block = ""
+    if existing_seed:
+        existing_blob = "\n".join([f"- {q}" for q in existing_seed[:60]])
+        uniqueness_block = (
+            "\nAlready generated questions for this checkpoint. Do NOT repeat or rephrase these:\n"
+            f"{existing_blob}\n"
+        )
     return f"""{role_clause}
 
 Given documentation about {scope}, generate exactly {count} interview-style questions with detailed educational answers.{diff_clause}
 Target candidate level: "{target_level}".
+User requested total questions for this checkpoint: {requested_total}.
+This call is generating {count} new questions to fill remaining slots.
+{uniqueness_block}
 
 Return ONLY valid JSON in this shape:
 [
@@ -174,6 +204,7 @@ Return ONLY valid JSON in this shape:
 Rules:
 - Return exactly {count} items; never return fewer.
 - Questions must be standalone and non-duplicative.
+- Questions must be NEW relative to already generated checkpoint questions listed above.
 {problem_scope_rules}
 - Answers must be grounded in the provided documentation.
 - {detail_clause}
@@ -371,34 +402,40 @@ def _validate_question_item(
     difficulty: Optional[str],
     level: Optional[str],
 ) -> tuple[bool, str]:
-    required = [
-        "question",
-        "answer",
-        "learning_objective",
-        "source_section",
-        "source_quote",
-        "misconception_trap",
-        "reasoning_summary",
-        "target_level",
-    ]
-    for key in required:
-        if not isinstance(item.get(key), str) or not item.get(key).strip():
-            return False, f"missing_or_empty_{key}"
+    question = str(item.get("question", "")).strip()
+    answer = str(item.get("answer", "")).strip()
+    if not question:
+        return False, "missing_or_empty_question"
+    if not answer:
+        return False, "missing_or_empty_answer"
 
-    diff = str(item.get("difficulty", "medium")).lower()
+    diff = str(item.get("difficulty", "")).strip().lower()
+    if difficulty:
+        diff = str(difficulty).strip().lower()
     if diff not in _VALID_DIFFICULTIES:
-        return False, "invalid_difficulty"
-    if difficulty and diff != difficulty:
-        return False, "difficulty_mismatch"
-    if len(item["question"].strip()) < 12:
-        return False, "question_too_short"
-    if len(item["answer"].strip()) < 60:
-        return False, "answer_too_short"
-    target_level = str(item.get("target_level", "")).strip().lower()
-    if target_level not in _VALID_LEVELS:
-        return False, "invalid_target_level"
-    if _normalise_level(level) != target_level:
-        return False, "level_mismatch"
+        diff = "medium"
+
+    target_level = _normalise_level(level)
+    item["question"] = question
+    item["answer"] = answer
+    item["learning_objective"] = (
+        str(item.get("learning_objective", "")).strip()
+        or "Assess understanding of the current checkpoint and practical tradeoffs."
+    )
+    item["source_section"] = str(item.get("source_section", "")).strip() or "Topic section"
+    item["source_quote"] = (
+        str(item.get("source_quote", "")).strip()
+        or "Generated from the current topic content."
+    )
+    item["misconception_trap"] = (
+        str(item.get("misconception_trap", "")).strip()
+        or "Overlooking requirements and constraints from the topic context."
+    )
+    item["reasoning_summary"] = (
+        str(item.get("reasoning_summary", "")).strip()
+        or "Start from requirements, then evaluate tradeoffs before finalizing an answer."
+    )
+    item["target_level"] = target_level
     item["topic_id"] = topic_id
     item["difficulty"] = diff
     return True, ""
@@ -505,8 +542,10 @@ async def _collect_with_retries(
     user_identity: Optional[dict] = None,
     target_count: int,
     validator: Callable[[dict[str, Any]], tuple[bool, str]],
+    existing_questions: Optional[list[str]] = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    dedup: set[str] = set()
+    existing_seed = _normalise_existing_questions(existing_questions)
+    dedup: set[str] = {_normalise_question(q) for q in existing_seed}
     valid_items: list[dict[str, Any]] = []
     malformed_items = 0
     retries_used = 0
@@ -530,7 +569,7 @@ async def _collect_with_retries(
                 base_prompt=base_prompt,
                 missing_count=max(1, target_count - len(valid_items)),
                 issues=f"transport_or_provider_error: {last_error}",
-                existing_questions=[x.get("question", "") for x in valid_items],
+                existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
             )
             continue
 
@@ -542,7 +581,7 @@ async def _collect_with_retries(
                 base_prompt=base_prompt,
                 missing_count=max(1, target_count - len(valid_items)),
                 issues="json_parse_failed",
-                existing_questions=[x.get("question", "") for x in valid_items],
+                existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
             )
             continue
 
@@ -577,7 +616,7 @@ async def _collect_with_retries(
             base_prompt=base_prompt,
             missing_count=target_count - len(valid_items),
             issues=top_issues,
-            existing_questions=[x.get("question", "") for x in valid_items],
+            existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
         )
 
     if len(valid_items) < target_count:
@@ -590,7 +629,7 @@ async def _collect_with_retries(
                 base_prompt=base_prompt,
                 missing_count=1,
                 issues="final_recovery_fill_missing_items",
-                existing_questions=[x.get("question", "") for x in valid_items],
+                existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
             )
             result = await llm.completion(
                 single_prompt,
@@ -710,6 +749,8 @@ class QuestionGenerator:
         topic_title: str,
         doc_content: str,
         count: int = 5,
+        requested_total_count: Optional[int] = None,
+        existing_questions: Optional[list[str]] = None,
         difficulty: Optional[str] = None,
         level: Optional[str] = None,
         llm_config: Optional[LLMConfigRequest] = None,
@@ -721,48 +762,48 @@ class QuestionGenerator:
         requires_programming: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(0, int(count))
+        requested_total = max(1, int(requested_total_count or count or 1))
+        seed_existing = _normalise_existing_questions(existing_questions)
         mcp_context = await self._mcp_context_for_flow(
             flow="questions",
             query=f"{topic_title} {section_title or ''} interview questions and practical examples",
             topic_id=topic_id,
             topic_title=topic_title,
         )
-        prompt_base = _build_prompt(
-            topic_id=topic_id,
-            topic_title=topic_title,
-            doc_content=doc_content,
-            count=1,
-            difficulty=difficulty,
-            level=level,
-            section_title=section_title,
-            section_content=section_content,
-            response_detail=response_detail,
-            preferred_language=preferred_language,
-            requires_programming=requires_programming,
-            mcp_context=mcp_context,
-        )
+        dedup_norm: set[str] = {_normalise_question(q) for q in seed_existing}
+        generated_question_texts: list[str] = [*seed_existing]
 
-        dedup_norm: set[str] = set()
-        existing_questions: list[str] = []
-        dedup_lock = asyncio.Lock()
-        semaphore = asyncio.Semaphore(max(1, min(3, target_count or 1)))
-
-        async def _generate_one() -> dict[str, Any]:
+        async def _generate_one(*, include_section: bool) -> dict[str, Any]:
             retries_used = 0
             malformed_dropped = 0
             metadata: dict[str, Any] = {}
-            prompt = prompt_base
             issue_counter: Counter[str] = Counter()
             last_error = ""
+            base_prompt = _build_prompt(
+                topic_id=topic_id,
+                topic_title=topic_title,
+                doc_content=doc_content,
+                count=1,
+                difficulty=difficulty,
+                level=level,
+                section_title=section_title if include_section else None,
+                section_content=section_content if include_section else None,
+                response_detail=response_detail,
+                preferred_language=preferred_language,
+                requires_programming=requires_programming,
+                requested_total_count=requested_total,
+                existing_questions=generated_question_texts,
+                mcp_context=mcp_context,
+            )
+            prompt = base_prompt
 
             try:
                 for _ in range(_attempt_budget(1)):
-                    async with semaphore:
-                        result = await self.llm.completion(
-                            prompt,
-                            llm_config,
-                            user_identity=user_identity,
-                        )
+                    result = await self.llm.completion(
+                        prompt,
+                        llm_config,
+                        user_identity=user_identity,
+                    )
                     raise_if_policy_blocked_result(result)
                     metadata = result.get("metadata", {})
 
@@ -770,13 +811,11 @@ class QuestionGenerator:
                         retries_used += 1
                         last_error = str(result.get("error", "unknown_error"))
                         issue_counter["transport_or_provider_error"] += 1
-                        async with dedup_lock:
-                            existing_snapshot = list(existing_questions)
                         prompt = _build_retry_prompt(
-                            base_prompt=prompt_base,
+                            base_prompt=base_prompt,
                             missing_count=1,
                             issues=f"transport_or_provider_error: {last_error}",
-                            existing_questions=existing_snapshot,
+                            existing_questions=generated_question_texts,
                         )
                         continue
 
@@ -785,13 +824,11 @@ class QuestionGenerator:
                         retries_used += 1
                         malformed_dropped += 1
                         issue_counter["json_parse_failed"] += 1
-                        async with dedup_lock:
-                            existing_snapshot = list(existing_questions)
                         prompt = _build_retry_prompt(
-                            base_prompt=prompt_base,
+                            base_prompt=base_prompt,
                             missing_count=1,
                             issues="json_parse_failed",
-                            existing_questions=existing_snapshot,
+                            existing_questions=generated_question_texts,
                         )
                         continue
 
@@ -815,18 +852,13 @@ class QuestionGenerator:
                             issue_counter["invalid_question"] += 1
                             continue
 
-                        async with dedup_lock:
-                            if q_norm in dedup_norm:
-                                duplicate = True
-                            else:
-                                dedup_norm.add(q_norm)
-                                existing_questions.append(q_text)
-                                duplicate = False
-                        if duplicate:
+                        if q_norm in dedup_norm:
                             malformed_dropped += 1
                             issue_counter["duplicate_question"] += 1
                             continue
 
+                        dedup_norm.add(q_norm)
+                        generated_question_texts.append(q_text)
                         selected_item = item
                         break
 
@@ -844,13 +876,11 @@ class QuestionGenerator:
                         ", ".join(f"{k}:{v}" for k, v in issue_counter.most_common(5))
                         or "insufficient_valid_items"
                     )
-                    async with dedup_lock:
-                        existing_snapshot = list(existing_questions)
                     prompt = _build_retry_prompt(
-                        base_prompt=prompt_base,
+                        base_prompt=base_prompt,
                         missing_count=1,
                         issues=top_issues,
-                        existing_questions=existing_snapshot,
+                        existing_questions=generated_question_texts,
                     )
 
                 if issue_counter:
@@ -916,46 +946,44 @@ class QuestionGenerator:
         malformed_items_dropped = 0
         generated_count = 0
 
-        tasks = [asyncio.create_task(_generate_one()) for _ in range(target_count)]
-        for pending in asyncio.as_completed(tasks):
-            result = await pending
-            retries_used += int(result.get("retries_used", 0))
-            malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
-            metadata = result.get("metadata", {}) or {}
-            if metadata.get("provider"):
-                provider_used = str(metadata.get("provider"))
-            if metadata.get("model"):
-                model_used = str(metadata.get("model"))
+        section_first = bool(section_title and section_content)
+        phase_modes = [True, False] if section_first else [False]
+        for include_section in phase_modes:
+            while generated_count < target_count:
+                result = await _generate_one(include_section=include_section)
+                retries_used += int(result.get("retries_used", 0))
+                malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
+                metadata = result.get("metadata", {}) or {}
+                if metadata.get("provider"):
+                    provider_used = str(metadata.get("provider"))
+                if metadata.get("model"):
+                    model_used = str(metadata.get("model"))
 
-            error = result.get("error")
-            if error:
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+                error = result.get("error")
+                if error:
+                    yield {
+                        "type": "error",
+                        "code": str(error.get("code", "generation_failed")),
+                        "message": str(error.get("message", "Question generation failed")),
+                    }
+                    return
+
+                question = result.get("question")
+                if not isinstance(question, dict):
+                    break
+
+                generated_count += 1
                 yield {
-                    "type": "error",
-                    "code": str(error.get("code", "generation_failed")),
-                    "message": str(error.get("message", "Question generation failed")),
+                    "type": "question",
+                    "question": question,
                 }
-                return
-
-            question = result.get("question")
-            if not isinstance(question, dict):
-                continue
-
-            generated_count += 1
-            yield {
-                "type": "question",
-                "question": question,
-            }
 
         if generated_count < target_count:
             for _ in range(_recovery_budget(target_count - generated_count)):
                 if generated_count >= target_count:
                     break
 
-                result = await _generate_one()
+                result = await _generate_one(include_section=False)
                 retries_used += int(result.get("retries_used", 0))
                 malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
                 metadata = result.get("metadata", {}) or {}
@@ -1000,6 +1028,8 @@ class QuestionGenerator:
         topic_title: str,
         doc_content: str,
         count: int = 5,
+        requested_total_count: Optional[int] = None,
+        existing_questions: Optional[list[str]] = None,
         difficulty: Optional[str] = None,
         level: Optional[str] = None,
         llm_config: Optional[LLMConfigRequest] = None,
@@ -1015,6 +1045,8 @@ class QuestionGenerator:
             topic_title=topic_title,
             doc_content=doc_content,
             count=count,
+            requested_total_count=requested_total_count,
+            existing_questions=existing_questions,
             difficulty=difficulty,
             level=level,
             llm_config=llm_config,
@@ -1051,6 +1083,8 @@ class QuestionGenerator:
         topic_title: str,
         doc_content: str,
         count: int = 5,
+        requested_total_count: Optional[int] = None,
+        existing_questions: Optional[list[str]] = None,
         difficulty: Optional[str] = None,
         level: Optional[str] = None,
         llm_config: Optional[LLMConfigRequest] = None,
@@ -1072,6 +1106,8 @@ class QuestionGenerator:
             topic_title=topic_title,
             doc_content=doc_content,
             count=count,
+            requested_total_count=requested_total_count,
+            existing_questions=existing_questions,
             difficulty=difficulty,
             level=level,
             section_title=section_title,
@@ -1090,6 +1126,7 @@ class QuestionGenerator:
             user_identity=user_identity,
             target_count=count,
             validator=validator,
+            existing_questions=existing_questions,
         )
 
         questions = [self._to_question_answer_v2(topic_id, item) for item in raw_items]

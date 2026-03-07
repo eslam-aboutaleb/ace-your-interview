@@ -78,9 +78,10 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "done")
         self.assertEqual(events[-1]["generated_count"], 3)
 
-    def test_generate_v2_stream_filters_duplicates_and_can_finish_partial(self):
+    def test_generate_v2_stream_filters_duplicates_and_recovers_full_count(self):
         duplicate = json.dumps([_question_payload("Explain consistency models in distributed systems.")])
-        llm = FakeLLM([duplicate])
+        unique = json.dumps([_question_payload("When should quorum reads be preferred over leader-only reads?")])
+        llm = FakeLLM([duplicate, duplicate, unique])
         generator = QuestionGenerator(llm)
 
         events = asyncio.run(
@@ -98,8 +99,8 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
         question_events = [e for e in events if e.get("type") == "question"]
         done_event = events[-1]
         self.assertEqual(done_event["type"], "done")
-        self.assertEqual(len(question_events), 1)
-        self.assertEqual(done_event["generated_count"], 1)
+        self.assertEqual(len(question_events), 2)
+        self.assertEqual(done_event["generated_count"], 2)
         self.assertGreater(done_event["retries_used"], 0)
 
 
