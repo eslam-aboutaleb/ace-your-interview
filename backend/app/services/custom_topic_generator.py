@@ -10,6 +10,7 @@ from typing import Any, Optional
 from app.schemas.models import LLMConfigRequest, TopicDetail
 from app.services.llm_client import LLMClient
 from app.services.llm_policy import raise_if_policy_blocked_result
+from app.services.mcp_gateway import MCPGateway
 
 logger = logging.getLogger(__name__)
 
@@ -515,10 +516,15 @@ def _build_raw_content(title: str, description: str, sections: list[dict[str, st
     return "\n".join(parts).strip()
 
 
-def _build_prompt(topic: str, target_sections: int) -> str:
+def _build_prompt(topic: str, target_sections: int, mcp_context: str = "") -> str:
     junior_count = target_sections // 3
     mid_count = target_sections // 3
     senior_count = target_sections - junior_count - mid_count
+    mcp_block = (
+        f"\n\nExternal context (optional, use only if relevant and factual):\n{mcp_context[:2500]}"
+        if mcp_context
+        else ""
+    )
     return f"""You are an expert curriculum architect and technical interview coach.
 Design this as if you are preparing someone to become a strong practitioner and teacher in the topic.
 
@@ -561,6 +567,7 @@ Hard constraints:
 - Every section heading should stand alone as a teachable lesson title.
 - Keep each section content concise and practical.
 - Output JSON only with escaped newlines/quotes/backslashes.
+{mcp_block}
 """
 
 
@@ -587,8 +594,9 @@ def _fallback_topic_detail(topic: str, topic_id: str, target_sections: int) -> T
 class CustomTopicGenerator:
     """Generate custom roadmap content with deterministic topic IDs."""
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, mcp_gateway: MCPGateway | None = None):
         self.llm = llm_client
+        self.mcp = mcp_gateway
 
     async def generate_topic(
         self,
@@ -603,7 +611,15 @@ class CustomTopicGenerator:
             source_topic = "Custom Topic"
         target = _clamp_target_sections(target_sections)
         topic_id = f"custom-{_slugify_topic(source_topic)}"
-        prompt = _build_prompt(source_topic, target)
+        mcp_context = ""
+        if self.mcp:
+            mcp_context = await self.mcp.gather_context(
+                flow="custom_topic",
+                query=f"{source_topic} technical learning roadmap and interview preparation",
+                topic_id=topic_id,
+                topic_title=source_topic,
+            )
+        prompt = _build_prompt(source_topic, target, mcp_context=mcp_context)
 
         for _ in range(_MAX_ATTEMPTS):
             result = await self.llm.completion(

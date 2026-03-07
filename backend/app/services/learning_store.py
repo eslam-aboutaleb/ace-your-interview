@@ -108,6 +108,36 @@ class LearningStore:
                 ON custom_topics(user_id, updated_at DESC)
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS topic_user_preferences (
+                    user_id TEXT NOT NULL,
+                    topic_id TEXT NOT NULL,
+                    response_detail TEXT NOT NULL,
+                    preferred_language TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, topic_id)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS topic_language_profiles (
+                    topic_id TEXT PRIMARY KEY,
+                    requires_programming INTEGER NOT NULL,
+                    language_options_json TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_topic_language_profiles_updated
+                ON topic_language_profiles(updated_at DESC)
+                """
+            )
 
     @staticmethod
     def _event_score(is_correct: bool, confidence: int) -> float:
@@ -486,3 +516,253 @@ class LearningStore:
         if not row:
             return None
         return self._custom_topic_row_to_detail(row)
+
+    @staticmethod
+    def _normalise_response_detail(value: str | None) -> str:
+        detail = str(value or "").strip().lower()
+        if detail == "very_detailed":
+            return "very_detailed"
+        return "concise"
+
+    @staticmethod
+    def _normalise_language(value: str | None) -> str:
+        return str(value or "").strip().lower()[:60]
+
+    @staticmethod
+    def _normalise_language_options(options: list[str] | None) -> list[str]:
+        out: list[str] = []
+        for raw in options or []:
+            lang = str(raw or "").strip().lower()
+            if not lang or lang in out:
+                continue
+            out.append(lang)
+            if len(out) >= 8:
+                break
+        return out
+
+    @staticmethod
+    def _infer_requires_programming_from_topic(topic_detail: dict | None) -> bool:
+        if not isinstance(topic_detail, dict):
+            return False
+        track = str(topic_detail.get("track", "")).strip().lower()
+        text = (
+            f"{topic_detail.get('id', '')} {topic_detail.get('title', '')} "
+            f"{topic_detail.get('description', '')}"
+        ).lower()
+        if track in {"backend", "frontend"}:
+            return True
+        if track == "ai_stack":
+            return any(
+                key in text
+                for key in (
+                    "agent",
+                    "rag",
+                    "prompt",
+                    "python",
+                    "javascript",
+                    "typescript",
+                    "llm app",
+                    "serving",
+                )
+            )
+        if track == "system_design":
+            return any(
+                key in text
+                for key in (
+                    "algorithm",
+                    "coding",
+                    "implementation",
+                    "api",
+                    "database",
+                    "java",
+                    "python",
+                    "typescript",
+                )
+            )
+        return any(
+            key in text
+            for key in (
+                "code",
+                "coding",
+                "programming",
+                "implementation",
+                "api",
+                "service",
+                "backend",
+                "frontend",
+            )
+        )
+
+    def get_topic_preferences(self, *, user_id: str, topic_id: str) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT user_id, topic_id, response_detail, preferred_language, created_at, updated_at
+            FROM topic_user_preferences
+            WHERE user_id = ? AND topic_id = ?
+            LIMIT 1
+            """,
+            (user_id, topic_id),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "topic_id": str(row["topic_id"]),
+            "response_detail": self._normalise_response_detail(str(row["response_detail"])),
+            "preferred_language": self._normalise_language(str(row["preferred_language"])),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def upsert_topic_preferences(
+        self,
+        *,
+        user_id: str,
+        topic_id: str,
+        response_detail: str | None = None,
+        preferred_language: str | None = None,
+    ) -> dict:
+        now_iso = _to_iso(_utc_now())
+        existing = self.get_topic_preferences(user_id=user_id, topic_id=topic_id)
+        next_response_detail = (
+            self._normalise_response_detail(response_detail)
+            if response_detail is not None
+            else (existing or {}).get("response_detail", "concise")
+        )
+        next_language = (
+            self._normalise_language(preferred_language)
+            if preferred_language is not None
+            else (existing or {}).get("preferred_language", "")
+        )
+        created_at = (existing or {}).get("created_at", now_iso)
+
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO topic_user_preferences(
+                        user_id, topic_id, response_detail, preferred_language, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, topic_id) DO UPDATE SET
+                        response_detail = excluded.response_detail,
+                        preferred_language = excluded.preferred_language,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        user_id,
+                        topic_id,
+                        next_response_detail,
+                        next_language,
+                        created_at,
+                        now_iso,
+                    ),
+                )
+        return {
+            "topic_id": topic_id,
+            "response_detail": next_response_detail,
+            "preferred_language": next_language,
+            "created_at": created_at,
+            "updated_at": now_iso,
+        }
+
+    def get_topic_language_profile(self, *, topic_id: str) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT topic_id, requires_programming, language_options_json, source, updated_at
+            FROM topic_language_profiles
+            WHERE topic_id = ?
+            LIMIT 1
+            """,
+            (topic_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "topic_id": str(row["topic_id"]),
+            "requires_programming": bool(int(row["requires_programming"])),
+            "language_options": self._normalise_language_options(
+                [str(v) for v in self._loads_json_list(str(row["language_options_json"]))]
+            ),
+            "source": str(row["source"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def upsert_topic_language_profile(
+        self,
+        *,
+        topic_id: str,
+        requires_programming: bool,
+        language_options: list[str],
+        source: str,
+    ) -> dict:
+        now_iso = _to_iso(_utc_now())
+        normalized_options = self._normalise_language_options(language_options)
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO topic_language_profiles(
+                        topic_id, requires_programming, language_options_json, source, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(topic_id) DO UPDATE SET
+                        requires_programming = excluded.requires_programming,
+                        language_options_json = excluded.language_options_json,
+                        source = excluded.source,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        topic_id,
+                        1 if requires_programming else 0,
+                        json.dumps(normalized_options, ensure_ascii=True),
+                        str(source or "").strip()[:80] or "unknown",
+                        now_iso,
+                    ),
+                )
+        return {
+            "topic_id": topic_id,
+            "requires_programming": bool(requires_programming),
+            "language_options": normalized_options,
+            "source": str(source or "").strip()[:80] or "unknown",
+            "updated_at": now_iso,
+        }
+
+    def resolve_topic_ai_settings(
+        self,
+        *,
+        user_id: str,
+        topic_id: str,
+        topic_detail: dict | None,
+    ) -> dict:
+        profile = self.get_topic_language_profile(topic_id=topic_id)
+        prefs = self.get_topic_preferences(user_id=user_id, topic_id=topic_id)
+
+        requires_programming = (
+            bool(profile["requires_programming"])
+            if profile is not None
+            else self._infer_requires_programming_from_topic(topic_detail)
+        )
+        language_options = (
+            self._normalise_language_options(profile.get("language_options", []))
+            if profile is not None
+            else []
+        )
+        response_detail = self._normalise_response_detail(
+            (prefs or {}).get("response_detail", "concise")
+        )
+        preferred_language = self._normalise_language((prefs or {}).get("preferred_language", ""))
+
+        if not requires_programming:
+            preferred_language = ""
+        elif preferred_language and language_options and preferred_language not in language_options:
+            preferred_language = ""
+        if requires_programming and not preferred_language and language_options:
+            preferred_language = language_options[0]
+
+        return {
+            "topic_id": topic_id,
+            "response_detail": response_detail,
+            "preferred_language": preferred_language,
+            "requires_programming": requires_programming,
+            "language_options": language_options,
+            "profile_source": (profile or {}).get("source", ""),
+            "profile_updated_at": (profile or {}).get("updated_at", ""),
+        }

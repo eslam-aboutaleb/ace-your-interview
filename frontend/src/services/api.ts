@@ -4,6 +4,8 @@ import type {
   InterviewLevel,
   TopicSummary,
   TopicDetail,
+  TopicPreferencesResponse,
+  TopicPreferencesUpdateRequest,
   CreateCustomTopicRequest,
   CustomTopicStreamDoneEvent,
   CustomTopicStreamEvent,
@@ -196,6 +198,26 @@ export async function fetchTopics(
 
 export async function fetchTopic(topicId: string): Promise<TopicDetail> {
   const { data } = await api.get<TopicDetail>(`/topics/${topicId}`);
+  return data;
+}
+
+export async function fetchTopicPreferences(
+  topicId: string,
+): Promise<TopicPreferencesResponse> {
+  const { data } = await api.get<TopicPreferencesResponse>(
+    `/topics/${topicId}/preferences`,
+  );
+  return data;
+}
+
+export async function updateTopicPreferences(
+  topicId: string,
+  payload: TopicPreferencesUpdateRequest,
+): Promise<TopicPreferencesResponse> {
+  const { data } = await api.put<TopicPreferencesResponse>(
+    `/topics/${topicId}/preferences`,
+    payload,
+  );
   return data;
 }
 

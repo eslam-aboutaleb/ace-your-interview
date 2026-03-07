@@ -24,6 +24,7 @@ from app.services.interview_generator import InterviewGenerator
 from app.services.interview_store import InterviewStore
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
+from app.services.mcp_gateway import MCPGateway
 
 router = APIRouter(prefix="/api/interview-sessions", tags=["interview-sessions"])
 
@@ -38,10 +39,11 @@ def init(
     parser: DocParser,
     learning_store: LearningStore,
     db_path: str,
+    mcp_gateway: MCPGateway | None = None,
 ):
     global _store, _generator, _parser, _learning_store
     _store = InterviewStore(db_path)
-    _generator = InterviewGenerator(llm_client, parser)
+    _generator = InterviewGenerator(llm_client, parser, mcp_gateway=mcp_gateway)
     _parser = parser
     _learning_store = learning_store
 

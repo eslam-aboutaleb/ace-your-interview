@@ -91,12 +91,13 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
             count=3,
             level="mid",
         )
-        self.assertIn("default to clear prose paragraphs", prompt)
+        self.assertIn("short readable paragraphs", prompt)
         self.assertIn("use bullets only when listing steps/checklists/categories", prompt)
         self.assertIn("valid GFM table syntax", prompt)
         self.assertIn("fenced code blocks", prompt)
         self.assertIn("fenced Mermaid diagrams", prompt)
         self.assertIn("valid JSON, escape newlines", prompt)
+        self.assertIn("Return exactly 3 items", prompt)
 
     def test_quiz_prompt_requires_adaptive_markdown_explanations(self):
         prompt = _build_quiz_prompt(
@@ -105,12 +106,13 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
             question_types=["mcq"],
             level="mid",
         )
-        self.assertIn("default to clear prose paragraphs", prompt)
+        self.assertIn("short readable paragraphs", prompt)
         self.assertIn("use bullets only when listing steps/checklists/categories", prompt)
         self.assertIn("valid GFM table syntax", prompt)
         self.assertIn("fenced code blocks", prompt)
         self.assertIn("fenced Mermaid diagrams", prompt)
         self.assertIn("valid JSON, escape newlines", prompt)
+        self.assertIn("Return exactly 3 items", prompt)
 
 
 if __name__ == "__main__":

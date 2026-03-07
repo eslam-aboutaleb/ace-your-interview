@@ -11,6 +11,8 @@ from app.schemas.models import LLMConfigRequest
 from app.services.doc_parser import DocParser
 from app.services.llm_client import LLMClient
 from app.services.llm_policy import raise_if_policy_blocked_result
+from app.services.markdown_formatter import format_markdown_readable
+from app.services.mcp_gateway import MCPGateway
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +65,10 @@ def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
 class InterviewGenerator:
     """Handles interview question creation, evaluation, and report synthesis."""
 
-    def __init__(self, llm: LLMClient, parser: DocParser):
+    def __init__(self, llm: LLMClient, parser: DocParser, mcp_gateway: MCPGateway | None = None):
         self.llm = llm
         self.parser = parser
+        self.mcp = mcp_gateway
 
     @staticmethod
     def _format_recent_turns(turns: list[dict[str, Any]]) -> str:
@@ -167,7 +170,7 @@ Rules:
 - If answer is weak or vague, score low rather than guessing intent.
 - strengths/improvements should remain plain short strings.
 - follow_up_note should use adaptive markdown structure:
-  - default to concise coaching prose,
+  - default to concise coaching prose in short readable paragraphs,
   - use bullets only when giving multi-step action plans,
   - use headings only when sections improve clarity,
   - use tables only for direct option/tradeoff comparisons.
@@ -279,6 +282,18 @@ Rules:
         user_identity: Optional[dict] = None,
     ) -> dict[str, Any]:
         base_prompt = self._question_prompt(session, turns)
+        if self.mcp is not None:
+            mcp_context = await self.mcp.gather_context(
+                flow="interview",
+                query=f"{session.get('track')} {session.get('target_role') or ''} interview question patterns",
+                topic_id=session.get("track", ""),
+                topic_title=session.get("target_role", ""),
+            )
+            if mcp_context:
+                base_prompt = (
+                    f"{base_prompt}\n\nExternal context (optional, use only if relevant and factual):\n"
+                    f"{mcp_context[:2200]}"
+                )
         asked = list(session.get("asked_questions") or [])
         prompt = base_prompt
 
@@ -327,6 +342,18 @@ Rules:
         user_identity: Optional[dict] = None,
     ) -> dict[str, Any]:
         base_prompt = self._evaluate_prompt(session, question, user_answer, turn_index)
+        if self.mcp is not None:
+            mcp_context = await self.mcp.gather_context(
+                flow="interview",
+                query=f"{session.get('track')} interview answer evaluation rubric",
+                topic_id=session.get("track", ""),
+                topic_title=session.get("target_role", ""),
+            )
+            if mcp_context:
+                base_prompt = (
+                    f"{base_prompt}\n\nExternal context (optional, use only if relevant and factual):\n"
+                    f"{mcp_context[:2200]}"
+                )
         prompt = base_prompt
 
         for _ in range(_MAX_ATTEMPTS):
@@ -339,7 +366,11 @@ Rules:
             payload = _extract_json(result.get("analysis", "")) if result.get("success") else {}
             ok, issue = self._validate_eval_payload(payload)
             if ok:
-                return self._normalise_eval_payload(payload)
+                normalized = self._normalise_eval_payload(payload)
+                normalized["follow_up_note"] = format_markdown_readable(
+                    normalized.get("follow_up_note", "")
+                )
+                return normalized
             prompt = (
                 f"Your previous JSON was invalid ({issue}). Return only corrected JSON.\n\n"
                 f"{base_prompt}"

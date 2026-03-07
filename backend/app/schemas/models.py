@@ -37,7 +37,13 @@ class InterviewTypeEnum(str, Enum):
     TECHNICAL = "technical"
     SYSTEM_DESIGN = "system_design"
     AI_FUNDAMENTALS = "ai_fundamentals"
+    CODING = "coding"
     MIXED = "mixed"
+
+
+class ResponseDetailEnum(str, Enum):
+    CONCISE = "concise"
+    VERY_DETAILED = "very_detailed"
 
 
 # Maps REST enum string → proto int
@@ -80,6 +86,8 @@ class GenerateQuestionsRequest(BaseModel):
     count: int = Field(default=5, ge=1, le=100)
     difficulty: Optional[str] = Field(default=None, pattern="^(easy|medium|hard)$")
     level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
+    response_detail: Optional[ResponseDetailEnum] = None
+    preferred_language: Optional[str] = Field(default=None, max_length=60)
     llm_config: Optional[LLMConfigRequest] = None
     section_title: Optional[str] = None
     section_content: Optional[str] = None
@@ -140,12 +148,29 @@ class TopicDetail(BaseModel):
     levels: list[str] = Field(default_factory=list)
     sections: list[dict[str, str]]  # [{heading, content}]
     raw_content: str = ""
+    requires_programming: bool = False
+    language_options: list[str] = Field(default_factory=list)
+    selected_language: str = ""
+    response_detail: ResponseDetailEnum = ResponseDetailEnum.CONCISE
 
 
 class CreateCustomTopicRequest(BaseModel):
     topic: str = Field(..., min_length=2, max_length=120)
     target_sections: int = Field(default=120, ge=100, le=150)
     llm_config: Optional[LLMConfigRequest] = None
+
+
+class TopicPreferencesResponse(BaseModel):
+    topic_id: str
+    response_detail: ResponseDetailEnum = ResponseDetailEnum.CONCISE
+    preferred_language: str = ""
+    requires_programming: bool = False
+    language_options: list[str] = Field(default_factory=list)
+
+
+class TopicPreferencesUpdateRequest(BaseModel):
+    response_detail: Optional[ResponseDetailEnum] = None
+    preferred_language: Optional[str] = Field(default=None, max_length=60)
 
 
 class ProviderStatus(BaseModel):
@@ -260,6 +285,9 @@ class ChatFollowUpRequest(BaseModel):
     topic_track: str = ""
     section_title: str = ""
     mode: str = ""
+    response_detail: Optional[ResponseDetailEnum] = None
+    preferred_language: Optional[str] = Field(default=None, max_length=60)
+    requires_programming: Optional[bool] = None
     user_message: str
     history: list[ChatMessage] = []
     llm_config: Optional[LLMConfigRequest] = None
@@ -298,6 +326,8 @@ class GenerateQuizRequest(BaseModel):
     question_types: list[QuizQuestionType] = [QuizQuestionType.MCQ, QuizQuestionType.TRUE_FALSE]
     difficulty: Optional[str] = Field(default=None, pattern="^(easy|medium|hard)$")
     level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
+    response_detail: Optional[ResponseDetailEnum] = None
+    preferred_language: Optional[str] = Field(default=None, max_length=60)
     llm_config: Optional[LLMConfigRequest] = None
 
 
@@ -390,6 +420,36 @@ class TopicMasteryItem(BaseModel):
 
 class TopicMasteryResponse(BaseModel):
     topics: list[TopicMasteryItem]
+
+
+class StudyPlanTaskType(str, Enum):
+    REVIEW = "review"
+    TOPIC_STUDY = "topic_study"
+    QUIZ = "quiz"
+
+
+class StudyPlanTask(BaseModel):
+    task_type: StudyPlanTaskType
+    topic_id: str
+    title: str
+    reason: str
+    estimated_minutes: int = Field(default=20, ge=5, le=120)
+    cta_route: str
+
+
+class StudyPlanDay(BaseModel):
+    day_index: int = Field(ge=1, le=31)
+    label: str
+    date: str
+    tasks: list[StudyPlanTask] = Field(default_factory=list)
+
+
+class StudyPlanResponse(BaseModel):
+    generated_at: str
+    days: int = Field(default=7, ge=1, le=31)
+    daily_items: int = Field(default=3, ge=1, le=10)
+    total_tasks: int = 0
+    days_plan: list[StudyPlanDay] = Field(default_factory=list)
 
 
 # ── Mock Interview Models ────────────────────────────────────
@@ -510,6 +570,29 @@ class InterviewStatsResponse(BaseModel):
     total_sessions: int = 0
     completed_sessions: int = 0
     interview_readiness_score: float = 0.0
+
+
+class InterviewTrendPoint(BaseModel):
+    session_id: str
+    completed_at: str
+    overall_score: float = 0.0
+    rubric_averages: RubricAverages = Field(default_factory=RubricAverages)
+    track: TrackEnum
+    level: LevelEnum
+    interview_type: InterviewTypeEnum
+    readiness_label: str = ""
+
+
+class InterviewTrendsSummary(BaseModel):
+    latest_score: float = 0.0
+    previous_score: float = 0.0
+    delta: float = 0.0
+    session_count: int = 0
+
+
+class InterviewTrendsResponse(BaseModel):
+    points: list[InterviewTrendPoint] = Field(default_factory=list)
+    summary: InterviewTrendsSummary = Field(default_factory=InterviewTrendsSummary)
 
 
 # ── Ollama Models ────────────────────────────────────────────

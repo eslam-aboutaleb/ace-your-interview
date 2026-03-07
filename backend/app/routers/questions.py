@@ -22,6 +22,7 @@ from app.schemas.models import (
 from app.services.doc_parser import DocParser
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
+from app.services.mcp_gateway import MCPGateway
 from app.services.question_generator import QuestionGenerator
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
@@ -30,13 +31,20 @@ router = APIRouter(prefix="/api/questions", tags=["questions"])
 _llm_client: LLMClient | None = None
 _parser: DocParser | None = None
 _learning_store: LearningStore | None = None
+_mcp_gateway: MCPGateway | None = None
 
 
-def init(llm_client: LLMClient, parser: DocParser, learning_store: LearningStore):
-    global _llm_client, _parser, _learning_store
+def init(
+    llm_client: LLMClient,
+    parser: DocParser,
+    learning_store: LearningStore,
+    mcp_gateway: MCPGateway | None = None,
+):
+    global _llm_client, _parser, _learning_store, _mcp_gateway
     _llm_client = llm_client
     _parser = parser
     _learning_store = learning_store
+    _mcp_gateway = mcp_gateway
 
 
 def _ensure_services() -> tuple[LLMClient, DocParser, LearningStore]:
@@ -58,6 +66,33 @@ def _resolve_topic_for_user(*, topic_id: str, user_id: str) -> tuple[TopicDetail
     return None
 
 
+def _resolve_ai_settings(
+    *,
+    store: LearningStore,
+    user_id: str,
+    topic: TopicDetail,
+    response_detail_override: str | None,
+    preferred_language_override: str | None,
+) -> dict:
+    resolved = store.resolve_topic_ai_settings(
+        user_id=user_id,
+        topic_id=topic.id,
+        topic_detail=topic.model_dump(mode="json"),
+    )
+    if response_detail_override is not None:
+        resolved["response_detail"] = (
+            "very_detailed" if str(response_detail_override) == "very_detailed" else "concise"
+        )
+    if preferred_language_override is not None:
+        normalized = preferred_language_override.strip().lower()
+        if resolved.get("requires_programming"):
+            allowed = [str(v) for v in resolved.get("language_options", [])]
+            resolved["preferred_language"] = normalized if (not normalized or normalized in allowed) else ""
+        else:
+            resolved["preferred_language"] = ""
+    return resolved
+
+
 @router.post("/generate", response_model=GenerateQuestionsResponse)
 async def generate_questions(
     body: GenerateQuestionsRequest,
@@ -70,7 +105,15 @@ async def generate_questions(
     if not resolved:
         raise HTTPException(status_code=404, detail=f"Topic '{body.topic_id}' not found")
     topic, doc_content = resolved
-    generator = QuestionGenerator(llm_client)
+    _, _, store = _ensure_services()
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    ai_settings = _resolve_ai_settings(
+        store=store,
+        user_id=user["user"],
+        topic=topic,
+        response_detail_override=(body.response_detail.value if body.response_detail else None),
+        preferred_language_override=body.preferred_language,
+    )
 
     return await generator.generate(
         topic_id=body.topic_id,
@@ -83,6 +126,9 @@ async def generate_questions(
         user_identity=user,
         section_title=body.section_title,
         section_content=body.section_content,
+        response_detail=ai_settings.get("response_detail", "concise"),
+        preferred_language=ai_settings.get("preferred_language", ""),
+        requires_programming=bool(ai_settings.get("requires_programming")),
     )
 
 
@@ -100,7 +146,15 @@ async def generate_questions_v2(
     if not resolved:
         raise HTTPException(status_code=404, detail=f"Topic '{body.topic_id}' not found")
     topic, doc_content = resolved
-    generator = QuestionGenerator(llm_client)
+    _, _, store = _ensure_services()
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    ai_settings = _resolve_ai_settings(
+        store=store,
+        user_id=user["user"],
+        topic=topic,
+        response_detail_override=(body.response_detail.value if body.response_detail else None),
+        preferred_language_override=body.preferred_language,
+    )
     return await generator.generate_v2(
         topic_id=body.topic_id,
         topic_title=topic.title,
@@ -112,6 +166,9 @@ async def generate_questions_v2(
         user_identity=user,
         section_title=body.section_title,
         section_content=body.section_content,
+        response_detail=ai_settings.get("response_detail", "concise"),
+        preferred_language=ai_settings.get("preferred_language", ""),
+        requires_programming=bool(ai_settings.get("requires_programming")),
     )
 
 
@@ -129,7 +186,15 @@ async def generate_questions_v2_stream(
     if not resolved:
         raise HTTPException(status_code=404, detail=f"Topic '{body.topic_id}' not found")
     topic, doc_content = resolved
-    generator = QuestionGenerator(llm_client)
+    _, _, store = _ensure_services()
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    ai_settings = _resolve_ai_settings(
+        store=store,
+        user_id=user["user"],
+        topic=topic,
+        response_detail_override=(body.response_detail.value if body.response_detail else None),
+        preferred_language_override=body.preferred_language,
+    )
 
     async def _event_stream():
         async for event in generator.generate_v2_stream(
@@ -143,6 +208,9 @@ async def generate_questions_v2_stream(
             user_identity=user,
             section_title=body.section_title,
             section_content=body.section_content,
+            response_detail=ai_settings.get("response_detail", "concise"),
+            preferred_language=ai_settings.get("preferred_language", ""),
+            requires_programming=bool(ai_settings.get("requires_programming")),
         ):
             yield json.dumps(event) + "\n"
             await asyncio.sleep(0)
@@ -166,30 +234,43 @@ async def generate_quiz(
     """Generate MCQ and/or True/False quiz questions across one or more topics."""
     llm_client, _, _ = _ensure_services()
 
+    _, _, store = _ensure_services()
     topics_content: list[dict] = []
     for tid in body.topic_ids:
         resolved = _resolve_topic_for_user(topic_id=tid, user_id=user["user"])
         if not resolved:
             raise HTTPException(status_code=404, detail=f"Topic '{tid}' not found")
         topic, doc_content = resolved
+        ai_settings = _resolve_ai_settings(
+            store=store,
+            user_id=user["user"],
+            topic=topic,
+            response_detail_override=(body.response_detail.value if body.response_detail else None),
+            preferred_language_override=body.preferred_language,
+        )
         topics_content.append(
             {
                 "id": tid,
                 "title": topic.title,
                 "content": doc_content,
+                "response_detail": ai_settings.get("response_detail", "concise"),
+                "preferred_language": ai_settings.get("preferred_language", ""),
+                "requires_programming": bool(ai_settings.get("requires_programming")),
             }
         )
 
     if not topics_content:
         raise HTTPException(status_code=400, detail="At least one topic_id required")
 
-    generator = QuestionGenerator(llm_client)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
     return await generator.generate_quiz(
         topics_content=topics_content,
         count=body.count,
         question_types=[qt.value for qt in body.question_types],
         difficulty=body.difficulty,
         level=body.level,
+        response_detail=(body.response_detail.value if body.response_detail else None),
+        preferred_language=(body.preferred_language or ""),
         llm_config=body.llm_config,
         user_identity=user,
     )
@@ -205,30 +286,43 @@ async def generate_quiz_v2(
     if not get_settings().enable_v2_generation:
         raise HTTPException(status_code=404, detail="v2 generation disabled")
 
+    _, _, store = _ensure_services()
     topics_content: list[dict] = []
     for tid in body.topic_ids:
         resolved = _resolve_topic_for_user(topic_id=tid, user_id=user["user"])
         if not resolved:
             raise HTTPException(status_code=404, detail=f"Topic '{tid}' not found")
         topic, doc_content = resolved
+        ai_settings = _resolve_ai_settings(
+            store=store,
+            user_id=user["user"],
+            topic=topic,
+            response_detail_override=(body.response_detail.value if body.response_detail else None),
+            preferred_language_override=body.preferred_language,
+        )
         topics_content.append(
             {
                 "id": tid,
                 "title": topic.title,
                 "content": doc_content,
+                "response_detail": ai_settings.get("response_detail", "concise"),
+                "preferred_language": ai_settings.get("preferred_language", ""),
+                "requires_programming": bool(ai_settings.get("requires_programming")),
             }
         )
 
     if not topics_content:
         raise HTTPException(status_code=400, detail="At least one topic_id required")
 
-    generator = QuestionGenerator(llm_client)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
     return await generator.generate_quiz_v2(
         topics_content=topics_content,
         count=body.count,
         question_types=[qt.value for qt in body.question_types],
         difficulty=body.difficulty,
         level=body.level,
+        response_detail=(body.response_detail.value if body.response_detail else None),
+        preferred_language=(body.preferred_language or ""),
         llm_config=body.llm_config,
         user_identity=user,
     )

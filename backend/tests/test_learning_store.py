@@ -116,6 +116,60 @@ class LearningStoreTests(unittest.TestCase):
             self.assertEqual(len(store.list_custom_topics(user_id="alice")), 1)
             self.assertEqual(len(store.list_custom_topics(user_id="bob")), 0)
 
+    def test_topic_preferences_and_language_profiles(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "learning.db")
+            store = LearningStore(db_path)
+
+            pref = store.get_topic_preferences(user_id="alice", topic_id="01-static")
+            self.assertIsNone(pref)
+
+            saved = store.upsert_topic_preferences(
+                user_id="alice",
+                topic_id="01-static",
+                response_detail="very_detailed",
+                preferred_language="python",
+            )
+            self.assertEqual(saved["response_detail"], "very_detailed")
+            self.assertEqual(saved["preferred_language"], "python")
+
+            profile = store.upsert_topic_language_profile(
+                topic_id="01-static",
+                requires_programming=True,
+                language_options=["python", "go", "python", "typescript"],
+                source="llm",
+            )
+            self.assertTrue(profile["requires_programming"])
+            self.assertEqual(profile["language_options"], ["python", "go", "typescript"])
+
+            resolved = store.resolve_topic_ai_settings(
+                user_id="alice",
+                topic_id="01-static",
+                topic_detail={
+                    "id": "01-static",
+                    "title": "Static",
+                    "description": "Static description",
+                    "track": "backend",
+                },
+            )
+            self.assertEqual(resolved["response_detail"], "very_detailed")
+            self.assertEqual(resolved["preferred_language"], "python")
+            self.assertTrue(resolved["requires_programming"])
+
+    def test_topic_preferences_are_user_isolated(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "learning.db")
+            store = LearningStore(db_path)
+
+            store.upsert_topic_preferences(
+                user_id="alice",
+                topic_id="topic-1",
+                response_detail="very_detailed",
+                preferred_language="typescript",
+            )
+            bob_pref = store.get_topic_preferences(user_id="bob", topic_id="topic-1")
+            self.assertIsNone(bob_pref)
+
 
 if __name__ == "__main__":
     unittest.main()
