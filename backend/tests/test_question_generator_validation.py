@@ -156,6 +156,67 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertIn("idempotency", items[0]["question"].lower())
 
+    def test_collect_with_retries_filters_near_duplicate_paraphrases(self):
+        class FakeLLM:
+            def __init__(self):
+                self.calls = 0
+
+            async def completion(self, prompt, llm_config=None, user_identity=None):
+                self.calls += 1
+                if self.calls == 1:
+                    payload = [
+                        {
+                            "question": "How do you design retry-safe API endpoints?",
+                            "answer": "Use idempotency and bounded retries with backoff.",
+                            "difficulty": "medium",
+                        },
+                        {
+                            "question": "How would you design API endpoints that are safe for retries?",
+                            "answer": "Enforce idempotency keys and avoid duplicate side effects.",
+                            "difficulty": "medium",
+                        },
+                    ]
+                else:
+                    payload = [
+                        {
+                            "question": "When should idempotency keys be mandatory for writes?",
+                            "answer": "They should be required for externally retried mutations to avoid duplicate effects.",
+                            "difficulty": "medium",
+                        }
+                    ]
+                return {
+                    "success": True,
+                    "analysis": json.dumps(payload),
+                    "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
+                    "error": "",
+                }
+
+        prompt = _build_prompt(
+            topic_id="topic-reliability",
+            topic_title="Reliability",
+            doc_content="Retries and idempotency guidance.",
+            count=2,
+            level="mid",
+        )
+        validator = lambda item: _validate_question_item(
+            item, "topic-reliability", "medium", "mid"
+        )
+        items, _stats = asyncio.run(
+            _collect_with_retries(
+                llm=FakeLLM(),
+                base_prompt=prompt,
+                target_count=2,
+                llm_config=None,
+                validator=validator,
+                existing_questions=[],
+            )
+        )
+        self.assertEqual(len(items), 2)
+        retry_like = [item for item in items if "retry" in item["question"].lower()]
+        self.assertLessEqual(len(retry_like), 1)
+        combined = " ".join(item["question"].lower() for item in items)
+        self.assertIn("idempotency", combined)
+
     def test_parse_questions_json_accepts_single_object_shape(self):
         parsed = _parse_questions_json(
             json.dumps(
