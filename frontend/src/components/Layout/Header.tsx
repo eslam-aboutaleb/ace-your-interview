@@ -31,7 +31,7 @@ export default function Header() {
       <div className="max-w-[1340px] mx-auto px-3 sm:px-4 md:px-6">
         <div className="h-16 flex items-center justify-between">
           <Link
-            to={isAuthenticated ? "/" : "/topics"}
+            to="/"
             className="flex items-center gap-2.5 hover:opacity-90 transition-opacity"
           >
             <span className="text-2xl">😴</span>
@@ -42,14 +42,12 @@ export default function Header() {
           </Link>
 
           <nav className="hidden md:flex items-center gap-1">
-            {isAuthenticated && (
-              <NavLink
-                to="/"
-                label="Dashboard"
-                icon={<BarChart3 className="w-4 h-4" />}
-                active={location.pathname === "/"}
-              />
-            )}
+            <NavLink
+              to="/"
+              label="Dashboard"
+              icon={<BarChart3 className="w-4 h-4" />}
+              active={location.pathname === "/"}
+            />
             <NavLink
               to="/topics"
               label="Topics"
@@ -164,11 +162,9 @@ export default function Header() {
         </div>
 
         <nav className="md:hidden pb-2 flex items-center gap-1 overflow-x-auto">
-          {isAuthenticated && (
-            <Link to="/" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
-              <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5" />
-            </Link>
-          )}
+          <Link to="/" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
+            <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5" />
+          </Link>
           <Link to="/topics" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
             <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
           </Link>
