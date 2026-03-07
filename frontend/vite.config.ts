@@ -14,8 +14,8 @@ export default defineConfig({
         "pwa-64x64.png",
       ],
       manifest: {
-        name: "Ace Your Interview",
-        short_name: "Ace Interview",
+        name: "Too lazy for this interview",
+        short_name: "Too Lazy",
         description:
           "Adaptive interview prep for backend, frontend, system design, and AI stacks",
         theme_color: "#1c1d1f",
