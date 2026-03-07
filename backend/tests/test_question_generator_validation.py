@@ -86,6 +86,7 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
 
     def test_question_prompt_requires_adaptive_markdown_answers(self):
         prompt = _build_prompt(
+            topic_id="topic-api",
             topic_title="API Design",
             doc_content="Use pagination and stable ordering for list endpoints.",
             count=3,

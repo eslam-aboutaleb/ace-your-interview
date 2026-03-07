@@ -38,6 +38,10 @@ from app.services.llm_policy import (
 )
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
+from app.services.topic_catalog import (
+    PROBLEM_SOLVING_DEFAULT_LANGUAGE,
+    is_problem_solving_topic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,7 @@ def _recovery_budget(missing_count: int) -> int:
 
 
 def _build_prompt(
+    topic_id: str,
     topic_title: str,
     doc_content: str,
     count: int = 5,
@@ -91,6 +96,7 @@ def _build_prompt(
     requires_programming: bool = False,
     mcp_context: str = "",
 ) -> str:
+    problem_solving_mode = is_problem_solving_topic(topic_id)
     target_level = _normalise_level(level)
     diff_clause = ""
     if difficulty:
@@ -108,9 +114,18 @@ def _build_prompt(
         if response_detail != "very_detailed"
         else "Be very detailed with layered explanation depth and concrete examples."
     )
+    selected_language = (preferred_language or "").strip().lower()
     code_clause = ""
-    if requires_programming and preferred_language:
-        code_clause = f'Include one practical fenced code example in "{preferred_language}" when code clarifies the answer.'
+    if problem_solving_mode:
+        code_language = selected_language or PROBLEM_SOLVING_DEFAULT_LANGUAGE
+        code_clause = (
+            f'When code materially helps, provide one fenced "{code_language}" example with inline comments '
+            "that explain each key step."
+        )
+    elif requires_programming and selected_language:
+        code_clause = (
+            f'Include one practical fenced code example in "{selected_language}" when code clarifies the answer.'
+        )
     elif not requires_programming:
         code_clause = "Avoid code blocks unless code is explicitly required by the question."
     mcp_block = (
@@ -119,7 +134,24 @@ def _build_prompt(
         else ""
     )
 
-    return f"""You are an expert technical interviewer and educator.
+    role_clause = (
+        "You are an expert algorithm interview coach and problem-solving educator."
+        if problem_solving_mode
+        else "You are an expert technical interviewer and educator."
+    )
+    problem_scope_rules = (
+        """
+- Questions must be true problem-solving prompts (algorithmic/coding style), not generic theory prompts.
+- Answers should explain:
+  - problem understanding and constraints,
+  - solution strategy and why it works,
+  - complexity analysis and tradeoffs.
+- Code is optional; if included, keep it practical and commented.
+"""
+        if problem_solving_mode
+        else "- Questions must cover conceptual + practical angles."
+    ).strip()
+    return f"""{role_clause}
 
 Given documentation about {scope}, generate exactly {count} interview-style questions with detailed educational answers.{diff_clause}
 Target candidate level: "{target_level}".
@@ -142,7 +174,7 @@ Return ONLY valid JSON in this shape:
 Rules:
 - Return exactly {count} items; never return fewer.
 - Questions must be standalone and non-duplicative.
-- Questions must cover conceptual + practical angles.
+{problem_scope_rules}
 - Answers must be grounded in the provided documentation.
 - {detail_clause}
 - Format answers as markdown, but keep structure adaptive:
@@ -696,6 +728,7 @@ class QuestionGenerator:
             topic_title=topic_title,
         )
         prompt_base = _build_prompt(
+            topic_id=topic_id,
             topic_title=topic_title,
             doc_content=doc_content,
             count=1,
@@ -1035,6 +1068,7 @@ class QuestionGenerator:
             topic_title=topic_title,
         )
         prompt = _build_prompt(
+            topic_id=topic_id,
             topic_title=topic_title,
             doc_content=doc_content,
             count=count,

@@ -160,6 +160,7 @@ export default function InterviewSetup() {
                   >
                     <option value="mixed">Mixed</option>
                     <option value="technical">Technical</option>
+                    <option value="coding">Coding</option>
                     <option value="behavioral">Behavioral</option>
                     <option value="system_design">System Design</option>
                     <option value="ai_fundamentals">AI Fundamentals</option>
@@ -294,6 +295,13 @@ export default function InterviewSetup() {
                 className="mt-4 inline-flex items-center gap-1 text-sm text-udemy-purple"
               >
                 Practice quick quiz
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+              <Link
+                to="/interview/trends"
+                className="mt-3 inline-flex items-center gap-1 text-sm text-udemy-purple"
+              >
+                View interview trends
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>

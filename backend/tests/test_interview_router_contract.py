@@ -83,6 +83,13 @@ class InterviewRouterContractTests(unittest.TestCase):
                 self.assertEqual(report_res.status_code, 200)
                 report_payload = report_res.json()
                 self.assertGreaterEqual(report_payload["report"]["overall_score"], 0)
+
+                trends_res = client.get("/api/interview-sessions/trends?limit=50")
+                self.assertEqual(trends_res.status_code, 200)
+                trends_payload = trends_res.json()
+                self.assertIn("points", trends_payload)
+                self.assertIn("summary", trends_payload)
+                self.assertGreaterEqual(trends_payload["summary"]["session_count"], 1)
         finally:
             if prev_flag is None:
                 os.environ.pop("STUDY_ENABLE_MOCK_INTERVIEW_V1", None)

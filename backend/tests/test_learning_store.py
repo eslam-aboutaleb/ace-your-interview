@@ -170,6 +170,75 @@ class LearningStoreTests(unittest.TestCase):
             bob_pref = store.get_topic_preferences(user_id="bob", topic_id="topic-1")
             self.assertIsNone(bob_pref)
 
+    def test_dynamic_topic_curriculum_crud_and_isolation(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "learning.db")
+            store = LearningStore(db_path)
+
+            sections = [
+                {"heading": "Junior: Two Pointers", "content": "Use two indices to scan arrays."}
+            ]
+            saved = store.upsert_dynamic_topic_curriculum(
+                user_id="alice",
+                topic_id="00-problem-solving-and-algorithms",
+                preferred_language="python",
+                title="Problem Solving and Algorithms (python)",
+                description="Python-focused roadmap.",
+                track="backend",
+                levels=["junior", "mid", "senior"],
+                sections=sections,
+                raw_content="# Problem Solving and Algorithms (python)",
+                target_sections=120,
+                source="llm",
+            )
+            self.assertEqual(saved["preferred_language"], "python")
+
+            detail = store.get_dynamic_topic_curriculum(
+                user_id="alice",
+                topic_id="00-problem-solving-and-algorithms",
+                preferred_language="python",
+            )
+            self.assertIsNotNone(detail)
+            assert detail is not None
+            self.assertEqual(detail["title"], "Problem Solving and Algorithms (python)")
+            self.assertEqual(len(detail["sections"]), 1)
+
+            self.assertIsNone(
+                store.get_dynamic_topic_curriculum(
+                    user_id="alice",
+                    topic_id="00-problem-solving-and-algorithms",
+                    preferred_language="java",
+                )
+            )
+            self.assertIsNone(
+                store.get_dynamic_topic_curriculum(
+                    user_id="bob",
+                    topic_id="00-problem-solving-and-algorithms",
+                    preferred_language="python",
+                )
+            )
+
+            store.delete_dynamic_topic_curriculum(
+                user_id="alice",
+                topic_id="00-problem-solving-and-algorithms",
+                preferred_language="python",
+            )
+            self.assertIsNone(
+                store.get_dynamic_topic_curriculum(
+                    user_id="alice",
+                    topic_id="00-problem-solving-and-algorithms",
+                    preferred_language="python",
+                )
+            )
+
+            resolved = store.resolve_topic_ai_settings(
+                user_id="alice",
+                topic_id="00-problem-solving-and-algorithms",
+                topic_detail={"id": "00-problem-solving-and-algorithms", "track": "backend"},
+            )
+            self.assertTrue(resolved["requires_programming"])
+            self.assertEqual(resolved["preferred_language"], "python")
+
 
 if __name__ == "__main__":
     unittest.main()

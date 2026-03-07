@@ -158,6 +158,7 @@ export default function InterviewSessionPage() {
     if (!data) return 0;
     return Math.round((data.session.turns_completed / data.session.turn_count) * 100);
   }, [data]);
+  const isCoding = data?.session.interview_type === "coding";
 
   if (loading) {
     return (
@@ -214,6 +215,11 @@ export default function InterviewSessionPage() {
           <p className="text-lg font-medium leading-relaxed">
             {data.session.current_question || "Generating next question..."}
           </p>
+          {isCoding && (
+            <p className="text-xs text-udemy-text-muted mt-2">
+              Include your approach, complexity analysis, and edge-case handling.
+            </p>
+          )}
         </div>
 
         <div className="udemy-card p-6">
@@ -221,9 +227,15 @@ export default function InterviewSessionPage() {
           <textarea
             value={answerDraft}
             onChange={(e) => setAnswerDraft(e.target.value)}
-            rows={8}
-            placeholder="Write your interview answer..."
-            className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
+            rows={isCoding ? 12 : 8}
+            placeholder={
+              isCoding
+                ? "Write your solution and explain complexity + edge cases..."
+                : "Write your interview answer..."
+            }
+            className={`w-full border border-udemy-border rounded px-3 py-2.5 text-sm ${
+              isCoding ? "font-mono" : ""
+            }`}
           />
 
           <div className="mt-4 flex flex-wrap items-center gap-3">

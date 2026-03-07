@@ -6,6 +6,8 @@ import {
   BarChart3,
   ListChecks,
   MessageSquare,
+  CalendarDays,
+  Clock3,
   LogOut,
   User,
 } from "lucide-react";
@@ -57,6 +59,18 @@ export default function Header() {
               label="Quiz"
               icon={<ListChecks className="w-4 h-4" />}
               active={location.pathname.startsWith("/quiz")}
+            />
+            <NavLink
+              to="/review"
+              label="Review Queue"
+              icon={<Clock3 className="w-4 h-4" />}
+              active={location.pathname.startsWith("/review")}
+            />
+            <NavLink
+              to="/study-plan"
+              label="Study Plan"
+              icon={<CalendarDays className="w-4 h-4" />}
+              active={location.pathname.startsWith("/study-plan")}
             />
             <NavLink
               to="/interview"
@@ -128,7 +142,7 @@ export default function Header() {
           </div>
         </div>
 
-        <nav className="md:hidden pb-2 flex items-center justify-between gap-1">
+        <nav className="md:hidden pb-2 flex items-center gap-1 overflow-x-auto">
           <Link to="/" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
             <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5" />
           </Link>
@@ -137,6 +151,12 @@ export default function Header() {
           </Link>
           <Link to="/quiz" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
             <ListChecks className="w-4 h-4 sm:w-5 sm:h-5" />
+          </Link>
+          <Link to="/review" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
+            <Clock3 className="w-4 h-4 sm:w-5 sm:h-5" />
+          </Link>
+          <Link to="/study-plan" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
+            <CalendarDays className="w-4 h-4 sm:w-5 sm:h-5" />
           </Link>
           <Link
             to="/interview"

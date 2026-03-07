@@ -12,6 +12,7 @@ import { fetchTopics } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
+import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
 import type { InterviewLevel, LearningTrack, TopicSummary } from "@/types";
 
 const TRACK_LABELS: Record<LearningTrack, string> = {
@@ -192,6 +193,8 @@ export default function TopicsList() {
               const progress = getTopicProgress(topic.id);
               const isComplete = completedTopics.includes(topic.id);
               const hasCoverageGap = topicHasCoverageGap(topic);
+              const title = normalizeEscapedSingleLineText(topic.title);
+              const description = normalizeEscapedSingleLineText(topic.description);
               return (
                 <motion.div key={topic.id} variants={cardVariants}>
                   <Link
@@ -213,10 +216,10 @@ export default function TopicsList() {
                       {/* Content */}
                       <div className="flex-1 min-w-0">
                         <h3 className="font-bold text-[15px] group-hover:text-udemy-purple transition-colors">
-                          {topic.title}
+                          {title}
                         </h3>
                         <p className="text-sm text-udemy-text-muted line-clamp-1 mt-0.5">
-                          {topic.description}
+                          {description}
                         </p>
                         <div className="flex items-center gap-2 mt-2">
                           <span className="text-[11px] font-semibold rounded-full bg-udemy-purple/10 text-udemy-purple px-2 py-0.5">

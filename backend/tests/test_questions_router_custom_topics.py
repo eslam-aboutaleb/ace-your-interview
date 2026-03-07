@@ -153,6 +153,54 @@ More context for generation.
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["topic_id"], "01-static")
 
+    def test_problem_solving_topic_requires_generated_curriculum(self):
+        res = self.client.post(
+            "/api/questions/generate-v2",
+            json={
+                "topic_id": "00-problem-solving-and-algorithms",
+                "count": 1,
+                "level": "mid",
+                "preferred_language": "python",
+            },
+        )
+        self.assertEqual(res.status_code, 409)
+
+    def test_problem_solving_topic_works_after_curriculum_exists(self):
+        self.store.upsert_dynamic_topic_curriculum(
+            user_id="alice",
+            topic_id="00-problem-solving-and-algorithms",
+            preferred_language="python",
+            title="Problem Solving and Algorithms (python)",
+            description="Python roadmap.",
+            track="backend",
+            levels=["junior", "mid", "senior"],
+            sections=[
+                {
+                    "heading": "Junior: Two pointers",
+                    "content": "Understand constraints and sliding window tradeoffs.",
+                }
+            ],
+            raw_content=(
+                "# Problem Solving and Algorithms (python)\n\n## Junior: Two pointers\n\n"
+                "Understand constraints and sliding window tradeoffs."
+            ),
+            target_sections=120,
+            source="llm",
+        )
+        res = self.client.post(
+            "/api/questions/generate-v2",
+            json={
+                "topic_id": "00-problem-solving-and-algorithms",
+                "count": 1,
+                "level": "mid",
+                "preferred_language": "python",
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["topic_id"], "00-problem-solving-and-algorithms")
+        self.assertEqual(len(payload["questions"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
