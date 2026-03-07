@@ -155,13 +155,13 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<PublicRoute />}>
           <Route path="/" element={<Layout />}>
+            <Route index element={<Dashboard />} />
             <Route path="topics" element={<TopicsList />} />
             <Route path="topics/:topicId" element={<TopicStudy />} />
           </Route>
         </Route>
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
             <Route path="topics/custom/build" element={<CustomTopicBuild />} />
             <Route path="quiz" element={<QuizMode />} />
             <Route path="quiz/:topicId" element={<QuizMode />} />
