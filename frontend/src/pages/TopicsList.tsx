@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { BookOpen, Search, ChevronRight, Filter } from "lucide-react";
@@ -27,6 +27,16 @@ const LEVEL_LABELS: Record<InterviewLevel, string> = {
   senior: "Senior",
 };
 
+const MIN_STATIC_TOPIC_SECTIONS = 40;
+const MIN_CUSTOM_TOPIC_SECTIONS = 100;
+
+function topicHasCoverageGap(topic: TopicSummary): boolean {
+  const minSections = topic.id.startsWith("custom-")
+    ? MIN_CUSTOM_TOPIC_SECTIONS
+    : MIN_STATIC_TOPIC_SECTIONS;
+  return topic.section_count < minSections;
+}
+
 export default function TopicsList() {
   const navigate = useNavigate();
   const [topics, setTopics] = useState<TopicSummary[]>([]);
@@ -38,6 +48,11 @@ export default function TopicsList() {
   const [customError, setCustomError] = useState("");
   const completedTopics = useProgressStore((s) => s.completedTopics);
   const getTopicProgress = useProgressStore((s) => s.getTopicProgress);
+  const gapFreeCount = useMemo(
+    () => topics.filter((topic) => !topicHasCoverageGap(topic)).length,
+    [topics],
+  );
+  const coverageGapCount = topics.length - gapFreeCount;
 
   const loadTopics = useCallback(async () => {
     setLoading(true);
@@ -85,7 +100,7 @@ export default function TopicsList() {
             Interview Topics
           </h1>
           <p className="text-gray-400 mt-2">
-            {topics.length} topics &middot; {completedTopics.length} completed
+            {topics.length} topics &middot; {gapFreeCount} gap-free &middot; {completedTopics.length} completed
           </p>
         </div>
       </div>
@@ -134,7 +149,7 @@ export default function TopicsList() {
         <div className="udemy-card p-4 mb-6">
           <h2 className="text-sm font-bold mb-2">Create Custom Topic</h2>
           <p className="text-xs text-udemy-text-muted mb-3">
-            Enter any topic to generate a deep roadmap with 100+ subtopics.
+            Enter any topic to generate a deep roadmap with 100+ subtopics and full learning-path coverage.
           </p>
           <div className="flex flex-col md:flex-row gap-3">
             <input
@@ -158,6 +173,12 @@ export default function TopicsList() {
           )}
         </div>
 
+        {coverageGapCount > 0 && (
+          <div className="mb-5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {coverageGapCount} topic(s) are currently flagged with possible coverage gaps.
+          </div>
+        )}
+
         {loading ? (
           <SkeletonCards count={9} />
         ) : (
@@ -170,6 +191,7 @@ export default function TopicsList() {
             {topics.map((topic, idx) => {
               const progress = getTopicProgress(topic.id);
               const isComplete = completedTopics.includes(topic.id);
+              const hasCoverageGap = topicHasCoverageGap(topic);
               return (
                 <motion.div key={topic.id} variants={cardVariants}>
                   <Link
@@ -199,6 +221,15 @@ export default function TopicsList() {
                         <div className="flex items-center gap-2 mt-2">
                           <span className="text-[11px] font-semibold rounded-full bg-udemy-purple/10 text-udemy-purple px-2 py-0.5">
                             {TRACK_LABELS[topic.track] || topic.track || "Topic"}
+                          </span>
+                          <span
+                            className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${
+                              hasCoverageGap
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-green-100 text-green-700"
+                            }`}
+                          >
+                            {hasCoverageGap ? "Coverage gap" : "Gap-free path"}
                           </span>
                           <span className="text-[11px] text-udemy-text-muted">
                             {(topic.levels || [])

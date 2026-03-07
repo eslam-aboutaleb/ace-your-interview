@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -144,8 +145,17 @@ async def generate_questions_v2_stream(
             section_content=body.section_content,
         ):
             yield json.dumps(event) + "\n"
+            await asyncio.sleep(0)
 
-    return StreamingResponse(_event_stream(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        _event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/quiz/generate", response_model=GenerateQuizResponse)

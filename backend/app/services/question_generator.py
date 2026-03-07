@@ -41,7 +41,9 @@ logger = logging.getLogger(__name__)
 
 _MAX_DOC_CONTEXT = 45000
 _MAX_TOPIC_CONTEXT = 9000
-_MAX_ATTEMPTS = 5
+_BASE_MAX_ATTEMPTS = 5
+_MAX_TOTAL_ATTEMPTS = 18
+_MAX_RECOVERY_ATTEMPTS = 24
 _VALID_DIFFICULTIES = {"easy", "medium", "hard"}
 _VALID_LEVELS = {"junior", "mid", "senior"}
 
@@ -62,6 +64,16 @@ def _clamp_content(doc_content: str) -> str:
 def _normalise_level(level: Optional[str]) -> str:
     lv = (level or "mid").strip().lower()
     return lv if lv in _VALID_LEVELS else "mid"
+
+
+def _attempt_budget(target_count: int) -> int:
+    target = max(1, int(target_count or 1))
+    return min(_MAX_TOTAL_ATTEMPTS, max(_BASE_MAX_ATTEMPTS, target + 3))
+
+
+def _recovery_budget(missing_count: int) -> int:
+    missing = max(1, int(missing_count or 1))
+    return min(_MAX_RECOVERY_ATTEMPTS, max(3, missing * 3))
 
 
 def _build_prompt(
@@ -106,6 +118,7 @@ Return ONLY valid JSON in this shape:
 ]
 
 Rules:
+- Return exactly {count} items; never return fewer.
 - Questions must be standalone and non-duplicative.
 - Questions must cover conceptual + practical angles.
 - Answers must be grounded in the provided documentation.
@@ -180,6 +193,7 @@ Return ONLY valid JSON:
 ]
 
 Rules:
+- Return exactly {count} items; never return fewer.
 - topic_id must be one of the provided ids.
 - correct_answer must match one choice label.
 - Avoid trick ambiguity; one clearly correct answer.
@@ -416,7 +430,7 @@ async def _collect_with_retries(
     prompt = base_prompt
     last_error = ""
 
-    for attempt in range(_MAX_ATTEMPTS):
+    for _ in range(_attempt_budget(target_count)):
         result = await llm.completion(
             prompt,
             llm_config,
@@ -480,6 +494,63 @@ async def _collect_with_retries(
             issues=top_issues,
             existing_questions=[x.get("question", "") for x in valid_items],
         )
+
+    if len(valid_items) < target_count:
+        # Final pass: request one item at a time to reduce duplicate/schema drift.
+        for _ in range(_recovery_budget(target_count - len(valid_items))):
+            if len(valid_items) >= target_count:
+                break
+
+            single_prompt = _build_retry_prompt(
+                base_prompt=base_prompt,
+                missing_count=1,
+                issues="final_recovery_fill_missing_items",
+                existing_questions=[x.get("question", "") for x in valid_items],
+            )
+            result = await llm.completion(
+                single_prompt,
+                llm_config,
+                user_identity=user_identity,
+            )
+            raise_if_policy_blocked_result(result)
+            metadata = result.get("metadata", {})
+            if not result.get("success"):
+                retries_used += 1
+                issue_counter["transport_or_provider_error"] += 1
+                continue
+
+            parsed = _parse_questions_json(result.get("analysis", ""))
+            if not parsed:
+                retries_used += 1
+                malformed_items += 1
+                issue_counter["json_parse_failed"] += 1
+                continue
+
+            added = False
+            for item in parsed:
+                if not isinstance(item, dict):
+                    malformed_items += 1
+                    issue_counter["non_dict_item"] += 1
+                    continue
+                is_valid, issue = validator(item)
+                if not is_valid:
+                    malformed_items += 1
+                    issue_counter[issue] += 1
+                    continue
+
+                q_norm = _normalise_question(str(item.get("question", "")))
+                if not q_norm or q_norm in dedup:
+                    malformed_items += 1
+                    issue_counter["duplicate_question"] += 1
+                    continue
+
+                dedup.add(q_norm)
+                valid_items.append(item)
+                added = True
+                break
+
+            if not added:
+                retries_used += 1
 
     if len(valid_items) < target_count:
         logger.warning(
@@ -568,7 +639,7 @@ class QuestionGenerator:
             last_error = ""
 
             try:
-                for _ in range(_MAX_ATTEMPTS):
+                for _ in range(_attempt_budget(1)):
                     async with semaphore:
                         result = await self.llm.completion(
                             prompt,
@@ -761,6 +832,39 @@ class QuestionGenerator:
                 "type": "question",
                 "question": question,
             }
+
+        if generated_count < target_count:
+            for _ in range(_recovery_budget(target_count - generated_count)):
+                if generated_count >= target_count:
+                    break
+
+                result = await _generate_one()
+                retries_used += int(result.get("retries_used", 0))
+                malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
+                metadata = result.get("metadata", {}) or {}
+                if metadata.get("provider"):
+                    provider_used = str(metadata.get("provider"))
+                if metadata.get("model"):
+                    model_used = str(metadata.get("model"))
+
+                error = result.get("error")
+                if error:
+                    yield {
+                        "type": "error",
+                        "code": str(error.get("code", "generation_failed")),
+                        "message": str(error.get("message", "Question generation failed")),
+                    }
+                    return
+
+                question = result.get("question")
+                if not isinstance(question, dict):
+                    continue
+
+                generated_count += 1
+                yield {
+                    "type": "question",
+                    "question": question,
+                }
 
         yield {
             "type": "done",
