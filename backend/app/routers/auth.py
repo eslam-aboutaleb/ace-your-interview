@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-import secrets
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -20,6 +19,7 @@ from app.schemas.models import (
     StudyAppAssignment,
 )
 from app.services import auth as auth_service
+from app.services.oauth_state import create_oauth_state, verify_oauth_state
 from app.services.llm_assignments_store import LLMAssignmentsStore, normalise_identity
 from app.services.llm_service_access import LLMServiceAccess
 
@@ -60,7 +60,7 @@ def _cookie_kwargs() -> dict:
     settings = get_settings()
     return dict(
         httponly=True,
-        samesite="lax",
+        samesite="strict",
         secure=settings.frontend_url.startswith("https"),
         path="/",
     )
@@ -72,7 +72,7 @@ def _cookie_kwargs() -> dict:
 @router.get("/github")
 async def github_login():
     settings = get_settings()
-    state = secrets.token_urlsafe(32)
+    state = create_oauth_state({"purpose": "auth_github"})
     params = urlencode(
         {
             "client_id": settings.github_client_id,
@@ -84,17 +84,15 @@ async def github_login():
     response = RedirectResponse(
         url=f"https://github.com/login/oauth/authorize?{params}"
     )
-    response.set_cookie(
-        "oauth_state", state, httponly=True, max_age=600, samesite="lax", path="/"
-    )
     return response
 
 
 @router.get("/github/callback")
-async def github_callback(request: Request, code: str, state: str = ""):
+async def github_callback(code: str, state: str = ""):
     settings = get_settings()
-    stored = request.cookies.get("oauth_state")
-    if not stored or stored != state:
+    try:
+        verify_oauth_state(state, expected_purpose="auth_github")
+    except ValueError:
         return RedirectResponse(
             url=f"{settings.frontend_url}/login?error=invalid_state"
         )
@@ -115,7 +113,6 @@ async def github_callback(request: Request, code: str, state: str = ""):
     token = auth_service.create_jwt_token(username.lower(), "github")
     response = RedirectResponse(url=f"{settings.frontend_url}/")
     response.set_cookie("session", token, max_age=_TEN_YEARS, **_cookie_kwargs())
-    response.delete_cookie("oauth_state", path="/")
     return response
 
 
@@ -125,7 +122,7 @@ async def github_callback(request: Request, code: str, state: str = ""):
 @router.get("/google")
 async def google_login():
     settings = get_settings()
-    state = secrets.token_urlsafe(32)
+    state = create_oauth_state({"purpose": "auth_google"})
     params = urlencode(
         {
             "client_id": settings.google_client_id,
@@ -139,17 +136,15 @@ async def google_login():
     response = RedirectResponse(
         url=f"https://accounts.google.com/o/oauth2/v2/auth?{params}"
     )
-    response.set_cookie(
-        "oauth_state", state, httponly=True, max_age=600, samesite="lax", path="/"
-    )
     return response
 
 
 @router.get("/google/callback")
-async def google_callback(request: Request, code: str, state: str = ""):
+async def google_callback(code: str, state: str = ""):
     settings = get_settings()
-    stored = request.cookies.get("oauth_state")
-    if not stored or stored != state:
+    try:
+        verify_oauth_state(state, expected_purpose="auth_google")
+    except ValueError:
         return RedirectResponse(
             url=f"{settings.frontend_url}/login?error=invalid_state"
         )
@@ -171,7 +166,6 @@ async def google_callback(request: Request, code: str, state: str = ""):
     token = auth_service.create_jwt_token(email.lower(), "google")
     response = RedirectResponse(url=f"{settings.frontend_url}/")
     response.set_cookie("session", token, max_age=_TEN_YEARS, **_cookie_kwargs())
-    response.delete_cookie("oauth_state", path="/")
     return response
 
 

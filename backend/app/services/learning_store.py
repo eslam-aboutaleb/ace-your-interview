@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from app.services.topic_catalog import (
     PROBLEM_SOLVING_DEFAULT_LANGUAGE,
@@ -19,6 +21,8 @@ from app.services.topic_catalog import (
     PROBLEM_SOLVING_TITLE,
     is_problem_solving_topic,
 )
+
+T = TypeVar("T")
 
 
 def _utc_now() -> datetime:
@@ -44,9 +48,20 @@ class LearningStore:
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
         self._lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="learning-store")
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
+
+    async def run_async(self, fn: Callable[..., T], /, *args, **kwargs) -> T:
+        """Run synchronous SQLite work on a dedicated worker thread."""
+        loop = asyncio.get_running_loop()
+        if kwargs:
+            return await loop.run_in_executor(
+                self._executor,
+                lambda: fn(*args, **kwargs),
+            )
+        return await loop.run_in_executor(self._executor, fn, *args)
 
     def _init_db(self) -> None:
         with self._conn:
@@ -193,6 +208,53 @@ class LearningStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_assistant_memory_updated
                 ON assistant_memory(user_id, flow, updated_at DESC)
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feature_runtime_state (
+                    feature_key TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    disabled_until TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS topic_video_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    topic_id TEXT NOT NULL,
+                    section_heading TEXT NOT NULL,
+                    preferred_language TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_topic_video_cache_topic
+                ON topic_video_cache(topic_id, fetched_at DESC)
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feature_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    feature_key TEXT NOT NULL,
+                    event_name TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_feature_events_feature_time
+                ON feature_events(feature_key, event_name, created_at DESC)
                 """
             )
 
@@ -1261,4 +1323,333 @@ class LearningStore:
             "summary": summary_obj,
             "created_at": created_at,
             "updated_at": now_iso,
+        }
+
+    def get_feature_state(self, *, feature_key: str) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT feature_key, status, disabled_until, reason, updated_at
+            FROM feature_runtime_state
+            WHERE feature_key = ?
+            LIMIT 1
+            """,
+            (feature_key,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "feature_key": str(row["feature_key"]),
+            "status": str(row["status"]),
+            "disabled_until": str(row["disabled_until"]),
+            "reason": str(row["reason"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def set_feature_state(
+        self,
+        *,
+        feature_key: str,
+        status: str,
+        disabled_until: str = "",
+        reason: str = "",
+    ) -> dict:
+        now_iso = _to_iso(_utc_now())
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO feature_runtime_state(
+                        feature_key, status, disabled_until, reason, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(feature_key) DO UPDATE SET
+                        status = excluded.status,
+                        disabled_until = excluded.disabled_until,
+                        reason = excluded.reason,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        feature_key,
+                        str(status or "").strip()[:60] or "enabled",
+                        str(disabled_until or "").strip()[:80],
+                        str(reason or "").strip()[:200],
+                        now_iso,
+                    ),
+                )
+        return {
+            "feature_key": feature_key,
+            "status": str(status or "").strip()[:60] or "enabled",
+            "disabled_until": str(disabled_until or "").strip()[:80],
+            "reason": str(reason or "").strip()[:200],
+            "updated_at": now_iso,
+        }
+
+    def get_topic_video_cache(
+        self,
+        *,
+        cache_key: str,
+        max_age_hours: int,
+    ) -> dict | None:
+        row = self._conn.execute(
+            """
+            SELECT cache_key, topic_id, section_heading, preferred_language, payload_json, fetched_at
+            FROM topic_video_cache
+            WHERE cache_key = ?
+            LIMIT 1
+            """,
+            (cache_key,),
+        ).fetchone()
+        if not row:
+            return None
+        fetched_at = str(row["fetched_at"])
+        try:
+            fetched_dt = _from_iso(fetched_at)
+        except ValueError:
+            return None
+        if fetched_dt.tzinfo is None:
+            fetched_dt = fetched_dt.replace(tzinfo=UTC)
+        age_seconds = (_utc_now() - fetched_dt.astimezone(UTC)).total_seconds()
+        if age_seconds > max(0, int(max_age_hours)) * 3600:
+            return None
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return {
+            "cache_key": str(row["cache_key"]),
+            "topic_id": str(row["topic_id"]),
+            "section_heading": str(row["section_heading"]),
+            "preferred_language": str(row["preferred_language"]),
+            "payload": payload,
+            "fetched_at": fetched_at,
+        }
+
+    def upsert_topic_video_cache(
+        self,
+        *,
+        cache_key: str,
+        topic_id: str,
+        section_heading: str,
+        preferred_language: str,
+        payload: dict,
+    ) -> dict:
+        now_iso = _to_iso(_utc_now())
+        payload_json = json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=True)
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO topic_video_cache(
+                        cache_key, topic_id, section_heading, preferred_language, payload_json, fetched_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(cache_key) DO UPDATE SET
+                        topic_id = excluded.topic_id,
+                        section_heading = excluded.section_heading,
+                        preferred_language = excluded.preferred_language,
+                        payload_json = excluded.payload_json,
+                        fetched_at = excluded.fetched_at
+                    """,
+                    (
+                        cache_key,
+                        topic_id,
+                        section_heading[:240],
+                        preferred_language[:60],
+                        payload_json,
+                        now_iso,
+                    ),
+                )
+        return {
+            "cache_key": cache_key,
+            "topic_id": topic_id,
+            "section_heading": section_heading[:240],
+            "preferred_language": preferred_language[:60],
+            "fetched_at": now_iso,
+        }
+
+    def record_feature_event(
+        self,
+        *,
+        user_id: str,
+        feature_key: str,
+        event_name: str,
+        metadata: dict | None = None,
+    ) -> dict:
+        now_iso = _to_iso(_utc_now())
+        payload = json.dumps(metadata if isinstance(metadata, dict) else {}, ensure_ascii=True)
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO feature_events(
+                        user_id, feature_key, event_name, metadata_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(user_id or "").strip()[:160] or "anonymous",
+                        str(feature_key or "").strip()[:80],
+                        str(event_name or "").strip()[:120],
+                        payload,
+                        now_iso,
+                    ),
+                )
+        return {
+            "user_id": str(user_id or "").strip()[:160] or "anonymous",
+            "feature_key": str(feature_key or "").strip()[:80],
+            "event_name": str(event_name or "").strip()[:120],
+            "created_at": now_iso,
+        }
+
+    def get_feature_metrics(
+        self,
+        *,
+        feature_key: str,
+    ) -> dict:
+        now = _utc_now()
+        since_7 = now - timedelta(days=7)
+        since_30 = now - timedelta(days=30)
+        since_30_iso = _to_iso(since_30)
+        state = self.get_feature_state(feature_key=feature_key) or {
+            "feature_key": feature_key,
+            "status": "disabled_config",
+            "disabled_until": "",
+            "reason": "",
+            "updated_at": "",
+        }
+
+        rows_30 = self._conn.execute(
+            """
+            SELECT event_name, metadata_json, created_at
+            FROM feature_events
+            WHERE feature_key = ? AND created_at >= ?
+            ORDER BY created_at ASC
+            """,
+            (feature_key, since_30_iso),
+        ).fetchall()
+
+        panel_views_30d = 0
+        video_clicks_30d = 0
+        reenabled_at = ""
+        hidden_intervals: list[tuple[datetime, datetime]] = []
+        weekly_hidden: dict[str, int] = {}
+
+        for row in rows_30:
+            event_name = str(row["event_name"])
+            created_at_raw = str(row["created_at"])
+            try:
+                created_at = _from_iso(created_at_raw)
+            except ValueError:
+                continue
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=UTC)
+            created_at_utc = created_at.astimezone(UTC)
+            if event_name == "video_panel_viewed":
+                panel_views_30d += 1
+            elif event_name == "video_click":
+                video_clicks_30d += 1
+            elif event_name == "video_feature_reenabled":
+                reenabled_at = created_at_raw
+            elif event_name == "video_panel_hidden_quota":
+                week_start = (created_at_utc - timedelta(days=created_at_utc.weekday())).date().isoformat()
+                weekly_hidden[week_start] = weekly_hidden.get(week_start, 0) + 1
+                try:
+                    metadata = json.loads(str(row["metadata_json"]))
+                except json.JSONDecodeError:
+                    metadata = {}
+                disabled_until_raw = str((metadata or {}).get("disabled_until", "")).strip()
+                if disabled_until_raw:
+                    try:
+                        disabled_until = _from_iso(disabled_until_raw)
+                        if disabled_until.tzinfo is None:
+                            disabled_until = disabled_until.replace(tzinfo=UTC)
+                        hidden_intervals.append((created_at_utc, disabled_until.astimezone(UTC)))
+                    except ValueError:
+                        continue
+
+        status = str(state.get("status", "disabled_config")).strip() or "disabled_config"
+        disabled_until_raw = str(state.get("disabled_until", "")).strip()
+        disabled_until_dt: datetime | None = None
+        if disabled_until_raw:
+            try:
+                parsed = _from_iso(disabled_until_raw)
+                disabled_until_dt = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+                disabled_until_dt = disabled_until_dt.astimezone(UTC)
+            except ValueError:
+                disabled_until_dt = None
+
+        hidden_now = bool(
+            status == "disabled_quota_exhausted"
+            and disabled_until_dt is not None
+            and disabled_until_dt > now
+        )
+
+        if hidden_now:
+            try:
+                start = _from_iso(str(state.get("updated_at", "")))
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=UTC)
+                hidden_intervals.append((start.astimezone(UTC), disabled_until_dt))
+            except ValueError:
+                pass
+
+        def _hidden_days(interval_start: datetime, interval_end: datetime, window_start: datetime) -> float:
+            start = max(interval_start, window_start)
+            end = min(interval_end, now)
+            if end <= start:
+                return 0.0
+            return (end - start).total_seconds() / 86400.0
+
+        hidden_days_7 = 0.0
+        hidden_days_30 = 0.0
+        for start, end in hidden_intervals:
+            hidden_days_7 += _hidden_days(start, end, since_7)
+            hidden_days_30 += _hidden_days(start, end, since_30)
+
+        if reenabled_at:
+            since_reenable_views = int(
+                self._conn.execute(
+                    """
+                    SELECT COUNT(*) FROM feature_events
+                    WHERE feature_key = ? AND event_name = 'video_panel_viewed' AND created_at >= ?
+                    """,
+                    (feature_key, reenabled_at),
+                ).fetchone()[0]
+            )
+            since_reenable_clicks = int(
+                self._conn.execute(
+                    """
+                    SELECT COUNT(*) FROM feature_events
+                    WHERE feature_key = ? AND event_name = 'video_click' AND created_at >= ?
+                    """,
+                    (feature_key, reenabled_at),
+                ).fetchone()[0]
+            )
+        else:
+            since_reenable_views = 0
+            since_reenable_clicks = 0
+
+        weekly_list = [
+            {"week_start": week_start, "hidden_events": count}
+            for week_start, count in sorted(weekly_hidden.items(), reverse=True)[:8]
+        ]
+
+        return {
+            "status": status,
+            "disabled_until": disabled_until_raw,
+            "reason": str(state.get("reason", "")),
+            "hidden_now": hidden_now,
+            "hidden_days_last_7": round(hidden_days_7, 2),
+            "hidden_days_last_30": round(hidden_days_30, 2),
+            "hidden_frequency_weekly": weekly_list,
+            "panel_views_30d": panel_views_30d,
+            "video_clicks_30d": video_clicks_30d,
+            "ctr_30d": round((video_clicks_30d / panel_views_30d), 4) if panel_views_30d else 0.0,
+            "reenabled_at": reenabled_at,
+            "panel_views_since_reenable": since_reenable_views,
+            "clicks_since_reenable": since_reenable_clicks,
+            "ctr_since_reenable": (
+                round((since_reenable_clicks / since_reenable_views), 4)
+                if since_reenable_views
+                else 0.0
+            ),
         }

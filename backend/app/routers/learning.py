@@ -38,7 +38,8 @@ async def record_attempt(
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
-    saved = _store.record_attempt(
+    saved = await _store.run_async(
+        _store.record_attempt,
         user_id=user["user"],
         question_id=body.question_id,
         topic_id=body.topic_id,
@@ -59,7 +60,7 @@ async def review_queue(
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
-    data = _store.get_review_queue(user_id=user["user"], limit=limit)
+    data = await _store.run_async(_store.get_review_queue, user_id=user["user"], limit=limit)
     return ReviewQueueResponse(**data)
 
 
@@ -71,7 +72,7 @@ async def weak_areas(
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
-    data = _store.get_weak_areas(user_id=user["user"], limit=limit)
+    data = await _store.run_async(_store.get_weak_areas, user_id=user["user"], limit=limit)
     return WeakAreasResponse(**data)
 
 
@@ -83,7 +84,7 @@ async def topic_mastery(
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
-    data = _store.get_topic_mastery(user_id=user["user"], limit=limit)
+    data = await _store.run_async(_store.get_topic_mastery, user_id=user["user"], limit=limit)
     return TopicMasteryResponse(**data)
 
 
@@ -96,7 +97,8 @@ async def study_plan(
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
-    data = _store.build_study_plan(
+    data = await _store.run_async(
+        _store.build_study_plan,
         user_id=user["user"],
         days=days,
         daily_items=daily_items,

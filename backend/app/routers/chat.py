@@ -81,11 +81,16 @@ async def chat_follow_up(
             if static:
                 topic_detail = static.model_dump(mode="json")
         if topic_detail is None:
-            custom = _learning_store.get_custom_topic(user_id=user["user"], topic_id=body.topic_id)
+            custom = await _learning_store.run_async(
+                _learning_store.get_custom_topic,
+                user_id=user["user"],
+                topic_id=body.topic_id,
+            )
             if custom:
                 topic_detail = custom
         if topic_detail is not None:
-            resolved = _learning_store.resolve_topic_ai_settings(
+            resolved = await _learning_store.run_async(
+                _learning_store.resolve_topic_ai_settings,
                 user_id=user["user"],
                 topic_id=body.topic_id,
                 topic_detail=topic_detail,
@@ -98,7 +103,8 @@ async def chat_follow_up(
                 resolved_requires_programming = bool(resolved.get("requires_programming", False))
 
     if bool(body.use_memory) and _learning_store is not None:
-        memory = _learning_store.get_assistant_memory(
+        memory = await _learning_store.run_async(
+            _learning_store.get_assistant_memory,
             user_id=user["user"],
             conversation_id=conv_id,
             flow="chat",
@@ -209,7 +215,8 @@ Provide a clear, educational explanation grounded in the context above.
         metadata = result.get("metadata", {})
         reply = format_markdown_readable(result["analysis"])
         if bool(body.use_memory) and _learning_store is not None:
-            previous = _learning_store.get_assistant_memory(
+            previous = await _learning_store.run_async(
+                _learning_store.get_assistant_memory,
                 user_id=user["user"],
                 conversation_id=conv_id,
                 flow="chat",
@@ -224,7 +231,8 @@ Provide a clear, educational explanation grounded in the context above.
                 f"User asked: {body.user_message[:240]}\n"
                 f"Assistant: {reply[:380]}"
             ).strip()
-            _learning_store.upsert_assistant_memory(
+            await _learning_store.run_async(
+                _learning_store.upsert_assistant_memory,
                 user_id=user["user"],
                 conversation_id=conv_id,
                 flow="chat",

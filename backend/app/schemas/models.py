@@ -202,6 +202,73 @@ class TopicPreferencesUpdateRequest(BaseModel):
     preferred_language: Optional[str] = Field(default=None, max_length=60)
 
 
+class FeatureGateStatusEnum(str, Enum):
+    ENABLED = "enabled"
+    DISABLED_QUOTA_EXHAUSTED = "disabled_quota_exhausted"
+    PROBE = "probe"
+    DISABLED_CONFIG = "disabled_config"
+
+
+class VideoResource(BaseModel):
+    video_id: str
+    title: str
+    url: str
+    channel: str = ""
+    duration_seconds: int = 0
+    thumbnail_url: str = ""
+    published_at: str = ""
+    source: str = "youtube"
+
+
+class TopicVideosStatusResponse(BaseModel):
+    enabled: bool = False
+    status: FeatureGateStatusEnum = FeatureGateStatusEnum.DISABLED_CONFIG
+    disabled_until: str = ""
+    reason: str = ""
+
+
+class TopicSectionVideosResponse(BaseModel):
+    enabled: bool = False
+    status: FeatureGateStatusEnum = FeatureGateStatusEnum.DISABLED_CONFIG
+    disabled_until: str = ""
+    reason: str = ""
+    topic_id: str
+    section_index: int = 0
+    section_heading: str = ""
+    videos: list[VideoResource] = Field(default_factory=list)
+    source: str = ""
+    cached: bool = False
+
+
+class TopicVideoEventRequest(BaseModel):
+    event_name: str = Field(
+        ...,
+        pattern="^(video_panel_viewed|video_click|video_panel_hidden_quota|video_feature_reenabled)$",
+    )
+    topic_id: str = ""
+    section_index: int = Field(default=0, ge=0)
+    section_heading: str = ""
+    video_id: str = ""
+    metadata: dict = Field(default_factory=dict)
+
+
+class TopicVideoMetricsResponse(BaseModel):
+    status: FeatureGateStatusEnum = FeatureGateStatusEnum.DISABLED_CONFIG
+    disabled_until: str = ""
+    reason: str = ""
+    hidden_now: bool = False
+    hidden_days_last_7: float = 0.0
+    hidden_days_last_30: float = 0.0
+    hidden_frequency_weekly: list[dict] = Field(default_factory=list)
+    panel_views_30d: int = 0
+    video_clicks_30d: int = 0
+    ctr_30d: float = 0.0
+    reenabled_at: str = ""
+    panel_views_since_reenable: int = 0
+    clicks_since_reenable: int = 0
+    ctr_since_reenable: float = 0.0
+
+
 class ProviderStatus(BaseModel):
     name: str
     available: bool
@@ -230,6 +297,12 @@ class UserLLMSourceEnum(str, Enum):
     STUDY_APP = "study_app"
 
 
+class VoiceTierEnum(str, Enum):
+    BROWSER = "browser"
+    CLOUD = "cloud"
+    REALTIME = "realtime"
+
+
 class UserPreferences(BaseModel):
     provider: str = Field(default="openai", pattern="^(google|openai|anthropic|groq)$")
     model: str = ""
@@ -238,6 +311,7 @@ class UserPreferences(BaseModel):
     auth_mode: UserAuthModeEnum = UserAuthModeEnum.API_KEY
     llm_source: UserLLMSourceEnum = UserLLMSourceEnum.PERSONAL
     require_answer_reveal: bool = False
+    voice_tier: Optional[str] = None  # user's preferred voice tier
 
 
 class UserPreferencesUpdateRequest(UserPreferences):
@@ -646,3 +720,37 @@ class OllamaModelsResponse(BaseModel):
 class OllamaTestResponse(BaseModel):
     connected: bool = False
     version: str = ""
+
+
+# ── Voice Agent Models ───────────────────────────────────────
+class VoiceConfigResponse(BaseModel):
+    enabled: bool = False
+    available_tiers: list[str] = Field(default_factory=list)
+    default_tier: str = "browser"
+    user_tier: Optional[str] = None
+    stt_provider: str = "groq"
+    tts_provider: str = "edge"
+    tts_voice: str = "en-US-AriaNeural"
+
+
+class VoiceSettingsUpdateRequest(BaseModel):
+    """Admin-only: update global voice settings."""
+    enable_voice_agent: Optional[bool] = None
+    voice_tiers_enabled: Optional[str] = None
+    voice_default_tier: Optional[str] = None
+    voice_stt_provider: Optional[str] = None
+    voice_stt_model: Optional[str] = None
+    voice_tts_provider: Optional[str] = None
+    voice_tts_voice: Optional[str] = None
+
+
+class VoiceTurnRecord(BaseModel):
+    session_type: str  # interview, chat, qa
+    session_id: str
+    turn_index: int
+    user_transcript: str
+    assistant_text: str
+    stt_provider: str = ""
+    tts_provider: str = ""
+    latency_ms: int = 0
+    created_at: str = ""

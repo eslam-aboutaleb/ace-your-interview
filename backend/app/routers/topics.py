@@ -6,15 +6,21 @@ import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 
+from app.config import get_settings
 from app.dependencies import require_auth
 from app.schemas.models import (
     CreateCustomTopicRequest,
+    FeatureGateStatusEnum,
     GenerateTopicContentRequest,
     ResponseDetailEnum,
     TopicDetail,
+    TopicSectionVideosResponse,
+    TopicVideoEventRequest,
+    TopicVideoMetricsResponse,
+    TopicVideosStatusResponse,
     TopicPreferencesResponse,
     TopicPreferencesUpdateRequest,
     TopicSummary,
@@ -36,6 +42,7 @@ from app.services.topic_catalog import (
     problem_solving_base_topic,
 )
 from app.services.topic_language_advisor import TopicLanguageAdvisor
+from app.services.video_recommender import VideoRecommender
 from app.services.llm_policy import (
     LLMServiceApprovalRequiredError,
     PersonalCredentialRequiredError,
@@ -45,11 +52,13 @@ from app.services.llm_policy import (
 from app.services.llm_client import LLMClient
 
 router = APIRouter(prefix="/api/topics", tags=["topics"])
+features_router = APIRouter(prefix="/api/features", tags=["features"])
 
 _parser: DocParser | None = None
 _llm_client: LLMClient | None = None
 _learning_store: LearningStore | None = None
 _mcp_gateway: MCPGateway | None = None
+_video_recommender: VideoRecommender | None = None
 
 
 def init(
@@ -57,18 +66,26 @@ def init(
     llm_client: LLMClient,
     learning_store: LearningStore,
     mcp_gateway: MCPGateway | None = None,
+    video_recommender: VideoRecommender | None = None,
 ):
-    global _parser, _llm_client, _learning_store, _mcp_gateway
+    global _parser, _llm_client, _learning_store, _mcp_gateway, _video_recommender
     _parser = parser
     _llm_client = llm_client
     _learning_store = learning_store
     _mcp_gateway = mcp_gateway
+    _video_recommender = video_recommender or VideoRecommender(learning_store, get_settings())
 
 
 def _ensure_services() -> tuple[DocParser, LLMClient, LearningStore]:
     if _parser is None or _llm_client is None or _learning_store is None:
         raise HTTPException(status_code=503, detail="Service not initialised")
     return _parser, _llm_client, _learning_store
+
+
+def _video_service() -> VideoRecommender:
+    if _video_recommender is None:
+        raise HTTPException(status_code=503, detail="Video service not initialised")
+    return _video_recommender
 
 
 def _profile_is_stale(updated_at: str) -> bool:
@@ -81,7 +98,7 @@ def _profile_is_stale(updated_at: str) -> bool:
     return updated < (datetime.now(UTC) - timedelta(days=7))
 
 
-def _resolve_topic_detail_for_user(
+async def _resolve_topic_detail_for_user(
     *,
     parser: DocParser,
     store: LearningStore,
@@ -89,7 +106,8 @@ def _resolve_topic_detail_for_user(
     topic_id: str,
 ) -> TopicDetail | None:
     if is_problem_solving_topic(topic_id):
-        resolved = store.resolve_topic_ai_settings(
+        resolved = await store.run_async(
+            store.resolve_topic_ai_settings,
             user_id=user_id,
             topic_id=topic_id,
             topic_detail=problem_solving_base_topic(),
@@ -97,7 +115,8 @@ def _resolve_topic_detail_for_user(
         selected_language = (
             resolved.get("preferred_language") or PROBLEM_SOLVING_DEFAULT_LANGUAGE
         )
-        dynamic = store.resolve_problem_solving_topic_detail(
+        dynamic = await store.run_async(
+            store.resolve_problem_solving_topic_detail,
             user_id=user_id,
             preferred_language=selected_language,
         )
@@ -105,7 +124,11 @@ def _resolve_topic_detail_for_user(
     topic = parser.get_topic(topic_id)
     if topic:
         return topic
-    custom = store.get_custom_topic(user_id=user_id, topic_id=topic_id)
+    custom = await store.run_async(
+        store.get_custom_topic,
+        user_id=user_id,
+        topic_id=topic_id,
+    )
     if custom:
         return TopicDetail(**custom)
     return None
@@ -139,14 +162,18 @@ async def _ensure_topic_language_profile(
     user_identity: dict,
 ) -> dict:
     if is_problem_solving_topic(topic.id):
-        return store.upsert_topic_language_profile(
+        return await store.run_async(
+            store.upsert_topic_language_profile,
             topic_id=topic.id,
             requires_programming=True,
             language_options=list(PROBLEM_SOLVING_LANGUAGE_OPTIONS),
             source="builtin",
         )
 
-    profile = store.get_topic_language_profile(topic_id=topic.id)
+    profile = await store.run_async(
+        store.get_topic_language_profile,
+        topic_id=topic.id,
+    )
     if profile and not _profile_is_stale(profile.get("updated_at", "")):
         return profile
 
@@ -164,7 +191,8 @@ async def _ensure_topic_language_profile(
         user_identity=user_identity,
         mcp_context=mcp_context,
     )
-    return store.upsert_topic_language_profile(
+    return await store.run_async(
+        store.upsert_topic_language_profile,
         topic_id=topic.id,
         requires_programming=bool(advised.get("requires_programming")),
         language_options=[str(v) for v in advised.get("language_options", [])],
@@ -174,19 +202,27 @@ async def _ensure_topic_language_profile(
 
 @router.get("", response_model=list[TopicSummary])
 async def list_topics(
+    response: Response,
     track: str | None = Query(default=None, pattern="^(backend|frontend|system_design|ai_stack)$"),
     level: str | None = Query(default=None, pattern="^(junior|mid|senior)$"),
     q: str | None = Query(default=None, max_length=200),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: dict = Depends(require_auth),
 ):
     """Return static topics + user custom topics with shared filters."""
     parser, _, store = _ensure_services()
     static_topics = parser.list_topics(track=track, level=level, q=q)
+    custom_topic_items = await store.run_async(
+        store.list_custom_topics,
+        user_id=user["user"],
+        track=track,
+        level=level,
+        q=q,
+    )
     custom_topics = [
         TopicSummary(**item)
-        for item in store.list_custom_topics(
-            user_id=user["user"], track=track, level=level, q=q
-        )
+        for item in custom_topic_items
     ]
     dynamic_topics: list[TopicSummary] = []
     if _passes_topic_filters(
@@ -198,7 +234,8 @@ async def list_topics(
         level_filter=level,
         query_filter=q,
     ):
-        resolved = store.resolve_topic_ai_settings(
+        resolved = await store.run_async(
+            store.resolve_topic_ai_settings,
             user_id=user["user"],
             topic_id=PROBLEM_SOLVING_TOPIC_ID,
             topic_detail=problem_solving_base_topic(),
@@ -206,7 +243,8 @@ async def list_topics(
         selected_language = (
             resolved.get("preferred_language") or PROBLEM_SOLVING_DEFAULT_LANGUAGE
         )
-        cached = store.get_dynamic_topic_curriculum(
+        cached = await store.run_async(
+            store.get_dynamic_topic_curriculum,
             user_id=user["user"],
             topic_id=PROBLEM_SOLVING_TOPIC_ID,
             preferred_language=selected_language,
@@ -225,14 +263,21 @@ async def list_topics(
         )
 
     merged = sorted([*static_topics, *custom_topics, *dynamic_topics], key=lambda t: t.id)
-    return merged
+    total = len(merged)
+    paged = merged[offset:] if limit is None else merged[offset : offset + limit]
+
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Offset"] = str(offset)
+    if limit is not None:
+        response.headers["X-Limit"] = str(limit)
+    return paged
 
 
 @router.get("/{topic_id}", response_model=TopicDetail)
 async def get_topic(topic_id: str, user: dict = Depends(require_auth)):
     """Return static topic first; then user-scoped custom topic."""
     parser, llm_client, store = _ensure_services()
-    topic = _resolve_topic_detail_for_user(
+    topic = await _resolve_topic_detail_for_user(
         parser=parser,
         store=store,
         user_id=user["user"],
@@ -247,7 +292,8 @@ async def get_topic(topic_id: str, user: dict = Depends(require_auth)):
         topic=topic,
         user_identity=user,
     )
-    resolved = store.resolve_topic_ai_settings(
+    resolved = await store.run_async(
+        store.resolve_topic_ai_settings,
         user_id=user["user"],
         topic_id=topic_id,
         topic_detail=topic.model_dump(mode="json"),
@@ -269,10 +315,110 @@ async def get_topic(topic_id: str, user: dict = Depends(require_auth)):
     )
 
 
+@features_router.get("/topic-videos/status", response_model=TopicVideosStatusResponse)
+async def topic_videos_status(user: dict = Depends(require_auth)):
+    _ = user
+    status = await _video_service().get_status_async()
+    return TopicVideosStatusResponse(**status)
+
+
+@features_router.get("/topic-videos/metrics", response_model=TopicVideoMetricsResponse)
+async def topic_videos_metrics(user: dict = Depends(require_auth)):
+    _ = user
+    _, _, store = _ensure_services()
+    status = await _video_service().get_status_async()
+    metrics = await store.run_async(store.get_feature_metrics, feature_key="topic_videos")
+    payload = {
+        **metrics,
+        "status": status.get("status", FeatureGateStatusEnum.DISABLED_CONFIG.value),
+        "disabled_until": status.get("disabled_until", ""),
+        "reason": status.get("reason", ""),
+        "hidden_now": bool(status.get("status") == FeatureGateStatusEnum.DISABLED_QUOTA_EXHAUSTED.value),
+    }
+    return TopicVideoMetricsResponse(**payload)
+
+
+@features_router.post("/topic-videos/events")
+async def topic_videos_events(
+    body: TopicVideoEventRequest,
+    user: dict = Depends(require_auth),
+):
+    _, _, store = _ensure_services()
+    await store.run_async(
+        store.record_feature_event,
+        user_id=user["user"],
+        feature_key="topic_videos",
+        event_name=body.event_name,
+        metadata={
+            "topic_id": body.topic_id,
+            "section_index": int(body.section_index),
+            "section_heading": body.section_heading,
+            "video_id": body.video_id,
+            "metadata": body.metadata,
+        },
+    )
+    return {"ok": True}
+
+
+@router.get("/{topic_id}/videos", response_model=TopicSectionVideosResponse)
+async def topic_section_videos(
+    topic_id: str,
+    section_index: int = Query(default=0, ge=0),
+    preferred_language: str = Query(default="", max_length=60),
+    limit: int = Query(default=3, ge=1, le=5),
+    force_refresh: bool = Query(default=False),
+    user: dict = Depends(require_auth),
+):
+    parser, _, store = _ensure_services()
+    topic = await _resolve_topic_detail_for_user(
+        parser=parser,
+        store=store,
+        user_id=user["user"],
+        topic_id=topic_id,
+    )
+    if topic is None:
+        raise HTTPException(status_code=404, detail=f"Topic '{topic_id}' not found")
+    if section_index >= len(topic.sections):
+        raise HTTPException(status_code=422, detail="section_index is out of range for this topic")
+
+    section = topic.sections[section_index]
+    selected_language = (preferred_language or topic.selected_language or "").strip().lower()
+    result = await _video_service().recommend(
+        topic_id=topic_id,
+        topic_title=topic.title,
+        section_heading=section.get("heading", ""),
+        preferred_language=selected_language,
+        limit=limit,
+        force_refresh=force_refresh,
+    )
+    result.update(
+        {
+            "topic_id": topic_id,
+            "section_index": int(section_index),
+            "section_heading": str(section.get("heading", "")),
+        }
+    )
+
+    if result.get("enabled"):
+        await store.run_async(
+            store.record_feature_event,
+            user_id=user["user"],
+            feature_key="topic_videos",
+            event_name="video_panel_viewed",
+            metadata={
+                "topic_id": topic_id,
+                "section_index": int(section_index),
+                "section_heading": str(section.get("heading", "")),
+                "cached": bool(result.get("cached")),
+            },
+        )
+    return TopicSectionVideosResponse(**result)
+
+
 @router.get("/{topic_id}/preferences", response_model=TopicPreferencesResponse)
 async def get_topic_preferences(topic_id: str, user: dict = Depends(require_auth)):
     parser, llm_client, store = _ensure_services()
-    topic = _resolve_topic_detail_for_user(
+    topic = await _resolve_topic_detail_for_user(
         parser=parser,
         store=store,
         user_id=user["user"],
@@ -287,7 +433,8 @@ async def get_topic_preferences(topic_id: str, user: dict = Depends(require_auth
         topic=topic,
         user_identity=user,
     )
-    resolved = store.resolve_topic_ai_settings(
+    resolved = await store.run_async(
+        store.resolve_topic_ai_settings,
         user_id=user["user"],
         topic_id=topic_id,
         topic_detail=topic.model_dump(mode="json"),
@@ -312,7 +459,7 @@ async def update_topic_preferences(
     user: dict = Depends(require_auth),
 ):
     parser, llm_client, store = _ensure_services()
-    topic = _resolve_topic_detail_for_user(
+    topic = await _resolve_topic_detail_for_user(
         parser=parser,
         store=store,
         user_id=user["user"],
@@ -336,13 +483,15 @@ async def update_topic_preferences(
                 detail=f"preferred_language must be one of: {', '.join(allowed_languages)}",
             )
 
-    store.upsert_topic_preferences(
+    await store.run_async(
+        store.upsert_topic_preferences,
         user_id=user["user"],
         topic_id=topic_id,
         response_detail=(body.response_detail.value if body.response_detail else None),
         preferred_language=body.preferred_language,
     )
-    resolved = store.resolve_topic_ai_settings(
+    resolved = await store.run_async(
+        store.resolve_topic_ai_settings,
         user_id=user["user"],
         topic_id=topic_id,
         topic_detail=topic.model_dump(mode="json"),
@@ -393,18 +542,21 @@ async def generate_topic_content_stream(
             }
         ) + "\n"
         try:
-            store.upsert_topic_preferences(
+            await store.run_async(
+                store.upsert_topic_preferences,
                 user_id=user["user"],
                 topic_id=topic_id,
                 preferred_language=language,
             )
-            cached = store.get_dynamic_topic_curriculum(
+            cached = await store.run_async(
+                store.get_dynamic_topic_curriculum,
                 user_id=user["user"],
                 topic_id=topic_id,
                 preferred_language=language,
             )
             if cached and not body.force_regenerate:
-                detail = store.resolve_problem_solving_topic_detail(
+                detail = await store.run_async(
+                    store.resolve_problem_solving_topic_detail,
                     user_id=user["user"],
                     preferred_language=language,
                 )
@@ -419,7 +571,8 @@ async def generate_topic_content_stream(
                 return
 
             if body.force_regenerate:
-                store.delete_dynamic_topic_curriculum(
+                await store.run_async(
+                    store.delete_dynamic_topic_curriculum,
                     user_id=user["user"],
                     topic_id=topic_id,
                     preferred_language=language,
@@ -448,7 +601,8 @@ async def generate_topic_content_stream(
                 await asyncio.sleep(1)
 
             generated = await generation_task
-            store.upsert_dynamic_topic_curriculum(
+            await store.run_async(
+                store.upsert_dynamic_topic_curriculum,
                 user_id=user["user"],
                 topic_id=topic_id,
                 preferred_language=language,
@@ -475,11 +629,13 @@ async def generate_topic_content_stream(
                 if idx % 8 == 0:
                     await asyncio.sleep(0)
 
-            detail = store.resolve_problem_solving_topic_detail(
+            detail = await store.run_async(
+                store.resolve_problem_solving_topic_detail,
                 user_id=user["user"],
                 preferred_language=language,
             )
-            resolved = store.resolve_topic_ai_settings(
+            resolved = await store.run_async(
+                store.resolve_topic_ai_settings,
                 user_id=user["user"],
                 topic_id=topic_id,
                 topic_detail=detail,
@@ -536,7 +692,8 @@ async def create_custom_topic(
         llm_config=body.llm_config,
         user_identity=user,
     )
-    store.upsert_custom_topic(
+    await store.run_async(
+        store.upsert_custom_topic,
         user_id=user["user"],
         topic_id=generated.id,
         source_topic=body.topic.strip(),
@@ -594,7 +751,8 @@ async def create_custom_topic_stream(
                 await asyncio.sleep(1)
 
             generated = await generation_task
-            store.upsert_custom_topic(
+            await store.run_async(
+                store.upsert_custom_topic,
                 user_id=user["user"],
                 topic_id=generated.id,
                 source_topic=topic_name,

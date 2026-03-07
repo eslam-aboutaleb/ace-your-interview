@@ -48,6 +48,59 @@ export interface TopicDetail {
   content_ready: boolean;
 }
 
+export type TopicVideosStatus =
+  | "enabled"
+  | "disabled_quota_exhausted"
+  | "probe"
+  | "disabled_config";
+
+export interface VideoResource {
+  video_id: string;
+  title: string;
+  url: string;
+  channel: string;
+  duration_seconds: number;
+  thumbnail_url: string;
+  published_at: string;
+  source: string;
+}
+
+export interface TopicVideosStatusResponse {
+  enabled: boolean;
+  status: TopicVideosStatus;
+  disabled_until: string;
+  reason: string;
+}
+
+export interface TopicSectionVideosResponse extends TopicVideosStatusResponse {
+  topic_id: string;
+  section_index: number;
+  section_heading: string;
+  videos: VideoResource[];
+  source: string;
+  cached: boolean;
+}
+
+export interface TopicVideoMetricsResponse {
+  status: TopicVideosStatus;
+  disabled_until: string;
+  reason: string;
+  hidden_now: boolean;
+  hidden_days_last_7: number;
+  hidden_days_last_30: number;
+  hidden_frequency_weekly: Array<{
+    week_start: string;
+    hidden_events: number;
+  }>;
+  panel_views_30d: number;
+  video_clicks_30d: number;
+  ctr_30d: number;
+  reenabled_at: string;
+  panel_views_since_reenable: number;
+  clicks_since_reenable: number;
+  ctr_since_reenable: number;
+}
+
 export interface CreateCustomTopicRequest {
   topic: string;
   target_sections?: number;
@@ -701,3 +754,49 @@ export interface OllamaTestResponse {
   connected: boolean;
   version: string;
 }
+
+/* ── Voice Types ─────────────────────────────────────────── */
+
+export type VoiceTier = "browser" | "cloud" | "realtime";
+
+export interface VoiceConfig {
+  enabled: boolean;
+  available_tiers: VoiceTier[];
+  default_tier: VoiceTier;
+  user_tier: VoiceTier;
+  stt_provider: string;
+  tts_provider: string;
+}
+
+export type VoiceSessionType = "chat" | "interview" | "qa";
+
+export interface VoiceLatency {
+  stt_ms: number;
+  llm_ms: number;
+  tts_ms: number;
+  total_ms: number;
+}
+
+/** Messages FROM the server over WebSocket */
+export type VoiceServerMessage =
+  | { type: "ready"; session_id: string; tier: VoiceTier }
+  | { type: "transcript"; text: string; final: boolean }
+  | { type: "response"; text: string; audio: string; latency: VoiceLatency }
+  | { type: "audio"; audio: string; text: string }
+  | { type: "stopped"; session_id: string }
+  | { type: "error"; message: string };
+
+/** Messages TO the server over WebSocket */
+export type VoiceClientMessage =
+  | {
+      type: "start";
+      tier: VoiceTier;
+      session_type: VoiceSessionType;
+      session_id?: string;
+      system_prompt?: string;
+      llm_config?: { provider: string; model: string };
+    }
+  | { type: "audio"; data: string; mime: string }
+  | { type: "text"; content: string; speak?: boolean }
+  | { type: "synthesize"; text: string }
+  | { type: "stop" };

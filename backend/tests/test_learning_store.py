@@ -1,11 +1,35 @@
 import os
 import tempfile
+import asyncio
+from datetime import UTC, datetime, timedelta
 import unittest
 
 from app.services.learning_store import LearningStore
 
 
 class LearningStoreTests(unittest.TestCase):
+    def test_run_async_executes_sqlite_work_off_main_loop(self):
+        async def _exercise() -> None:
+            with tempfile.TemporaryDirectory() as td:
+                db_path = os.path.join(td, "learning.db")
+                store = LearningStore(db_path)
+                saved = await store.run_async(
+                    store.record_attempt,
+                    user_id="alice",
+                    question_id="q-async",
+                    topic_id="topic-async",
+                    user_answer="answer",
+                    is_correct=False,
+                    confidence=4,
+                    response_time_ms=800,
+                    mode="study",
+                )
+                queue = await store.run_async(store.get_review_queue, user_id="alice", limit=10)
+                self.assertEqual(saved["question_id"], "q-async")
+                self.assertEqual(queue["items"][0]["question_id"], "q-async")
+
+        asyncio.run(_exercise())
+
     def test_incorrect_high_confidence_is_prioritized(self):
         with tempfile.TemporaryDirectory() as td:
             db_path = os.path.join(td, "learning.db")
@@ -238,6 +262,80 @@ class LearningStoreTests(unittest.TestCase):
             )
             self.assertTrue(resolved["requires_programming"])
             self.assertEqual(resolved["preferred_language"], "python")
+
+    def test_feature_runtime_state_roundtrip(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = LearningStore(os.path.join(td, "learning.db"))
+            saved = store.set_feature_state(
+                feature_key="topic_videos",
+                status="disabled_quota_exhausted",
+                disabled_until="2026-03-08T08:00:00+00:00",
+                reason="youtube_quota_exhausted",
+            )
+            self.assertEqual(saved["status"], "disabled_quota_exhausted")
+            loaded = store.get_feature_state(feature_key="topic_videos")
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded["reason"], "youtube_quota_exhausted")
+
+    def test_topic_video_cache_ttl(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = LearningStore(os.path.join(td, "learning.db"))
+            key = "topic_videos:test"
+            store.upsert_topic_video_cache(
+                cache_key=key,
+                topic_id="01-static",
+                section_heading="HTTP Basics",
+                preferred_language="python",
+                payload={"videos": [{"video_id": "abc"}], "source": "youtube"},
+            )
+            found = store.get_topic_video_cache(cache_key=key, max_age_hours=24)
+            self.assertIsNotNone(found)
+            assert found is not None
+            self.assertEqual(found["payload"]["videos"][0]["video_id"], "abc")
+
+            stale = (datetime.now(UTC) - timedelta(hours=26)).isoformat()
+            store._conn.execute(
+                "UPDATE topic_video_cache SET fetched_at = ? WHERE cache_key = ?",
+                (stale, key),
+            )
+            store._conn.commit()
+            expired = store.get_topic_video_cache(cache_key=key, max_age_hours=24)
+            self.assertIsNone(expired)
+
+    def test_feature_event_metrics_summary(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = LearningStore(os.path.join(td, "learning.db"))
+            now = datetime.now(UTC)
+            disabled_until = (now + timedelta(hours=10)).isoformat()
+            store.record_feature_event(
+                user_id="system",
+                feature_key="topic_videos",
+                event_name="video_panel_hidden_quota",
+                metadata={"disabled_until": disabled_until},
+            )
+            store.record_feature_event(
+                user_id="alice",
+                feature_key="topic_videos",
+                event_name="video_panel_viewed",
+                metadata={},
+            )
+            store.record_feature_event(
+                user_id="alice",
+                feature_key="topic_videos",
+                event_name="video_click",
+                metadata={},
+            )
+            store.record_feature_event(
+                user_id="system",
+                feature_key="topic_videos",
+                event_name="video_feature_reenabled",
+                metadata={},
+            )
+            out = store.get_feature_metrics(feature_key="topic_videos")
+            self.assertEqual(out["panel_views_30d"], 1)
+            self.assertEqual(out["video_clicks_30d"], 1)
+            self.assertGreaterEqual(out["ctr_30d"], 1.0)
 
     def test_assistant_memory_upsert_and_isolation(self):
         with tempfile.TemporaryDirectory() as td:

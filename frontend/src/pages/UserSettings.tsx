@@ -8,6 +8,7 @@ import {
   Link as LinkIcon,
   Unlink,
   ShieldCheck,
+  Mic,
 } from "lucide-react";
 import {
   connectGeminiAccount,
@@ -26,6 +27,7 @@ import type {
   UserSettingsResponse,
 } from "@/types";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useVoiceStore } from "@/store/voiceStore";
 
 function readPolicyErrorFromUrl(): string {
   const params = new URLSearchParams(window.location.search);
@@ -44,6 +46,7 @@ function readPolicyErrorFromUrl(): string {
 
 export default function UserSettingsPage() {
   const settings = useSettingsStore();
+  const voiceStore = useVoiceStore();
   const [data, setData] = useState<UserSettingsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingPrefs, setSavingPrefs] = useState(false);
@@ -63,7 +66,8 @@ export default function UserSettingsPage() {
 
   const canUseAccountMode = selectedProvider === "google";
   const showNotApprovedBanner = !!data && !data.study_app_available;
-  const showMissingAssignmentBanner = inStudyAppMode && !!data && !data.study_app_assignment;
+  const showMissingAssignmentBanner =
+    inStudyAppMode && !!data && !data.study_app_assignment;
   const showPersonalCredentialBanner =
     !inStudyAppMode &&
     !!providerStatus &&
@@ -137,12 +141,17 @@ export default function UserSettingsPage() {
           : canUseAccountMode
             ? authMode
             : "api_key";
-      const assignmentProvider = data?.study_app_assignment?.provider || settings.provider;
-      const assignmentModel = data?.study_app_assignment?.model || settings.model;
+      const assignmentProvider =
+        data?.study_app_assignment?.provider || settings.provider;
+      const assignmentModel =
+        data?.study_app_assignment?.model || settings.model;
 
       const payload: UserPreferences = {
-        provider: (selectedSource === "study_app" ? assignmentProvider : selectedProvider) as UserSettingsProvider,
-        model: selectedSource === "study_app" ? assignmentModel : settings.model,
+        provider: (selectedSource === "study_app"
+          ? assignmentProvider
+          : selectedProvider) as UserSettingsProvider,
+        model:
+          selectedSource === "study_app" ? assignmentModel : settings.model,
         temperature: settings.temperature,
         max_tokens: settings.maxTokens,
         auth_mode: effectiveAuthMode,
@@ -151,7 +160,11 @@ export default function UserSettingsPage() {
       };
       const saved = await updateUserPreferences(payload);
       setAuthMode(saved.auth_mode);
-      setData((prev) => (prev ? { ...prev, has_saved_preferences: true, preferences: saved } : prev));
+      setData((prev) =>
+        prev
+          ? { ...prev, has_saved_preferences: true, preferences: saved }
+          : prev,
+      );
       setMessage("Preferences saved.");
       await load();
     } catch (e) {
@@ -226,7 +239,11 @@ export default function UserSettingsPage() {
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1100px] mx-auto px-4 sm:px-6 py-8">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="max-w-[1100px] mx-auto px-4 sm:px-6 py-8"
+    >
       <div className="udemy-card p-6 mb-6">
         <h1 className="text-2xl font-bold mb-2">User Settings</h1>
         <p className="text-sm text-udemy-text-muted">
@@ -236,17 +253,20 @@ export default function UserSettingsPage() {
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         {showNotApprovedBanner && (
           <p className="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-            You are not approved for Study App LLM. Ask admin approval to enable this mode.
+            You are not approved for Study App LLM. Ask admin approval to enable
+            this mode.
           </p>
         )}
         {showMissingAssignmentBanner && (
           <p className="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-            Study App LLM is selected but admin has not assigned your provider/model yet.
+            Study App LLM is selected but admin has not assigned your
+            provider/model yet.
           </p>
         )}
         {showPersonalCredentialBanner && (
           <p className="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-            Personal LLM mode needs your own API key/account for the selected provider.
+            Personal LLM mode needs your own API key/account for the selected
+            provider.
           </p>
         )}
       </div>
@@ -280,25 +300,38 @@ export default function UserSettingsPage() {
 
           {inStudyAppMode ? (
             <div className="rounded-lg border border-udemy-border p-4 mb-6">
-              <h3 className="text-sm font-semibold mb-2">Assigned Study App LLM</h3>
+              <h3 className="text-sm font-semibold mb-2">
+                Assigned Study App LLM
+              </h3>
               {data?.study_app_assignment ? (
                 <div className="text-sm space-y-1">
                   <p>
-                    Provider: <span className="font-medium capitalize">{data.study_app_assignment.provider === "google" ? "Gemini" : data.study_app_assignment.provider}</span>
+                    Provider:{" "}
+                    <span className="font-medium capitalize">
+                      {data.study_app_assignment.provider === "google"
+                        ? "Gemini"
+                        : data.study_app_assignment.provider}
+                    </span>
                   </p>
                   <p>
-                    Model: <span className="font-medium">{data.study_app_assignment.model}</span>
+                    Model:{" "}
+                    <span className="font-medium">
+                      {data.study_app_assignment.model}
+                    </span>
                   </p>
                 </div>
               ) : (
                 <p className="text-sm text-udemy-text-muted">
-                  No assignment yet. Ask admin to assign your Study App provider/model.
+                  No assignment yet. Ask admin to assign your Study App
+                  provider/model.
                 </p>
               )}
             </div>
           ) : (
             <>
-              <h2 className="text-lg font-bold mb-4">Personal Provider & Model</h2>
+              <h2 className="text-lg font-bold mb-4">
+                Personal Provider & Model
+              </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
                 {data?.providers.map((p) => (
                   <button
@@ -310,14 +343,19 @@ export default function UserSettingsPage() {
                         : "border-udemy-border hover:border-gray-400"
                     }`}
                   >
-                    <div className="font-semibold capitalize">{p.provider === "google" ? "Gemini" : p.provider}</div>
-                    <div className="text-xs text-udemy-text-muted mt-1">{p.models.length} models</div>
+                    <div className="font-semibold capitalize">
+                      {p.provider === "google" ? "Gemini" : p.provider}
+                    </div>
+                    <div className="text-xs text-udemy-text-muted mt-1">
+                      {p.models.length} models
+                    </div>
                     <div className="flex flex-wrap gap-1 mt-2">
                       {p.models.map((m) => (
                         <span
                           key={m}
                           className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                            selectedProvider === p.provider && settings.model === m
+                            selectedProvider === p.provider &&
+                            settings.model === m
                               ? "bg-udemy-purple text-white"
                               : "bg-gray-100 text-udemy-text-muted"
                           }`}
@@ -355,7 +393,9 @@ export default function UserSettingsPage() {
             max="1.5"
             step="0.1"
             value={settings.temperature}
-            onChange={(e) => settings.setTemperature(parseFloat(e.target.value))}
+            onChange={(e) =>
+              settings.setTemperature(parseFloat(e.target.value))
+            }
             className="w-full accent-udemy-purple mb-6"
           />
 
@@ -365,14 +405,67 @@ export default function UserSettingsPage() {
               <input
                 type="checkbox"
                 checked={settings.requireAnswerReveal}
-                onChange={(e) => settings.setRequireAnswerReveal(e.target.checked)}
+                onChange={(e) =>
+                  settings.setRequireAnswerReveal(e.target.checked)
+                }
                 className="mt-0.5 accent-udemy-purple"
               />
               <span>
-                Require clicking <span className="font-medium">Reveal Official Answer</span> before showing answers
-                in Topics study mode.
+                Require clicking{" "}
+                <span className="font-medium">Reveal Official Answer</span>{" "}
+                before showing answers in Topics study mode.
               </span>
             </label>
+          </div>
+
+          <div className="mb-6 rounded-lg border border-udemy-border p-4">
+            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <Mic className="w-4 h-4 text-udemy-purple" />
+              Voice Agent
+            </h3>
+            <label className="flex items-start gap-3 text-sm mb-3">
+              <input
+                type="checkbox"
+                checked={voiceStore.voiceEnabled}
+                onChange={(e) => voiceStore.setVoiceEnabled(e.target.checked)}
+                className="mt-0.5 accent-udemy-purple"
+              />
+              <span>
+                Enable voice interactions (mic button, speech-to-text,
+                read-aloud)
+              </span>
+            </label>
+            {voiceStore.voiceEnabled && (
+              <>
+                <div className="flex items-center gap-3 text-sm mb-2">
+                  <label className="text-udemy-text-muted">
+                    Preferred tier:
+                  </label>
+                  <select
+                    value={voiceStore.preferredTier}
+                    onChange={(e) =>
+                      voiceStore.setPreferredTier(e.target.value as any)
+                    }
+                    className="border border-udemy-border rounded px-2 py-1 text-sm"
+                  >
+                    <option value="browser">Browser (Free)</option>
+                    <option value="cloud">Cloud (~$0.01)</option>
+                    <option value="realtime">Realtime (~$0.50+)</option>
+                  </select>
+                </div>
+                <label className="flex items-start gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={voiceStore.autoPlayResponses}
+                    onChange={(e) =>
+                      voiceStore.setAutoPlayResponses(e.target.checked)
+                    }
+                    className="mt-0.5 accent-udemy-purple"
+                  />
+                  <span>Auto-play audio responses</span>
+                </label>
+              </>
+            )}
           </div>
 
           <button
@@ -380,7 +473,11 @@ export default function UserSettingsPage() {
             disabled={savingPrefs}
             className="btn-primary inline-flex items-center gap-2"
           >
-            {savingPrefs ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {savingPrefs ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
             Save Preferences
           </button>
         </div>
@@ -389,7 +486,9 @@ export default function UserSettingsPage() {
           {!inStudyAppMode && (
             <>
               <div>
-                <h3 className="text-sm font-bold uppercase text-udemy-text-muted mb-2">Authentication Mode</h3>
+                <h3 className="text-sm font-bold uppercase text-udemy-text-muted mb-2">
+                  Authentication Mode
+                </h3>
                 {canUseAccountMode ? (
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 text-sm">
@@ -412,16 +511,22 @@ export default function UserSettingsPage() {
                     </label>
                   </div>
                 ) : (
-                  <p className="text-sm text-udemy-text-muted">Only API key mode is available for this provider.</p>
+                  <p className="text-sm text-udemy-text-muted">
+                    Only API key mode is available for this provider.
+                  </p>
                 )}
               </div>
 
               {selectedProvider === "google" && (
                 <div>
-                  <h3 className="text-sm font-bold uppercase text-udemy-text-muted mb-2">Gemini Account</h3>
+                  <h3 className="text-sm font-bold uppercase text-udemy-text-muted mb-2">
+                    Gemini Account
+                  </h3>
                   <div className="flex items-center gap-2 text-sm mb-3">
                     <UserCheck className="w-4 h-4 text-udemy-purple" />
-                    {providerStatus?.account_connected ? "Connected" : "Not connected"}
+                    {providerStatus?.account_connected
+                      ? "Connected"
+                      : "Not connected"}
                   </div>
                   {providerStatus?.account_connected ? (
                     <button
@@ -444,7 +549,9 @@ export default function UserSettingsPage() {
               )}
 
               <div>
-                <h3 className="text-sm font-bold uppercase text-udemy-text-muted mb-2">API Key</h3>
+                <h3 className="text-sm font-bold uppercase text-udemy-text-muted mb-2">
+                  API Key
+                </h3>
                 <input
                   type="password"
                   placeholder="Paste API key"
@@ -458,7 +565,11 @@ export default function UserSettingsPage() {
                     disabled={savingKey || !apiKeyInput.trim()}
                     className="btn-secondary flex-1 inline-flex items-center justify-center gap-2"
                   >
-                    {savingKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                    {savingKey ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <KeyRound className="w-4 h-4" />
+                    )}
                     Save
                   </button>
                   <button
@@ -474,13 +585,29 @@ export default function UserSettingsPage() {
           )}
 
           <div className="border-t border-udemy-border pt-4 text-sm">
-            <h3 className="text-sm font-bold uppercase text-udemy-text-muted mb-2">Status</h3>
-            <p className="mb-1">Current source: {inStudyAppMode ? "Study App LLM" : "Personal LLM"}</p>
-            <p className="mb-1">API key: {providerStatus?.api_key_connected ? "Connected" : "Not connected"}</p>
-            <p className="mb-1">Account: {providerStatus?.account_connected ? "Connected" : "Not connected"}</p>
+            <h3 className="text-sm font-bold uppercase text-udemy-text-muted mb-2">
+              Status
+            </h3>
+            <p className="mb-1">
+              Current source:{" "}
+              {inStudyAppMode ? "Study App LLM" : "Personal LLM"}
+            </p>
+            <p className="mb-1">
+              API key:{" "}
+              {providerStatus?.api_key_connected
+                ? "Connected"
+                : "Not connected"}
+            </p>
+            <p className="mb-1">
+              Account:{" "}
+              {providerStatus?.account_connected
+                ? "Connected"
+                : "Not connected"}
+            </p>
             <p className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-udemy-purple" />
-              Study App access: {data?.study_app_available ? "Enabled" : "Disabled"}
+              Study App access:{" "}
+              {data?.study_app_available ? "Enabled" : "Disabled"}
             </p>
           </div>
         </div>

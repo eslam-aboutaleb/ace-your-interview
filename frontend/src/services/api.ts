@@ -4,6 +4,9 @@ import type {
   InterviewLevel,
   TopicSummary,
   TopicDetail,
+  TopicVideosStatusResponse,
+  TopicSectionVideosResponse,
+  TopicVideoMetricsResponse,
   TopicPreferencesResponse,
   TopicPreferencesUpdateRequest,
   CreateCustomTopicRequest,
@@ -210,6 +213,8 @@ export interface FetchTopicsParams {
   track?: LearningTrack;
   level?: InterviewLevel;
   q?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export async function fetchTopics(
@@ -240,6 +245,49 @@ export async function updateTopicPreferences(
   const { data } = await api.put<TopicPreferencesResponse>(
     `/topics/${topicId}/preferences`,
     payload,
+  );
+  return data;
+}
+
+export async function fetchTopicVideosStatus(): Promise<TopicVideosStatusResponse> {
+  const { data } = await api.get<TopicVideosStatusResponse>(
+    "/features/topic-videos/status",
+  );
+  return data;
+}
+
+export interface FetchTopicSectionVideosParams {
+  section_index: number;
+  preferred_language?: string;
+  limit?: number;
+  force_refresh?: boolean;
+}
+
+export async function fetchTopicSectionVideos(
+  topicId: string,
+  params: FetchTopicSectionVideosParams,
+): Promise<TopicSectionVideosResponse> {
+  const { data } = await api.get<TopicSectionVideosResponse>(
+    `/topics/${topicId}/videos`,
+    { params },
+  );
+  return data;
+}
+
+export async function recordTopicVideoEvent(payload: {
+  event_name: "video_panel_viewed" | "video_click" | "video_panel_hidden_quota" | "video_feature_reenabled";
+  topic_id?: string;
+  section_index?: number;
+  section_heading?: string;
+  video_id?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  await api.post("/features/topic-videos/events", payload);
+}
+
+export async function fetchTopicVideoMetrics(): Promise<TopicVideoMetricsResponse> {
+  const { data } = await api.get<TopicVideoMetricsResponse>(
+    "/features/topic-videos/metrics",
   );
   return data;
 }

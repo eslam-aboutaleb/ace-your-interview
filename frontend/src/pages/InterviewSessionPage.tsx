@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { AlertTriangle, Loader2, Send, SkipForward, FileText } from "lucide-react";
+import {
+  AlertTriangle,
+  Loader2,
+  Send,
+  SkipForward,
+  FileText,
+  Mic,
+  MicOff,
+  Volume2,
+} from "lucide-react";
 import { pageVariants, pageTransition } from "@/utils/animations";
 import {
   fetchInterviewSession,
@@ -11,6 +20,7 @@ import {
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
 import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
+import { useVoice } from "@/hooks/useVoice";
 import type { InterviewSessionResponse, InterviewTurnResponse } from "@/types";
 
 export default function InterviewSessionPage() {
@@ -26,6 +36,24 @@ export default function InterviewSessionPage() {
   const [loadingNext, setLoadingNext] = useState(false);
   const [startedAt, setStartedAt] = useState<number>(Date.now());
   const [lastTurn, setLastTurn] = useState<InterviewTurnResponse | null>(null);
+
+  // Voice integration
+  const voice = useVoice();
+
+  // Auto-fill answer draft from voice transcript
+  useEffect(() => {
+    if (voice.turns.length > 0) {
+      const lastUserTurn = [...voice.turns]
+        .reverse()
+        .find((t) => t.role === "user");
+      if (lastUserTurn && lastUserTurn.text) {
+        setAnswerDraft((prev) =>
+          prev ? prev + " " + lastUserTurn.text : lastUserTurn.text,
+        );
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.turns.length]);
 
   const loadSession = useCallback(async () => {
     if (!sessionId) return;
@@ -157,7 +185,9 @@ export default function InterviewSessionPage() {
 
   const progressPct = useMemo(() => {
     if (!data) return 0;
-    return Math.round((data.session.turns_completed / data.session.turn_count) * 100);
+    return Math.round(
+      (data.session.turns_completed / data.session.turn_count) * 100,
+    );
   }, [data]);
   const isCoding = data?.session.interview_type === "coding";
 
@@ -189,10 +219,12 @@ export default function InterviewSessionPage() {
         <div className="max-w-[1000px] mx-auto px-4 sm:px-6 py-6">
           <h1 className="text-2xl font-bold">Live Mock Interview</h1>
           <p className="text-gray-400 text-sm mt-1">
-            {data.session.track} · {data.session.level} · {data.session.interview_type}
+            {data.session.track} · {data.session.level} ·{" "}
+            {data.session.interview_type}
           </p>
           <p className="text-gray-400 text-xs mt-1">
-            style: {data.session.interviewer_style} · feedback: {data.session.feedback_mode}
+            style: {data.session.interviewer_style} · feedback:{" "}
+            {data.session.feedback_mode}
           </p>
           <div className="mt-4 bg-white/15 h-2 rounded-full overflow-hidden">
             <div
@@ -201,7 +233,8 @@ export default function InterviewSessionPage() {
             />
           </div>
           <p className="text-xs text-gray-400 mt-2">
-            {data.session.turns_completed}/{data.session.turn_count} turns completed
+            {data.session.turns_completed}/{data.session.turn_count} turns
+            completed
           </p>
         </div>
       </div>
@@ -215,7 +248,9 @@ export default function InterviewSessionPage() {
         )}
 
         <div className="udemy-card p-6">
-          <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-2">Current Question</h2>
+          <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-2">
+            Current Question
+          </h2>
           <p className="text-lg font-medium leading-relaxed whitespace-pre-line">
             {normalizeEscapedMultilineText(
               data.session.current_question || "Generating next question...",
@@ -223,31 +258,98 @@ export default function InterviewSessionPage() {
           </p>
           {isCoding && (
             <p className="text-xs text-udemy-text-muted mt-2">
-              Include your approach, complexity analysis, and edge-case handling.
+              Include your approach, complexity analysis, and edge-case
+              handling.
             </p>
+          )}
+          {voice.voiceEnabled && data.session.current_question && (
+            <button
+              onClick={() =>
+                voice.speak(
+                  normalizeEscapedMultilineText(
+                    data.session.current_question || "",
+                  ),
+                )
+              }
+              disabled={voice.isSpeaking}
+              className="mt-3 inline-flex items-center gap-1.5 text-xs text-udemy-purple
+                hover:text-udemy-purple-light transition-colors disabled:opacity-50"
+            >
+              <Volume2 className="w-3.5 h-3.5" />
+              {voice.isSpeaking ? "Speaking..." : "Read aloud"}
+            </button>
           )}
         </div>
 
         <div className="udemy-card p-6">
           <label className="block text-sm font-medium mb-2">Your Answer</label>
-          <textarea
-            value={answerDraft}
-            onChange={(e) => setAnswerDraft(e.target.value)}
-            rows={isCoding ? 12 : 8}
-            placeholder={
-              isCoding
-                ? "Write your solution and explain complexity + edge cases..."
-                : "Write your interview answer..."
-            }
-            className={`w-full border border-udemy-border rounded px-3 py-2.5 text-sm ${
-              isCoding ? "font-mono" : ""
-            }`}
-          />
+          <div className="relative">
+            <textarea
+              value={answerDraft}
+              onChange={(e) => setAnswerDraft(e.target.value)}
+              rows={isCoding ? 12 : 8}
+              placeholder={
+                isCoding
+                  ? "Write your solution and explain complexity + edge cases..."
+                  : voice.voiceEnabled
+                    ? "Write or speak your interview answer..."
+                    : "Write your interview answer..."
+              }
+              className={`w-full border border-udemy-border rounded px-3 py-2.5 text-sm ${
+                isCoding ? "font-mono" : ""
+              }`}
+            />
+            {voice.voiceEnabled && (
+              <button
+                onClick={async () => {
+                  if (voice.isRecording) {
+                    voice.stopRecording();
+                    // After stopping, the transcript appears in voice.turns — grab it
+                    // For browser tier, the transcript was already put into currentTranscript
+                  } else {
+                    // Start a voice session for interview if not already active
+                    if (!voice.sessionActive) {
+                      await voice.startSession("interview", {
+                        sessionId,
+                        systemPrompt:
+                          "Transcribe the user's spoken interview answer. Return only the transcription.",
+                      });
+                    }
+                    voice.startRecording();
+                  }
+                }}
+                className={`absolute bottom-3 right-3 p-2 rounded-full transition-colors ${
+                  voice.isRecording
+                    ? "bg-red-500 hover:bg-red-600 animate-pulse"
+                    : "bg-gray-200 hover:bg-gray-300"
+                }`}
+                title={
+                  voice.isRecording ? "Stop recording" : "Speak your answer"
+                }
+              >
+                {voice.isRecording ? (
+                  <MicOff className="w-4 h-4 text-white" />
+                ) : (
+                  <Mic className="w-4 h-4 text-gray-600" />
+                )}
+              </button>
+            )}
+          </div>
+          {voice.currentTranscript && (
+            <p className="text-xs text-gray-500 mt-1 italic">
+              🎙 {voice.currentTranscript}...
+            </p>
+          )}
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
               onClick={handleSubmit}
-              disabled={submitting || loadingNext || !answerDraft.trim() || !data.session.current_question}
+              disabled={
+                submitting ||
+                loadingNext ||
+                !answerDraft.trim() ||
+                !data.session.current_question
+              }
               className="btn-primary w-full sm:w-auto flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {submitting ? (
@@ -260,7 +362,9 @@ export default function InterviewSessionPage() {
 
             <button
               onClick={handleNext}
-              disabled={loadingNext || submitting || data.session.status !== "active"}
+              disabled={
+                loadingNext || submitting || data.session.status !== "active"
+              }
               className="btn-secondary w-full sm:w-auto flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {loadingNext ? (
@@ -285,11 +389,15 @@ export default function InterviewSessionPage() {
 
         {lastTurn && (
           <div className="udemy-card p-6">
-            <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-3">Rubric Feedback</h2>
+            <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-3">
+              Rubric Feedback
+            </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
               {Object.entries(lastTurn.turn.rubric).map(([k, v]) => (
                 <div key={k} className="bg-udemy-bg rounded px-3 py-2">
-                  <p className="text-[11px] text-udemy-text-muted uppercase">{k.replace(/_/g, " ")}</p>
+                  <p className="text-[11px] text-udemy-text-muted uppercase">
+                    {k.replace(/_/g, " ")}
+                  </p>
                   <p className="font-bold">{v}</p>
                 </div>
               ))}

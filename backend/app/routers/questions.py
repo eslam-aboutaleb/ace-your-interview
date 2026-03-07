@@ -58,7 +58,7 @@ def _ensure_services() -> tuple[LLMClient, DocParser, LearningStore]:
     return _llm_client, _parser, _learning_store
 
 
-def _resolve_topic_for_user(
+async def _resolve_topic_for_user(
     *,
     topic_id: str,
     user_id: str,
@@ -68,13 +68,15 @@ def _resolve_topic_for_user(
     if is_problem_solving_topic(topic_id):
         language = (preferred_language_hint or "").strip().lower()
         if not language:
-            resolved = store.resolve_topic_ai_settings(
+            resolved = await store.run_async(
+                store.resolve_topic_ai_settings,
                 user_id=user_id,
                 topic_id=topic_id,
                 topic_detail=problem_solving_base_topic(),
             )
             language = resolved.get("preferred_language", "") or PROBLEM_SOLVING_DEFAULT_LANGUAGE
-        detail = store.resolve_problem_solving_topic_detail(
+        detail = await store.run_async(
+            store.resolve_problem_solving_topic_detail,
             user_id=user_id,
             preferred_language=language,
         )
@@ -85,14 +87,18 @@ def _resolve_topic_for_user(
     if static_topic:
         return static_topic, parser.get_topic_content(topic_id)
 
-    custom_topic = store.get_custom_topic(user_id=user_id, topic_id=topic_id)
+    custom_topic = await store.run_async(
+        store.get_custom_topic,
+        user_id=user_id,
+        topic_id=topic_id,
+    )
     if custom_topic:
         detail = TopicDetail(**custom_topic)
         return detail, detail.raw_content
     return None
 
 
-def _resolve_ai_settings(
+async def _resolve_ai_settings(
     *,
     store: LearningStore,
     user_id: str,
@@ -100,7 +106,8 @@ def _resolve_ai_settings(
     response_detail_override: str | None,
     preferred_language_override: str | None,
 ) -> dict:
-    resolved = store.resolve_topic_ai_settings(
+    resolved = await store.run_async(
+        store.resolve_topic_ai_settings,
         user_id=user_id,
         topic_id=topic.id,
         topic_detail=topic.model_dump(mode="json"),
@@ -127,7 +134,7 @@ async def generate_questions(
     """Generate interview questions for a topic using the configured LLM."""
     llm_client, _, _ = _ensure_services()
 
-    resolved = _resolve_topic_for_user(
+    resolved = await _resolve_topic_for_user(
         topic_id=body.topic_id,
         user_id=user["user"],
         preferred_language_hint=body.preferred_language,
@@ -142,7 +149,7 @@ async def generate_questions(
         )
     _, _, store = _ensure_services()
     generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
-    ai_settings = _resolve_ai_settings(
+    ai_settings = await _resolve_ai_settings(
         store=store,
         user_id=user["user"],
         topic=topic,
@@ -179,7 +186,7 @@ async def generate_questions_v2(
     if not get_settings().enable_v2_generation:
         raise HTTPException(status_code=404, detail="v2 generation disabled")
 
-    resolved = _resolve_topic_for_user(
+    resolved = await _resolve_topic_for_user(
         topic_id=body.topic_id,
         user_id=user["user"],
         preferred_language_hint=body.preferred_language,
@@ -194,7 +201,7 @@ async def generate_questions_v2(
         )
     _, _, store = _ensure_services()
     generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
-    ai_settings = _resolve_ai_settings(
+    ai_settings = await _resolve_ai_settings(
         store=store,
         user_id=user["user"],
         topic=topic,
@@ -230,7 +237,7 @@ async def generate_questions_v2_stream(
     if not get_settings().enable_v2_generation:
         raise HTTPException(status_code=404, detail="v2 generation disabled")
 
-    resolved = _resolve_topic_for_user(
+    resolved = await _resolve_topic_for_user(
         topic_id=body.topic_id,
         user_id=user["user"],
         preferred_language_hint=body.preferred_language,
@@ -245,7 +252,7 @@ async def generate_questions_v2_stream(
         )
     _, _, store = _ensure_services()
     generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
-    ai_settings = _resolve_ai_settings(
+    ai_settings = await _resolve_ai_settings(
         store=store,
         user_id=user["user"],
         topic=topic,
@@ -296,7 +303,7 @@ async def generate_quiz(
     _, _, store = _ensure_services()
     topics_content: list[dict] = []
     for tid in body.topic_ids:
-        resolved = _resolve_topic_for_user(
+        resolved = await _resolve_topic_for_user(
             topic_id=tid,
             user_id=user["user"],
             preferred_language_hint=body.preferred_language,
@@ -309,7 +316,7 @@ async def generate_quiz(
                 status_code=409,
                 detail="Problem Solving roadmap is not generated yet for this language.",
             )
-        ai_settings = _resolve_ai_settings(
+        ai_settings = await _resolve_ai_settings(
             store=store,
             user_id=user["user"],
             topic=topic,
@@ -357,7 +364,7 @@ async def generate_quiz_v2(
     _, _, store = _ensure_services()
     topics_content: list[dict] = []
     for tid in body.topic_ids:
-        resolved = _resolve_topic_for_user(
+        resolved = await _resolve_topic_for_user(
             topic_id=tid,
             user_id=user["user"],
             preferred_language_hint=body.preferred_language,
@@ -370,7 +377,7 @@ async def generate_quiz_v2(
                 status_code=409,
                 detail="Problem Solving roadmap is not generated yet for this language.",
             )
-        ai_settings = _resolve_ai_settings(
+        ai_settings = await _resolve_ai_settings(
             store=store,
             user_id=user["user"],
             topic=topic,

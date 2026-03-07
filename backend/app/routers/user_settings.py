@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import os
-import secrets
 from urllib.parse import urlencode
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 
 from app.config import get_settings
@@ -21,6 +19,8 @@ from app.schemas.models import (
     UserSettingsResponse,
 )
 from app.services.llm_policy import APPROVAL_REQUIRED_CODE, APPROVAL_REQUIRED_MESSAGE
+from app.services.http_clients import get_oauth_http_client
+from app.services.oauth_state import create_oauth_state, verify_oauth_state
 from app.services.user_settings_store import UserSettingsStore, identity_key_for_user
 
 router = APIRouter(prefix="/api/user-settings", tags=["user-settings"])
@@ -49,17 +49,6 @@ def _ensure_store() -> UserSettingsStore:
 def _backend_provider_configured(provider: str) -> bool:
     env_key = _PROVIDER_ENV_KEYS.get(provider, "")
     return bool(env_key and os.getenv(env_key))
-
-
-def _cookie_kwargs() -> dict:
-    settings = get_settings()
-    return dict(
-        httponly=True,
-        samesite="lax",
-        secure=settings.frontend_url.startswith("https"),
-        path="/",
-        max_age=600,
-    )
 
 
 def _build_response(identity_key: str, store: UserSettingsStore) -> UserSettingsResponse:
@@ -175,7 +164,12 @@ async def connect_google(user: dict = Depends(require_auth)):
     if not settings.google_client_id:
         raise HTTPException(status_code=400, detail="Google OAuth is not configured")
 
-    state = secrets.token_urlsafe(32)
+    state = create_oauth_state(
+        {
+            "purpose": "user_settings_google_connect",
+            "identity_key": identity_key_for_user(user),
+        }
+    )
     redirect_uri = f"{settings.frontend_url}/api/user-settings/google/callback"
     params = urlencode(
         {
@@ -189,64 +183,52 @@ async def connect_google(user: dict = Depends(require_auth)):
         }
     )
 
-    response = RedirectResponse(
-        url=f"https://accounts.google.com/o/oauth2/v2/auth?{params}"
-    )
-    response.set_cookie("oauth_user_settings_state", state, **_cookie_kwargs())
-    response.set_cookie("oauth_user_settings_identity", identity_key_for_user(user), **_cookie_kwargs())
-    return response
+    return RedirectResponse(url=f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
 
 
 @router.get("/google/callback")
 async def google_callback(
-    request: Request,
     code: str,
     state: str = "",
-    user: dict = Depends(require_auth),
 ):
     settings = get_settings()
     redirect_base = f"{settings.frontend_url}/user-settings"
 
-    stored_state = request.cookies.get("oauth_user_settings_state")
-    stored_identity = request.cookies.get("oauth_user_settings_identity")
-    current_identity = identity_key_for_user(user)
-
-    if not stored_state or stored_state != state or stored_identity != current_identity:
-        response = RedirectResponse(url=f"{redirect_base}?error=invalid_state")
-        response.delete_cookie("oauth_user_settings_state", path="/")
-        response.delete_cookie("oauth_user_settings_identity", path="/")
-        return response
+    try:
+        state_payload = verify_oauth_state(
+            state,
+            expected_purpose="user_settings_google_connect",
+        )
+        current_identity = str(state_payload.get("identity_key", "")).strip().lower()
+        if not current_identity or ":" not in current_identity:
+            raise ValueError("Missing identity")
+    except ValueError:
+        return RedirectResponse(url=f"{redirect_base}?error=invalid_state")
 
     redirect_uri = f"{settings.frontend_url}/api/user-settings/google/callback"
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "client_id": settings.google_client_id,
-                    "client_secret": settings.google_client_secret,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": redirect_uri,
-                },
-            )
-            resp.raise_for_status()
-            token_payload = resp.json()
+        client = get_oauth_http_client()
+        resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            },
+        )
+        resp.raise_for_status()
+        token_payload = resp.json()
     except Exception:
-        response = RedirectResponse(url=f"{redirect_base}?error=exchange_failed")
-        response.delete_cookie("oauth_user_settings_state", path="/")
-        response.delete_cookie("oauth_user_settings_identity", path="/")
-        return response
+        return RedirectResponse(url=f"{redirect_base}?error=exchange_failed")
 
     access_token = str(token_payload.get("access_token", "")).strip()
     refresh_token = str(token_payload.get("refresh_token", "")).strip() or None
     expires_in = int(token_payload.get("expires_in", 3600) or 3600)
 
     if not access_token:
-        response = RedirectResponse(url=f"{redirect_base}?error=token_missing")
-        response.delete_cookie("oauth_user_settings_state", path="/")
-        response.delete_cookie("oauth_user_settings_identity", path="/")
-        return response
+        return RedirectResponse(url=f"{redirect_base}?error=token_missing")
 
     store = _ensure_store()
     store.set_google_oauth_tokens(
@@ -264,10 +246,7 @@ async def google_callback(
         prefs["model"] = models[0] if models else ""
     store.save_preferences(current_identity, prefs)
 
-    response = RedirectResponse(url=f"{redirect_base}?google_connected=1")
-    response.delete_cookie("oauth_user_settings_state", path="/")
-    response.delete_cookie("oauth_user_settings_identity", path="/")
-    return response
+    return RedirectResponse(url=f"{redirect_base}?google_connected=1")
 
 
 @router.post("/google/disconnect")
