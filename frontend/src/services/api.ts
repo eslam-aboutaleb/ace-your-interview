@@ -10,6 +10,10 @@ import type {
   CustomTopicStreamDoneEvent,
   CustomTopicStreamEvent,
   CustomTopicStreamHandlers,
+  GenerateTopicContentRequest,
+  TopicContentStreamDoneEvent,
+  TopicContentStreamEvent,
+  TopicContentStreamHandlers,
   GenerateQuestionsRequest,
   GenerateQuestionsResponse,
   GenerateQuestionsV2Response,
@@ -155,6 +159,22 @@ export class CustomTopicStreamError extends Error {
 
 export function isCustomTopicStreamError(error: unknown): error is CustomTopicStreamError {
   return error instanceof CustomTopicStreamError;
+}
+
+export class TopicContentStreamError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(message: string, opts: { code?: string; status?: number } = {}) {
+    super(message);
+    this.name = "TopicContentStreamError";
+    this.code = opts.code || "";
+    this.status = opts.status || 0;
+  }
+}
+
+export function isTopicContentStreamError(error: unknown): error is TopicContentStreamError {
+  return error instanceof TopicContentStreamError;
 }
 
 // Redirect to /login on 401
@@ -334,6 +354,119 @@ export async function createCustomTopicStream(
   if (!doneEvent) {
     throw new CustomTopicStreamError(
       "Custom topic streaming ended before completion event.",
+      { code: "incomplete_stream" },
+    );
+  }
+  return doneEvent;
+}
+
+export async function generateTopicContentStream(
+  topicId: string,
+  req: GenerateTopicContentRequest,
+  handlers: TopicContentStreamHandlers,
+  signal?: AbortSignal,
+): Promise<TopicContentStreamDoneEvent> {
+  const response = await fetch(
+    _resolveApiPath(`/topics/${encodeURIComponent(topicId)}/content/generate/stream`),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+      signal,
+    },
+  );
+
+  if (!response.ok) {
+    let detail: unknown = null;
+    try {
+      const payload = await response.json();
+      detail = payload?.detail ?? payload;
+    } catch {
+      detail = null;
+    }
+    const policyCode = _policyCodeFromDetail(detail);
+    if (policyCode) {
+      _redirectToPolicySettings(policyCode);
+      throw new TopicContentStreamError("LLM access policy blocked this request.", {
+        code: policyCode,
+        status: response.status,
+      });
+    }
+    throw new TopicContentStreamError("Topic content streaming endpoint unavailable.", {
+      code: "stream_unavailable",
+      status: response.status,
+    });
+  }
+
+  if (!response.body) {
+    throw new TopicContentStreamError("Streaming response body is empty.", {
+      code: "stream_unavailable",
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let doneEvent: TopicContentStreamDoneEvent | null = null;
+
+  const dispatchEvent = (event: TopicContentStreamEvent) => {
+    if (event.type === "start") {
+      handlers.onStart?.(event);
+      return;
+    }
+    if (event.type === "progress") {
+      handlers.onProgress?.(event);
+      return;
+    }
+    if (event.type === "section") {
+      handlers.onSection?.(event);
+      return;
+    }
+    if (event.type === "done") {
+      doneEvent = event;
+      handlers.onDone?.(event);
+      return;
+    }
+    handlers.onError?.(event);
+    throw new TopicContentStreamError(event.message || "Topic content generation failed.", {
+      code: event.code || "generation_failed",
+      status: 200,
+    });
+  };
+
+  const parseAndDispatch = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let parsed: TopicContentStreamEvent;
+    try {
+      parsed = JSON.parse(trimmed) as TopicContentStreamEvent;
+    } catch {
+      throw new TopicContentStreamError("Invalid topic content stream payload.", {
+        code: "invalid_stream_payload",
+      });
+    }
+    dispatchEvent(parsed);
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      parseAndDispatch(line);
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    parseAndDispatch(tail);
+  }
+  if (!doneEvent) {
+    throw new TopicContentStreamError(
+      "Topic content stream ended before completion event.",
       { code: "incomplete_stream" },
     );
   }

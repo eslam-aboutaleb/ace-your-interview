@@ -9,6 +9,17 @@ import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.services.topic_catalog import (
+    PROBLEM_SOLVING_DEFAULT_LANGUAGE,
+    PROBLEM_SOLVING_LANGUAGE_OPTIONS,
+    PROBLEM_SOLVING_LEVELS,
+    PROBLEM_SOLVING_TARGET_SECTIONS,
+    PROBLEM_SOLVING_TOPIC_ID,
+    PROBLEM_SOLVING_TRACK,
+    PROBLEM_SOLVING_TITLE,
+    is_problem_solving_topic,
+)
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -137,6 +148,32 @@ class LearningStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_topic_language_profiles_updated
                 ON topic_language_profiles(updated_at DESC)
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dynamic_topic_curricula (
+                    user_id TEXT NOT NULL,
+                    topic_id TEXT NOT NULL,
+                    preferred_language TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    track TEXT NOT NULL,
+                    levels_json TEXT NOT NULL,
+                    sections_json TEXT NOT NULL,
+                    raw_content TEXT NOT NULL,
+                    target_sections INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, topic_id, preferred_language)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dynamic_topic_curricula_user_updated
+                ON dynamic_topic_curricula(user_id, topic_id, updated_at DESC)
                 """
             )
 
@@ -682,6 +719,201 @@ class LearningStore:
             return None
         return self._custom_topic_row_to_detail(row)
 
+    def get_dynamic_topic_curriculum(
+        self,
+        *,
+        user_id: str,
+        topic_id: str,
+        preferred_language: str,
+    ) -> dict | None:
+        language = self._normalise_language(preferred_language)
+        row = self._conn.execute(
+            """
+            SELECT
+                user_id, topic_id, preferred_language, title, description, track,
+                levels_json, sections_json, raw_content, target_sections, source,
+                created_at, updated_at
+            FROM dynamic_topic_curricula
+            WHERE user_id = ? AND topic_id = ? AND preferred_language = ?
+            LIMIT 1
+            """,
+            (user_id, topic_id, language),
+        ).fetchone()
+        if not row:
+            return None
+        sections_raw = self._loads_json_list(str(row["sections_json"]))
+        sections: list[dict[str, str]] = []
+        for item in sections_raw:
+            if not isinstance(item, dict):
+                continue
+            heading = str(item.get("heading", "")).strip()
+            content = str(item.get("content", "")).strip()
+            if not heading:
+                continue
+            sections.append({"heading": heading, "content": content})
+        return {
+            "id": str(row["topic_id"]),
+            "title": str(row["title"]),
+            "description": str(row["description"]),
+            "track": str(row["track"]),
+            "levels": [str(v) for v in self._loads_json_list(str(row["levels_json"]))],
+            "sections": sections,
+            "raw_content": str(row["raw_content"]),
+            "preferred_language": str(row["preferred_language"]),
+            "target_sections": int(row["target_sections"] or 0),
+            "source": str(row["source"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def upsert_dynamic_topic_curriculum(
+        self,
+        *,
+        user_id: str,
+        topic_id: str,
+        preferred_language: str,
+        title: str,
+        description: str,
+        track: str,
+        levels: list[str],
+        sections: list[dict[str, str]],
+        raw_content: str,
+        target_sections: int,
+        source: str,
+    ) -> dict:
+        now_iso = _to_iso(_utc_now())
+        language = self._normalise_language(preferred_language)
+        levels_json = json.dumps(levels, ensure_ascii=True)
+        sections_json = json.dumps(sections, ensure_ascii=True)
+        with self._lock:
+            with self._conn:
+                existing = self._conn.execute(
+                    """
+                    SELECT created_at
+                    FROM dynamic_topic_curricula
+                    WHERE user_id = ? AND topic_id = ? AND preferred_language = ?
+                    """,
+                    (user_id, topic_id, language),
+                ).fetchone()
+                created_at = str(existing["created_at"]) if existing else now_iso
+                self._conn.execute(
+                    """
+                    INSERT INTO dynamic_topic_curricula(
+                        user_id, topic_id, preferred_language, title, description, track,
+                        levels_json, sections_json, raw_content, target_sections, source,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, topic_id, preferred_language) DO UPDATE SET
+                        title = excluded.title,
+                        description = excluded.description,
+                        track = excluded.track,
+                        levels_json = excluded.levels_json,
+                        sections_json = excluded.sections_json,
+                        raw_content = excluded.raw_content,
+                        target_sections = excluded.target_sections,
+                        source = excluded.source,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        user_id,
+                        topic_id,
+                        language,
+                        title,
+                        description,
+                        track,
+                        levels_json,
+                        sections_json,
+                        raw_content,
+                        int(target_sections),
+                        str(source or "").strip()[:40] or "llm",
+                        created_at,
+                        now_iso,
+                    ),
+                )
+        return {
+            "id": topic_id,
+            "preferred_language": language,
+            "title": title,
+            "description": description,
+            "track": track,
+            "levels": levels,
+            "sections": sections,
+            "raw_content": raw_content,
+            "target_sections": int(target_sections),
+            "source": str(source or "").strip()[:40] or "llm",
+            "created_at": created_at,
+            "updated_at": now_iso,
+        }
+
+    def delete_dynamic_topic_curriculum(
+        self,
+        *,
+        user_id: str,
+        topic_id: str,
+        preferred_language: str,
+    ) -> None:
+        language = self._normalise_language(preferred_language)
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    DELETE FROM dynamic_topic_curricula
+                    WHERE user_id = ? AND topic_id = ? AND preferred_language = ?
+                    """,
+                    (user_id, topic_id, language),
+                )
+
+    def resolve_problem_solving_topic_detail(
+        self,
+        *,
+        user_id: str,
+        preferred_language: str,
+    ) -> dict:
+        language = self._normalise_language(preferred_language)
+        if language not in PROBLEM_SOLVING_LANGUAGE_OPTIONS:
+            language = PROBLEM_SOLVING_DEFAULT_LANGUAGE
+
+        cached = self.get_dynamic_topic_curriculum(
+            user_id=user_id,
+            topic_id=PROBLEM_SOLVING_TOPIC_ID,
+            preferred_language=language,
+        )
+        if cached:
+            return {
+                "id": PROBLEM_SOLVING_TOPIC_ID,
+                "title": str(cached.get("title") or PROBLEM_SOLVING_TITLE),
+                "description": str(cached.get("description") or ""),
+                "track": str(cached.get("track") or PROBLEM_SOLVING_TRACK),
+                "levels": list(cached.get("levels") or list(PROBLEM_SOLVING_LEVELS)),
+                "sections": list(cached.get("sections") or []),
+                "raw_content": str(cached.get("raw_content") or ""),
+                "requires_programming": True,
+                "language_options": list(PROBLEM_SOLVING_LANGUAGE_OPTIONS),
+                "selected_language": language,
+                "response_detail": "concise",
+                "is_dynamic_topic": True,
+                "content_ready": True,
+            }
+
+        return {
+            "id": PROBLEM_SOLVING_TOPIC_ID,
+            "title": PROBLEM_SOLVING_TITLE,
+            "description": (
+                f"Pick a language and generate a {PROBLEM_SOLVING_TARGET_SECTIONS}-section "
+                "problem-solving roadmap from beginner to senior."
+            ),
+            "track": PROBLEM_SOLVING_TRACK,
+            "levels": list(PROBLEM_SOLVING_LEVELS),
+            "sections": [],
+            "raw_content": "",
+            "requires_programming": True,
+            "language_options": list(PROBLEM_SOLVING_LANGUAGE_OPTIONS),
+            "selected_language": language,
+            "response_detail": "concise",
+            "is_dynamic_topic": True,
+            "content_ready": False,
+        }
+
     @staticmethod
     def _normalise_response_detail(value: str | None) -> str:
         detail = str(value or "").strip().lower()
@@ -899,17 +1131,20 @@ class LearningStore:
     ) -> dict:
         profile = self.get_topic_language_profile(topic_id=topic_id)
         prefs = self.get_topic_preferences(user_id=user_id, topic_id=topic_id)
-
-        requires_programming = (
-            bool(profile["requires_programming"])
-            if profile is not None
-            else self._infer_requires_programming_from_topic(topic_detail)
-        )
-        language_options = (
-            self._normalise_language_options(profile.get("language_options", []))
-            if profile is not None
-            else []
-        )
+        if is_problem_solving_topic(topic_id):
+            requires_programming = True
+            language_options = list(PROBLEM_SOLVING_LANGUAGE_OPTIONS)
+        else:
+            requires_programming = (
+                bool(profile["requires_programming"])
+                if profile is not None
+                else self._infer_requires_programming_from_topic(topic_detail)
+            )
+            language_options = (
+                self._normalise_language_options(profile.get("language_options", []))
+                if profile is not None
+                else []
+            )
         response_detail = self._normalise_response_detail(
             (prefs or {}).get("response_detail", "concise")
         )

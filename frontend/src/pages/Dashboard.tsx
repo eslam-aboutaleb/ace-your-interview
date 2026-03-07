@@ -23,6 +23,7 @@ import {
 import { useProgressStore } from "@/store/progressStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
+import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
 import type { TopicSummary } from "@/types";
 
 const TOPIC_ICONS: Record<string, string> = {
@@ -190,6 +191,20 @@ export default function Dashboard() {
               value={`${Math.round(interviewStats.interview_readiness_score)}%`}
             />
           </motion.div>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="mt-4"
+          >
+            <Link
+              to="/interview/trends"
+              className="inline-flex items-center gap-1 text-sm text-udemy-purple-light hover:text-white"
+            >
+              View readiness trends
+              <ChevronRight className="w-4 h-4" />
+            </Link>
+          </motion.div>
         </div>
       </div>
 
@@ -274,6 +289,8 @@ export default function Dashboard() {
             {topics.map((topic) => {
               const tp = getTopicProgress(topic.id);
               const isComplete = completedTopics.includes(topic.id);
+              const title = normalizeEscapedSingleLineText(topic.title);
+              const description = normalizeEscapedSingleLineText(topic.description);
               return (
                 <motion.div key={topic.id} variants={cardVariants}>
                   <Link to={`/topics/${topic.id}`} className="block group">
@@ -289,7 +306,7 @@ export default function Dashboard() {
                           </span>
                           <div className="flex-1 min-w-0">
                             <h3 className="font-bold text-[15px] text-udemy-text leading-tight group-hover:text-udemy-purple transition-colors line-clamp-2">
-                              {topic.title}
+                              {title}
                             </h3>
                           </div>
                           {isComplete && (
@@ -301,7 +318,7 @@ export default function Dashboard() {
 
                         {/* Description */}
                         <p className="text-sm text-udemy-text-muted line-clamp-2 mb-4 leading-relaxed">
-                          {topic.description ||
+                          {description ||
                             "Explore this topic through interview questions."}
                         </p>
 

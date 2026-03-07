@@ -46,6 +46,27 @@ class InterviewGeneratorTests(unittest.TestCase):
         out = asyncio.run(gen.generate_question(session=session, turns=[]))
         self.assertIn("versioning", out["question"].lower())
 
+    def test_coding_interview_question_prompt_has_coding_rules(self):
+        prompt = InterviewGenerator._question_prompt(
+            session={
+                "track": "backend",
+                "level": "mid",
+                "interview_type": "coding",
+                "target_role": "Backend Engineer",
+                "turn_count": 5,
+                "turns_completed": 1,
+                "focus_areas": ["algorithms"],
+                "job_description_text": "",
+                "resume_summary_text": "",
+                "asked_questions": [],
+            },
+            turns=[],
+        )
+        self.assertIn("coding interviewer", prompt)
+        self.assertIn("coding problem statement", prompt)
+        self.assertIn("algorithmic clarity + complexity awareness", prompt)
+        self.assertIn("question <= 65 words", prompt)
+
     def test_eval_payload_repair_after_invalid(self):
         llm = FakeLLM(
             [
@@ -93,6 +114,22 @@ class InterviewGeneratorTests(unittest.TestCase):
         self.assertIn("fenced Mermaid diagrams", prompt)
         self.assertIn("Keep valid JSON string escaping", prompt)
         self.assertIn("No extra keys.", prompt)
+
+    def test_coding_evaluate_prompt_requests_code_specific_scoring(self):
+        prompt = InterviewGenerator._evaluate_prompt(
+            session={
+                "track": "backend",
+                "level": "mid",
+                "interview_type": "coding",
+                "target_role": "Backend Engineer",
+            },
+            question="Implement LRU cache",
+            answer="Use hashmap + doubly linked list.",
+            turn_index=1,
+        )
+        self.assertIn("This is a coding interview response", prompt)
+        self.assertIn("correctness and edge-case handling", prompt)
+        self.assertIn("time/space complexity reasoning", prompt)
 
     def test_build_report_summary_is_markdown_ready(self):
         gen = InterviewGenerator(FakeLLM([]), FakeParser())

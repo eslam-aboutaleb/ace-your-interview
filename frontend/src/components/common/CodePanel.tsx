@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
 
 interface CodePanelProps {
   code: string;
@@ -15,7 +16,7 @@ export default function CodePanel({
 }: CodePanelProps) {
   const [copied, setCopied] = useState(false);
   const lang = (language || "text").toLowerCase();
-  const normalizedCode = code.replace(/\n$/, "");
+  const normalizedCode = normalizeEscapedMultilineText(code).replace(/\n$/, "");
 
   const handleCopy = async () => {
     try {
@@ -39,8 +40,15 @@ export default function CodePanel({
         <SyntaxHighlighter
           language={lang}
           style={oneDark}
-          customStyle={{ margin: 0, background: "transparent" }}
+          customStyle={{
+            margin: 0,
+            background: "transparent",
+            padding: compact ? "0.75rem" : "1rem",
+            fontSize: compact ? "0.75rem" : "0.8125rem",
+            lineHeight: 1.6,
+          }}
           wrapLongLines
+          wrapLines
           showLineNumbers={!compact}
         >
           {normalizedCode}

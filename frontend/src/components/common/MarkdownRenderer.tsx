@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import CodePanel from "@/components/common/CodePanel";
 import MermaidDiagram from "@/components/common/MermaidDiagram";
+import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
 
 interface MarkdownRendererProps {
   content: string;
@@ -72,7 +73,8 @@ function normalizeStarStyledLine(line: string): string {
 }
 
 function normalizeMarkdownForRendering(content: string): string {
-  const normalizedNewlines = content.replace(/\r\n?/g, "\n");
+  const decoded = normalizeEscapedMultilineText(content);
+  const normalizedNewlines = decoded.replace(/\r\n?/g, "\n");
   const tableFixed = normalizedNewlines
     .split("\n")
     .map(normalizeInlinePipeTableLine)

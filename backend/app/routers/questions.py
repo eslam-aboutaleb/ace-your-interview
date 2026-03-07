@@ -24,6 +24,11 @@ from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
 from app.services.mcp_gateway import MCPGateway
 from app.services.question_generator import QuestionGenerator
+from app.services.topic_catalog import (
+    PROBLEM_SOLVING_DEFAULT_LANGUAGE,
+    is_problem_solving_topic,
+    problem_solving_base_topic,
+)
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
 
@@ -53,8 +58,29 @@ def _ensure_services() -> tuple[LLMClient, DocParser, LearningStore]:
     return _llm_client, _parser, _learning_store
 
 
-def _resolve_topic_for_user(*, topic_id: str, user_id: str) -> tuple[TopicDetail, str] | None:
+def _resolve_topic_for_user(
+    *,
+    topic_id: str,
+    user_id: str,
+    preferred_language_hint: str | None = None,
+) -> tuple[TopicDetail, str] | None:
     _, parser, store = _ensure_services()
+    if is_problem_solving_topic(topic_id):
+        language = (preferred_language_hint or "").strip().lower()
+        if not language:
+            resolved = store.resolve_topic_ai_settings(
+                user_id=user_id,
+                topic_id=topic_id,
+                topic_detail=problem_solving_base_topic(),
+            )
+            language = resolved.get("preferred_language", "") or PROBLEM_SOLVING_DEFAULT_LANGUAGE
+        detail = store.resolve_problem_solving_topic_detail(
+            user_id=user_id,
+            preferred_language=language,
+        )
+        dynamic_topic = TopicDetail(**detail)
+        return dynamic_topic, dynamic_topic.raw_content
+
     static_topic = parser.get_topic(topic_id)
     if static_topic:
         return static_topic, parser.get_topic_content(topic_id)
@@ -101,10 +127,19 @@ async def generate_questions(
     """Generate interview questions for a topic using the configured LLM."""
     llm_client, _, _ = _ensure_services()
 
-    resolved = _resolve_topic_for_user(topic_id=body.topic_id, user_id=user["user"])
+    resolved = _resolve_topic_for_user(
+        topic_id=body.topic_id,
+        user_id=user["user"],
+        preferred_language_hint=body.preferred_language,
+    )
     if not resolved:
         raise HTTPException(status_code=404, detail=f"Topic '{body.topic_id}' not found")
     topic, doc_content = resolved
+    if is_problem_solving_topic(body.topic_id) and not topic.content_ready:
+        raise HTTPException(
+            status_code=409,
+            detail="Problem Solving roadmap is not generated yet for this language.",
+        )
     _, _, store = _ensure_services()
     generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
     ai_settings = _resolve_ai_settings(
@@ -142,10 +177,19 @@ async def generate_questions_v2(
     if not get_settings().enable_v2_generation:
         raise HTTPException(status_code=404, detail="v2 generation disabled")
 
-    resolved = _resolve_topic_for_user(topic_id=body.topic_id, user_id=user["user"])
+    resolved = _resolve_topic_for_user(
+        topic_id=body.topic_id,
+        user_id=user["user"],
+        preferred_language_hint=body.preferred_language,
+    )
     if not resolved:
         raise HTTPException(status_code=404, detail=f"Topic '{body.topic_id}' not found")
     topic, doc_content = resolved
+    if is_problem_solving_topic(body.topic_id) and not topic.content_ready:
+        raise HTTPException(
+            status_code=409,
+            detail="Problem Solving roadmap is not generated yet for this language.",
+        )
     _, _, store = _ensure_services()
     generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
     ai_settings = _resolve_ai_settings(
@@ -182,10 +226,19 @@ async def generate_questions_v2_stream(
     if not get_settings().enable_v2_generation:
         raise HTTPException(status_code=404, detail="v2 generation disabled")
 
-    resolved = _resolve_topic_for_user(topic_id=body.topic_id, user_id=user["user"])
+    resolved = _resolve_topic_for_user(
+        topic_id=body.topic_id,
+        user_id=user["user"],
+        preferred_language_hint=body.preferred_language,
+    )
     if not resolved:
         raise HTTPException(status_code=404, detail=f"Topic '{body.topic_id}' not found")
     topic, doc_content = resolved
+    if is_problem_solving_topic(body.topic_id) and not topic.content_ready:
+        raise HTTPException(
+            status_code=409,
+            detail="Problem Solving roadmap is not generated yet for this language.",
+        )
     _, _, store = _ensure_services()
     generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
     ai_settings = _resolve_ai_settings(
@@ -237,10 +290,19 @@ async def generate_quiz(
     _, _, store = _ensure_services()
     topics_content: list[dict] = []
     for tid in body.topic_ids:
-        resolved = _resolve_topic_for_user(topic_id=tid, user_id=user["user"])
+        resolved = _resolve_topic_for_user(
+            topic_id=tid,
+            user_id=user["user"],
+            preferred_language_hint=body.preferred_language,
+        )
         if not resolved:
             raise HTTPException(status_code=404, detail=f"Topic '{tid}' not found")
         topic, doc_content = resolved
+        if is_problem_solving_topic(tid) and not topic.content_ready:
+            raise HTTPException(
+                status_code=409,
+                detail="Problem Solving roadmap is not generated yet for this language.",
+            )
         ai_settings = _resolve_ai_settings(
             store=store,
             user_id=user["user"],
@@ -289,10 +351,19 @@ async def generate_quiz_v2(
     _, _, store = _ensure_services()
     topics_content: list[dict] = []
     for tid in body.topic_ids:
-        resolved = _resolve_topic_for_user(topic_id=tid, user_id=user["user"])
+        resolved = _resolve_topic_for_user(
+            topic_id=tid,
+            user_id=user["user"],
+            preferred_language_hint=body.preferred_language,
+        )
         if not resolved:
             raise HTTPException(status_code=404, detail=f"Topic '{tid}' not found")
         topic, doc_content = resolved
+        if is_problem_solving_topic(tid) and not topic.content_ready:
+            raise HTTPException(
+                status_code=409,
+                detail="Problem Solving roadmap is not generated yet for this language.",
+            )
         ai_settings = _resolve_ai_settings(
             store=store,
             user_id=user["user"],

@@ -23,6 +23,8 @@ import {
 import {
   fetchTopic,
   updateTopicPreferences,
+  generateTopicContentStream,
+  isTopicContentStreamError,
   generateQuestions,
   generateQuestionsV2,
   generateQuestionsV2Stream,
@@ -101,8 +103,15 @@ export default function TopicStudy() {
   const [languageOptions, setLanguageOptions] = useState<string[]>([]);
   const [preferredLanguage, setPreferredLanguage] = useState("");
   const [savingTopicPrefs, setSavingTopicPrefs] = useState(false);
+  const [generatingCurriculum, setGeneratingCurriculum] = useState(false);
+  const [curriculumProgress, setCurriculumProgress] = useState("");
+  const [curriculumError, setCurriculumError] = useState("");
+  const [curriculumSections, setCurriculumSections] = useState<
+    { index: number; heading: string }[]
+  >([]);
   const navRef = useRef<HTMLElement | null>(null);
   const generationAbortRef = useRef<AbortController | null>(null);
+  const curriculumAbortRef = useRef<AbortController | null>(null);
 
   const settings = useSettingsStore();
   const {
@@ -136,6 +145,8 @@ export default function TopicStudy() {
     return () => {
       generationAbortRef.current?.abort();
       generationAbortRef.current = null;
+      curriculumAbortRef.current?.abort();
+      curriculumAbortRef.current = null;
     };
   }, []);
 
@@ -157,18 +168,118 @@ export default function TopicStudy() {
         setRequiresProgramming(saved.requires_programming);
         setLanguageOptions(saved.language_options || []);
         setPreferredLanguage(saved.preferred_language || "");
+        if (topic?.is_dynamic_topic && next.preferred_language !== undefined) {
+          const refreshed = await fetchTopic(topicId);
+          setTopic(refreshed);
+          setResponseDetail(refreshed.response_detail || "concise");
+          setRequiresProgramming(!!refreshed.requires_programming);
+          setLanguageOptions(refreshed.language_options || []);
+          setPreferredLanguage(refreshed.selected_language || "");
+          setActiveSection(0);
+        }
+        return saved;
       } catch (err) {
         console.error(err);
         setErrorMsg("Failed to save topic preferences.");
+        return null;
       } finally {
         setSavingTopicPrefs(false);
       }
     },
-    [topicId],
+    [topicId, topic?.is_dynamic_topic],
+  );
+
+  const handleGenerateCurriculum = useCallback(
+    async (forceRegenerate: boolean) => {
+      if (!topicId || !topic?.is_dynamic_topic) return;
+      curriculumAbortRef.current?.abort();
+      const controller = new AbortController();
+      curriculumAbortRef.current = controller;
+      setGeneratingCurriculum(true);
+      setCurriculumError("");
+      setCurriculumProgress("Preparing roadmap generation...");
+      setCurriculumSections([]);
+      setErrorMsg("");
+
+      const selected =
+        (preferredLanguage || "").trim().toLowerCase()
+        || languageOptions[0]
+        || "python";
+
+      try {
+        await saveTopicPreferences({ preferred_language: selected });
+        await generateTopicContentStream(
+          topicId,
+          {
+            preferred_language: selected,
+            target_sections: 120,
+            force_regenerate: forceRegenerate,
+            llm_config: {
+              provider: settings.provider,
+              model: settings.model,
+              temperature: settings.temperature,
+              max_tokens: settings.maxTokens,
+            },
+          },
+          {
+            onStart: () => {
+              setCurriculumProgress("Starting language-specific roadmap generation...");
+            },
+            onProgress: (event) => {
+              setCurriculumProgress(event.message || "Generating roadmap...");
+            },
+            onSection: (event) => {
+              setCurriculumSections((prev) => [
+                ...prev,
+                { index: event.index, heading: event.heading },
+              ]);
+            },
+            onDone: (event) => {
+              setCurriculumProgress("Roadmap generated.");
+              setTopic(event.topic);
+              setResponseDetail(event.topic.response_detail || "concise");
+              setRequiresProgramming(!!event.topic.requires_programming);
+              setLanguageOptions(event.topic.language_options || []);
+              setPreferredLanguage(event.topic.selected_language || selected);
+              setActiveSection(0);
+            },
+            onError: (event) => {
+              setCurriculumError(event.message || "Roadmap generation failed.");
+            },
+          },
+          controller.signal,
+        );
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        console.error(err);
+        if (isTopicContentStreamError(err)) {
+          setCurriculumError(err.message || "Roadmap generation failed.");
+        } else {
+          setCurriculumError("Roadmap generation failed.");
+        }
+      } finally {
+        if (curriculumAbortRef.current === controller) {
+          curriculumAbortRef.current = null;
+        }
+        setGeneratingCurriculum(false);
+      }
+    },
+    [
+      topicId,
+      topic?.is_dynamic_topic,
+      preferredLanguage,
+      languageOptions,
+      saveTopicPreferences,
+      settings,
+    ],
   );
 
   const handleGenerate = useCallback(async () => {
     if (!topicId || !topic) return;
+    if (topic.is_dynamic_topic && !topic.content_ready) {
+      setErrorMsg("Generate the problem-solving roadmap first.");
+      return;
+    }
     generationAbortRef.current?.abort();
     const controller = new AbortController();
     generationAbortRef.current = controller;
@@ -183,9 +294,8 @@ export default function TopicStudy() {
     setQuestionStartMs({});
     try {
       const activeS = topic.sections[activeSection];
-      const payload = {
+      const basePayload = {
         topic_id: topicId,
-        count: questionCount,
         difficulty: difficulty || undefined,
         level,
         response_detail: responseDetail,
@@ -205,20 +315,30 @@ export default function TopicStudy() {
             }
           : {}),
       };
-      const applyV2Result = (res: Awaited<ReturnType<typeof generateQuestionsV2>>) => {
-        setQuestions(res.questions);
-        setProviderInfo({
-          provider: res.provider_used,
-          model: res.model_used,
-          retries: res.retries_used,
-          malformed: res.malformed_items_dropped,
-        });
-      };
-      const applyLegacyResult = (
-        legacy: Awaited<ReturnType<typeof generateQuestions>>,
+      const payloadWithCount = (count: number) => ({ ...basePayload, count });
+      const questionKey = (q: Pick<QuestionAnswerV2, "question">) =>
+        q.question.trim().toLowerCase().replace(/\s+/g, " ");
+      const mergeUniqueQuestions = (
+        current: QuestionAnswerV2[],
+        incoming: QuestionAnswerV2[],
       ) => {
-        const upgraded: QuestionAnswerV2[] = legacy.questions.map((q, idx) => ({
-          question_id: `${topicId}:legacy:${idx}`,
+        const seen = new Set(current.map((q) => questionKey(q)));
+        const merged = [...current];
+        for (const item of incoming) {
+          const key = questionKey(item);
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          merged.push(item);
+          if (merged.length >= questionCount) break;
+        }
+        return merged;
+      };
+      const mapLegacyQuestions = (
+        legacy: Awaited<ReturnType<typeof generateQuestions>>,
+        startAt: number,
+      ): QuestionAnswerV2[] =>
+        legacy.questions.map((q, idx) => ({
+          question_id: `${topicId}:legacy:${startAt + idx}`,
           topic_id: topicId,
           question: q.question,
           answer: q.answer,
@@ -230,33 +350,60 @@ export default function TopicStudy() {
           misconception_trap: "Confusing terms without checking documentation context.",
           reasoning_summary: "Review the answer and compare with your own reasoning.",
         }));
-        setQuestions(upgraded);
-        setProviderInfo({
-          provider: legacy.provider_used,
-          model: legacy.model_used,
-          retries: 0,
-          malformed: 0,
-        });
-      };
 
-      const runFallbackGeneration = async () => {
-        try {
-          const res = await generateQuestionsV2(payload);
-          applyV2Result(res);
-        } catch {
-          const legacy = await generateQuestions(payload);
-          applyLegacyResult(legacy);
+      const topUpMissingQuestions = async (
+        seed: QuestionAnswerV2[],
+      ): Promise<QuestionAnswerV2[]> => {
+        let merged = mergeUniqueQuestions([], seed).slice(0, questionCount);
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (controller.signal.aborted || merged.length >= questionCount) break;
+          const remaining = questionCount - merged.length;
+
+          try {
+            const res = await generateQuestionsV2(payloadWithCount(remaining));
+            merged = mergeUniqueQuestions(merged, res.questions).slice(0, questionCount);
+            setProviderInfo({
+              provider: res.provider_used,
+              model: res.model_used,
+              retries: res.retries_used,
+              malformed: res.malformed_items_dropped,
+            });
+          } catch {
+            // Best-effort v2 top-up. Legacy fallback below.
+          }
+
+          if (controller.signal.aborted || merged.length >= questionCount) break;
+
+          try {
+            const legacy = await generateQuestions(
+              payloadWithCount(questionCount - merged.length),
+            );
+            const upgraded = mapLegacyQuestions(legacy, merged.length);
+            merged = mergeUniqueQuestions(merged, upgraded).slice(0, questionCount);
+            setProviderInfo({
+              provider: legacy.provider_used,
+              model: legacy.model_used,
+              retries: 0,
+              malformed: 0,
+            });
+          } catch {
+            // Legacy fallback is best effort; caller handles partial results.
+          }
         }
+
+        return merged;
       };
 
-      let streamedCount = 0;
+      const streamedQuestions: QuestionAnswerV2[] = [];
       try {
         await generateQuestionsV2Stream(
-          payload,
+          payloadWithCount(questionCount),
           {
             onQuestion: (event) => {
-              streamedCount += 1;
-              setQuestions((prev) => [...prev, event.question]);
+              const merged = mergeUniqueQuestions(streamedQuestions, [event.question]);
+              streamedQuestions.splice(0, streamedQuestions.length, ...merged);
+              setQuestions([...streamedQuestions]);
             },
             onDone: (event) => {
               setProviderInfo({
@@ -272,14 +419,31 @@ export default function TopicStudy() {
           },
           controller.signal,
         );
+
+        if (controller.signal.aborted) return;
+
+        let finalQuestions = [...streamedQuestions];
+        if (finalQuestions.length < questionCount) {
+          finalQuestions = await topUpMissingQuestions(finalQuestions);
+          if (controller.signal.aborted) return;
+          setQuestions(finalQuestions);
+        }
+        if (finalQuestions.length < questionCount) {
+          setErrorMsg(
+            `Generated ${finalQuestions.length} of ${questionCount} questions. Try retrying or selecting another section.`,
+          );
+        }
       } catch (streamErr) {
         if (controller.signal.aborted) return;
-        if (
-          isQuestionsStreamError(streamErr)
-          && streamErr.fallbackEligible
-          && streamedCount === 0
-        ) {
-          await runFallbackGeneration();
+        if (isQuestionsStreamError(streamErr) && streamErr.fallbackEligible) {
+          const recovered = await topUpMissingQuestions(streamedQuestions);
+          if (controller.signal.aborted) return;
+          setQuestions(recovered);
+          if (recovered.length < questionCount) {
+            setErrorMsg(
+              `Generated ${recovered.length} of ${questionCount} questions. Try retrying or selecting another section.`,
+            );
+          }
           return;
         }
         throw streamErr;
@@ -518,7 +682,9 @@ export default function TopicStudy() {
               >
                 {matchedSections === 0 && (
                   <div className="px-3 py-3 rounded text-sm text-udemy-text-muted bg-udemy-bg">
-                    No matching sections.
+                    {topic.is_dynamic_topic && !topic.content_ready
+                      ? "Generate the roadmap to load course sections."
+                      : "No matching sections."}
                   </div>
                 )}
                 {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} aria-hidden />}
@@ -556,6 +722,80 @@ export default function TopicStudy() {
           </aside>
 
           <div className="flex-1 min-w-0">
+            {topic.is_dynamic_topic && (
+              <div className="udemy-card p-4 sm:p-6 mb-6">
+                <h2 className="text-lg font-bold mb-2">Problem Solving Roadmap</h2>
+                <p className="text-sm text-udemy-text-muted mb-4">
+                  Generate a language-specific curriculum with 120 sections from beginner to
+                  senior.
+                </p>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-udemy-text-muted mb-1">
+                      Programming Language
+                    </label>
+                    <select
+                      value={preferredLanguage}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setPreferredLanguage(next);
+                        void saveTopicPreferences({ preferred_language: next });
+                      }}
+                      className="border border-udemy-border rounded px-3 py-2 text-sm min-w-[180px]"
+                      disabled={savingTopicPrefs || generatingCurriculum}
+                    >
+                      {languageOptions.map((lang) => (
+                        <option key={lang} value={lang}>
+                          {lang}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={() => void handleGenerateCurriculum(false)}
+                    disabled={generatingCurriculum}
+                    className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {topic.content_ready ? "Load or Regenerate" : "Generate Problem Solving Roadmap"}
+                  </button>
+                  {topic.content_ready && (
+                    <button
+                      onClick={() => void handleGenerateCurriculum(true)}
+                      disabled={generatingCurriculum}
+                      className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Force Regenerate
+                    </button>
+                  )}
+                </div>
+                {curriculumProgress && (
+                  <p className="text-xs text-udemy-text-muted mt-3">{curriculumProgress}</p>
+                )}
+                {curriculumError && (
+                  <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    {curriculumError}
+                  </div>
+                )}
+                {generatingCurriculum && (
+                  <div className="mt-4 max-h-52 overflow-y-auto friendly-scrollbar pr-1 space-y-1">
+                    {curriculumSections.map((sec) => (
+                      <div
+                        key={`${sec.index}-${sec.heading}`}
+                        className="text-xs border border-udemy-border rounded px-2 py-1"
+                      >
+                        {sec.index}. {sec.heading}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!topic.content_ready && !generatingCurriculum && (
+                  <p className="text-xs text-udemy-text-muted mt-3">
+                    No roadmap generated yet for this language.
+                  </p>
+                )}
+              </div>
+            )}
+
             {topic.sections[activeSection] && (
               <motion.div
                 key={activeSection}
@@ -628,7 +868,7 @@ export default function TopicStudy() {
                   </select>
                 </div>
 
-                {requiresProgramming && (
+                {requiresProgramming && !topic.is_dynamic_topic && (
                   <div>
                     <label className="block text-xs font-medium text-udemy-text-muted mb-1">
                       Code Language
@@ -670,7 +910,7 @@ export default function TopicStudy() {
 
                 <button
                   onClick={handleGenerate}
-                  disabled={generating}
+                  disabled={generating || (topic.is_dynamic_topic && !topic.content_ready)}
                   className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {generating ? (

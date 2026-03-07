@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, CalendarDays, Loader2, RefreshCw } from "lucide-react";
 import { pageTransition, pageVariants } from "@/utils/animations";
 import { fetchStudyPlan, fetchTopics } from "@/services/api";
+import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
 import type { StudyPlanResponse, TopicSummary } from "@/types";
 
 export default function StudyPlanPage() {
@@ -35,7 +36,10 @@ export default function StudyPlanPage() {
   }, []);
 
   const topicMap = useMemo(
-    () => new Map(topics.map((topic) => [topic.id, topic.title])),
+    () =>
+      new Map(
+        topics.map((topic) => [topic.id, normalizeEscapedSingleLineText(topic.title)]),
+      ),
     [topics],
   );
 
@@ -124,27 +128,32 @@ export default function StudyPlanPage() {
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {day.tasks.map((task, idx) => (
-                      <div
-                        key={`${day.day_index}:${idx}:${task.topic_id}:${task.task_type}`}
-                        className="rounded-lg border border-udemy-border bg-white p-3"
-                      >
-                        <p className="text-sm font-semibold">{task.title}</p>
-                        <p className="text-xs text-udemy-text-muted mt-1">
-                          {topicMap.get(task.topic_id) || task.topic_id} · {task.task_type.replace("_", " ")} · ~
-                          {task.estimated_minutes} min
-                        </p>
-                        <p className="text-xs text-udemy-text-muted mt-1">
-                          {task.reason}
-                        </p>
-                        <Link
-                          to={task.cta_route}
-                          className="btn-secondary mt-3 inline-flex text-sm"
+                    {day.tasks.map((task, idx) => {
+                      const taskTitle = normalizeEscapedSingleLineText(task.title);
+                      const taskReason = normalizeEscapedSingleLineText(task.reason);
+                      const topicId = normalizeEscapedSingleLineText(task.topic_id);
+                      return (
+                        <div
+                          key={`${day.day_index}:${idx}:${task.topic_id}:${task.task_type}`}
+                          className="rounded-lg border border-udemy-border bg-white p-3"
                         >
-                          Open task
-                        </Link>
-                      </div>
-                    ))}
+                          <p className="text-sm font-semibold">{taskTitle}</p>
+                          <p className="text-xs text-udemy-text-muted mt-1">
+                            {topicMap.get(task.topic_id) || topicId} · {task.task_type.replace("_", " ")} · ~
+                            {task.estimated_minutes} min
+                          </p>
+                          <p className="text-xs text-udemy-text-muted mt-1">
+                            {taskReason}
+                          </p>
+                          <Link
+                            to={task.cta_route}
+                            className="btn-secondary mt-3 inline-flex text-sm"
+                          >
+                            Open task
+                          </Link>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

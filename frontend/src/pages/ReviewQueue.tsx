@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, Clock3, Loader2, RefreshCw } from "lucide-react";
 import { pageTransition, pageVariants } from "@/utils/animations";
 import { fetchReviewQueue, fetchTopics } from "@/services/api";
+import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
 import type { ReviewQueueItem, TopicSummary } from "@/types";
 
 function formatDateTime(value: string): string {
@@ -41,7 +42,9 @@ export default function ReviewQueue() {
   }, []);
 
   const topicMap = useMemo(() => {
-    return new Map(topics.map((topic) => [topic.id, topic.title]));
+    return new Map(
+      topics.map((topic) => [topic.id, normalizeEscapedSingleLineText(topic.title)]),
+    );
   }, [topics]);
 
   const overdueNow = useMemo(() => {
@@ -119,38 +122,42 @@ export default function ReviewQueue() {
           </div>
         ) : (
           <div className="space-y-3">
-            {items.map((item) => (
-              <div
-                key={`${item.topic_id}:${item.question_id}`}
-                className="udemy-card p-4"
-              >
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-base font-semibold truncate">
-                      {topicMap.get(item.topic_id) || item.topic_id}
-                    </p>
-                    <p className="text-xs text-udemy-text-muted mt-1 break-all">
-                      {item.topic_id} · {item.question_id}
-                    </p>
-                    <div className="flex flex-wrap gap-2 mt-2 text-xs">
-                      <Badge>{`Due: ${formatDateTime(item.due_at)}`}</Badge>
-                      <Badge>{`Mastery: ${Math.round(item.mastery_score * 100)}%`}</Badge>
-                      <Badge>{`Confidence: ${item.last_confidence}/5`}</Badge>
-                      <Badge>{`Bucket: ${item.review_bucket}`}</Badge>
-                      <Badge>{`Attempts: ${item.attempts}`}</Badge>
+            {items.map((item) => {
+              const topicId = normalizeEscapedSingleLineText(item.topic_id);
+              const questionId = normalizeEscapedSingleLineText(item.question_id);
+              return (
+                <div
+                  key={`${item.topic_id}:${item.question_id}`}
+                  className="udemy-card p-4"
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-base font-semibold truncate">
+                        {topicMap.get(item.topic_id) || topicId}
+                      </p>
+                      <p className="text-xs text-udemy-text-muted mt-1 break-all">
+                        {topicId} · {questionId}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-2 text-xs">
+                        <Badge>{`Due: ${formatDateTime(item.due_at)}`}</Badge>
+                        <Badge>{`Mastery: ${Math.round(item.mastery_score * 100)}%`}</Badge>
+                        <Badge>{`Confidence: ${item.last_confidence}/5`}</Badge>
+                        <Badge>{`Bucket: ${item.review_bucket}`}</Badge>
+                        <Badge>{`Attempts: ${item.attempts}`}</Badge>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Link to={`/topics/${item.topic_id}`} className="btn-secondary">
+                        Study now
+                      </Link>
+                      <Link to={`/quiz/${item.topic_id}`} className="btn-primary">
+                        Quiz this topic
+                      </Link>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Link to={`/topics/${item.topic_id}`} className="btn-secondary">
-                      Study now
-                    </Link>
-                    <Link to={`/quiz/${item.topic_id}`} className="btn-primary">
-                      Quiz this topic
-                    </Link>
-                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

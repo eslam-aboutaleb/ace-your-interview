@@ -42,6 +42,8 @@ export interface TopicDetail {
   language_options: string[];
   selected_language: string;
   response_detail: ResponseDetail;
+  is_dynamic_topic: boolean;
+  content_ready: boolean;
 }
 
 export interface CreateCustomTopicRequest {
@@ -99,6 +101,65 @@ export interface CustomTopicStreamHandlers {
   onSection?: (event: CustomTopicStreamSectionEvent) => void;
   onDone?: (event: CustomTopicStreamDoneEvent) => void;
   onError?: (event: CustomTopicStreamErrorEvent) => void;
+}
+
+export interface GenerateTopicContentRequest {
+  preferred_language: string;
+  target_sections?: number;
+  force_regenerate?: boolean;
+  llm_config?: LLMConfig;
+}
+
+export interface TopicContentStreamStartEvent {
+  type: "start";
+  topic_id: string;
+  preferred_language: string;
+  target_sections: number;
+}
+
+export interface TopicContentStreamProgressEvent {
+  type: "progress";
+  stage: "analyzing" | "ready";
+  message: string;
+  elapsed_seconds?: number;
+}
+
+export interface TopicContentStreamSectionEvent {
+  type: "section";
+  index: number;
+  total_sections: number;
+  heading: string;
+  content: string;
+}
+
+export interface TopicContentStreamDoneEvent {
+  type: "done";
+  topic: TopicDetail;
+}
+
+export interface TopicContentStreamErrorEvent {
+  type: "error";
+  code:
+    | "llm_service_approval_required"
+    | "study_app_llm_not_assigned"
+    | "personal_credential_required"
+    | "generation_failed";
+  message: string;
+}
+
+export type TopicContentStreamEvent =
+  | TopicContentStreamStartEvent
+  | TopicContentStreamProgressEvent
+  | TopicContentStreamSectionEvent
+  | TopicContentStreamDoneEvent
+  | TopicContentStreamErrorEvent;
+
+export interface TopicContentStreamHandlers {
+  onStart?: (event: TopicContentStreamStartEvent) => void;
+  onProgress?: (event: TopicContentStreamProgressEvent) => void;
+  onSection?: (event: TopicContentStreamSectionEvent) => void;
+  onDone?: (event: TopicContentStreamDoneEvent) => void;
+  onError?: (event: TopicContentStreamErrorEvent) => void;
 }
 
 export interface QuestionAnswer {

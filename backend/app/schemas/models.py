@@ -159,11 +159,20 @@ class TopicDetail(BaseModel):
     language_options: list[str] = Field(default_factory=list)
     selected_language: str = ""
     response_detail: ResponseDetailEnum = ResponseDetailEnum.CONCISE
+    is_dynamic_topic: bool = False
+    content_ready: bool = True
 
 
 class CreateCustomTopicRequest(BaseModel):
     topic: str = Field(..., min_length=2, max_length=120)
     target_sections: int = Field(default=120, ge=100, le=150)
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class GenerateTopicContentRequest(BaseModel):
+    preferred_language: str = Field(..., min_length=2, max_length=40)
+    target_sections: int = Field(default=120, ge=100, le=150)
+    force_regenerate: bool = False
     llm_config: Optional[LLMConfigRequest] = None
 
 
