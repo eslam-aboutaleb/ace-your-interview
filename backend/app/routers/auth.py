@@ -285,6 +285,13 @@ def _allowed_login_identities() -> list[tuple[str, str, str]]:
     return out
 
 
+def _is_allowed_login_identity(identity_key: str) -> bool:
+    key = (identity_key or "").strip().lower()
+    if not key:
+        return False
+    return any(existing_key == key for _, _, existing_key in _allowed_login_identities())
+
+
 def _build_assignment_item(login_provider: str, identifier: str) -> LLMUserAssignmentItem:
     identity_key = normalise_identity(login_provider, identifier)
     assignment = _get_llm_assignments().get_assignment(identity_key=identity_key)
@@ -335,6 +342,11 @@ async def upsert_llm_assignment_for_user(
     login_provider, login_identifier, identity_key = _normalise_login_identity(provider, identifier)
     if not identity_key:
         raise HTTPException(status_code=400, detail="Invalid user identity")
+    if not _is_allowed_login_identity(identity_key):
+        raise HTTPException(
+            status_code=404,
+            detail="Assignment target must be an allowed-login user",
+        )
     try:
         _get_llm_assignments().set_assignment(
             identity_key=identity_key,

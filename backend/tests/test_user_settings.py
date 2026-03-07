@@ -49,6 +49,7 @@ class UserSettingsRouterTests(unittest.TestCase):
         self.prev_env = {
             "STUDY_USER_SETTINGS_FILE": os.environ.get("STUDY_USER_SETTINGS_FILE"),
             "STUDY_LLM_SERVICE_USERS_FILE": os.environ.get("STUDY_LLM_SERVICE_USERS_FILE"),
+            "STUDY_LLM_ASSIGNMENTS_FILE": os.environ.get("STUDY_LLM_ASSIGNMENTS_FILE"),
             "STUDY_CREDENTIALS_ENCRYPTION_KEY": os.environ.get("STUDY_CREDENTIALS_ENCRYPTION_KEY"),
             "STUDY_GOOGLE_CLIENT_ID": os.environ.get("STUDY_GOOGLE_CLIENT_ID"),
             "STUDY_GOOGLE_CLIENT_SECRET": os.environ.get("STUDY_GOOGLE_CLIENT_SECRET"),
@@ -57,6 +58,7 @@ class UserSettingsRouterTests(unittest.TestCase):
         }
         os.environ["STUDY_USER_SETTINGS_FILE"] = os.path.join(self.tmpdir.name, "user_settings.json")
         os.environ["STUDY_LLM_SERVICE_USERS_FILE"] = os.path.join(self.tmpdir.name, "llm_service_users.json")
+        os.environ["STUDY_LLM_ASSIGNMENTS_FILE"] = os.path.join(self.tmpdir.name, "llm_assignments.json")
         os.environ["STUDY_CREDENTIALS_ENCRYPTION_KEY"] = "test-encryption-secret"
         os.environ["STUDY_GOOGLE_CLIENT_ID"] = "test-google-client-id"
         os.environ["STUDY_GOOGLE_CLIENT_SECRET"] = "test-google-client-secret"
@@ -165,8 +167,28 @@ class UserSettingsRouterTests(unittest.TestCase):
         self.assertFalse(providers_initial["openai"]["using_backend_fallback"])
 
         self.store._llm_service_access.add_user("google", "learner@example.com")
+        identity_key = identity_key_for_user({"user": "learner@example.com", "provider": "google"})
+        self.store._llm_assignments_store.set_assignment(
+            identity_key=identity_key,
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+        self.store.save_preferences(
+            identity_key,
+            {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "temperature": 0.7,
+                "max_tokens": 0,
+                "auth_mode": "api_key",
+                "llm_source": "study_app",
+            },
+        )
+
         after = self.client.get("/api/user-settings")
         self.assertEqual(after.status_code, 200)
+        self.assertTrue(after.json()["study_app_available"])
+        self.assertEqual(after.json()["study_app_assignment"]["provider"], "openai")
         providers_after = {p["provider"]: p for p in after.json()["providers"]}
         self.assertTrue(providers_after["openai"]["backend_fallback_eligible"])
         self.assertTrue(providers_after["openai"]["using_backend_fallback"])
