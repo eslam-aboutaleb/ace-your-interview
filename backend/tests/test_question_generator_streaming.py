@@ -103,6 +103,47 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
         self.assertEqual(done_event["generated_count"], 2)
         self.assertGreater(done_event["retries_used"], 0)
 
+    def test_generate_v2_fills_target_count_with_fallback_when_llm_unstructured(self):
+        llm = FakeLLM(["unstructured output that is not json"])
+        generator = QuestionGenerator(llm)
+
+        result = asyncio.run(
+            generator.generate_v2(
+                topic_id="topic-backend",
+                topic_title="Backend API Design",
+                doc_content="Use clear API contracts, validation, and idempotency for robust backend APIs.",
+                count=5,
+                difficulty="medium",
+                level="mid",
+            )
+        )
+
+        self.assertEqual(len(result.questions), 5)
+        self.assertTrue(all(q.question.strip() for q in result.questions))
+        self.assertTrue(all(q.answer.strip() for q in result.questions))
+
+    def test_generate_v2_stream_fills_target_count_with_fallback_when_llm_unstructured(self):
+        llm = FakeLLM(["unstructured output that is not json"])
+        generator = QuestionGenerator(llm)
+
+        events = asyncio.run(
+            _collect_events(
+                generator.generate_v2_stream(
+                    topic_id="topic-backend",
+                    topic_title="Backend API Design",
+                    doc_content="Use clear API contracts, validation, and idempotency for robust backend APIs.",
+                    count=3,
+                    level="mid",
+                )
+            )
+        )
+
+        question_events = [e for e in events if e.get("type") == "question"]
+        done_event = events[-1]
+        self.assertEqual(done_event["type"], "done")
+        self.assertEqual(done_event["generated_count"], 3)
+        self.assertEqual(len(question_events), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

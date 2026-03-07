@@ -459,6 +459,135 @@ def _parse_questions_json(raw: str) -> list[dict]:
     return []
 
 
+def _extract_content_fragments(content: str, *, limit: int = 48) -> list[str]:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text:
+        return []
+
+    fragments: list[str] = []
+    seen: set[str] = set()
+    lines = text.splitlines()
+    for line in lines:
+        chunk = line.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("```"):
+            continue
+        chunk = re.sub(r"^#{1,6}\s*", "", chunk)
+        chunk = re.sub(r"^[\-\*\d\.\)\s]+", "", chunk).strip()
+        chunk = re.sub(r"\s+", " ", chunk)
+        if len(chunk) < 6:
+            continue
+        if len(chunk) > 140:
+            chunk = chunk[:140].rsplit(" ", 1)[0].strip() or chunk[:140]
+        norm = _normalise_question(chunk)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        fragments.append(chunk.rstrip(":;,. "))
+        if len(fragments) >= limit:
+            break
+
+    if not fragments:
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        for p in paragraphs[:limit]:
+            cleaned = re.sub(r"\s+", " ", p)
+            if len(cleaned) < 6:
+                continue
+            fragments.append(cleaned[:140].rsplit(" ", 1)[0].strip() or cleaned[:140])
+            if len(fragments) >= limit:
+                break
+    return fragments
+
+
+def _build_fallback_question_items(
+    *,
+    topic_id: str,
+    topic_title: str,
+    doc_content: str,
+    count: int,
+    difficulty: Optional[str],
+    level: Optional[str],
+    section_title: Optional[str] = None,
+    section_content: Optional[str] = None,
+    existing_questions: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    remaining = max(0, int(count or 0))
+    if remaining <= 0:
+        return []
+
+    source_scope = section_title or topic_title or "this topic"
+    source_content = section_content if (section_title and section_content) else doc_content
+    fragments = _extract_content_fragments(source_content, limit=64)
+    if not fragments:
+        fragments = [source_scope, topic_title or "core concepts", "practical implementation"]
+
+    dedup: set[str] = {_normalise_question(q) for q in _normalise_existing_questions(existing_questions)}
+    difficulty_value = (difficulty or "medium").strip().lower()
+    if difficulty_value not in _VALID_DIFFICULTIES:
+        difficulty_value = "medium"
+
+    templates = [
+        "What are the key design considerations for {focus} in {topic} from a {angle} perspective?",
+        "How would you apply {focus} in a real implementation for {topic} while prioritizing {angle}?",
+        "What tradeoffs should be evaluated when working with {focus} in {topic} regarding {angle}?",
+        "How would you validate that {focus} is implemented correctly in {topic} with emphasis on {angle}?",
+    ]
+    angles = [
+        "correctness",
+        "reliability",
+        "performance",
+        "security",
+        "maintainability",
+        "scalability",
+        "observability",
+        "cost efficiency",
+        "testing",
+    ]
+
+    items: list[dict[str, Any]] = []
+    idx = 0
+    max_rounds = max(remaining * 12, 24)
+    while len(items) < remaining and idx < max_rounds:
+        focus = fragments[idx % len(fragments)]
+        angle = angles[(idx // max(1, len(fragments))) % len(angles)]
+        template = templates[idx % len(templates)]
+        question = template.format(
+            focus=focus,
+            topic=topic_title or "this topic",
+            angle=angle,
+        ).strip()
+        q_norm = _normalise_question(question)
+        idx += 1
+        if not q_norm or q_norm in dedup:
+            continue
+
+        answer = (
+            f"Start by defining clear requirements for **{focus}** in the context of {source_scope}.\n\n"
+            "Then evaluate constraints, tradeoffs, and failure modes before choosing an approach.\n\n"
+            "A strong answer should justify decisions with practical implementation and validation steps."
+        )
+        item: dict[str, Any] = {
+            "question": question,
+            "answer": answer,
+            "difficulty": difficulty_value,
+            "learning_objective": f"Assess practical understanding of {focus}.",
+            "source_section": source_scope,
+            "source_quote": focus,
+            "misconception_trap": "Choosing an approach without validating constraints and tradeoffs.",
+            "reasoning_summary": "Clarify requirements first, then compare options and justify a decision.",
+            "target_level": _normalise_level(level),
+            "topic_id": topic_id,
+        }
+        valid, _issue = _validate_question_item(item, topic_id, difficulty, level)
+        if not valid:
+            continue
+        dedup.add(q_norm)
+        items.append(item)
+
+    return items[:remaining]
+
+
 def _validate_question_item(
     item: dict[str, Any],
     topic_id: str,
@@ -836,7 +965,7 @@ class QuestionGenerator:
         dedup_norm: set[str] = {_normalise_question(q) for q in seed_existing}
         generated_question_texts: list[str] = [*seed_existing]
 
-        async def _generate_one(*, include_section: bool) -> dict[str, Any]:
+        async def _generate_one(*, include_section: bool, relaxed: bool = False) -> dict[str, Any]:
             retries_used = 0
             malformed_dropped = 0
             metadata: dict[str, Any] = {}
@@ -847,13 +976,13 @@ class QuestionGenerator:
                 topic_title=topic_title,
                 doc_content=doc_content,
                 count=1,
-                difficulty=difficulty,
+                difficulty=None if relaxed else difficulty,
                 level=level,
                 section_title=section_title if include_section else None,
                 section_content=section_content if include_section else None,
                 response_detail=response_detail,
-                preferred_language=preferred_language,
-                requires_programming=requires_programming,
+                preferred_language="" if relaxed else preferred_language,
+                requires_programming=False if relaxed else requires_programming,
                 requested_total_count=requested_total,
                 existing_questions=generated_question_texts,
                 mcp_context=mcp_context,
@@ -1010,10 +1139,14 @@ class QuestionGenerator:
         generated_count = 0
 
         section_first = bool(section_title and section_content)
-        phase_modes = [True, False] if section_first else [False]
-        for include_section in phase_modes:
+        phase_modes: list[tuple[bool, bool]] = (
+            [(True, False), (False, False), (False, True)]
+            if section_first
+            else [(False, False), (False, True)]
+        )
+        for include_section, relaxed in phase_modes:
             while generated_count < target_count:
-                result = await _generate_one(include_section=include_section)
+                result = await _generate_one(include_section=include_section, relaxed=relaxed)
                 retries_used += int(result.get("retries_used", 0))
                 malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
                 metadata = result.get("metadata", {}) or {}
@@ -1046,7 +1179,7 @@ class QuestionGenerator:
                 if generated_count >= target_count:
                     break
 
-                result = await _generate_one(include_section=False)
+                result = await _generate_one(include_section=False, relaxed=True)
                 retries_used += int(result.get("retries_used", 0))
                 malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
                 metadata = result.get("metadata", {}) or {}
@@ -1073,6 +1206,34 @@ class QuestionGenerator:
                     "type": "question",
                     "question": question,
                 }
+
+        if generated_count < target_count:
+            fallback_items = _build_fallback_question_items(
+                topic_id=topic_id,
+                topic_title=topic_title,
+                doc_content=doc_content,
+                count=target_count - generated_count,
+                difficulty=difficulty,
+                level=level,
+                section_title=None,
+                section_content=None,
+                existing_questions=generated_question_texts,
+            )
+            for item in fallback_items:
+                q_text = str(item.get("question", "")).strip()
+                q_norm = _normalise_question(q_text)
+                if not q_norm or q_norm in dedup_norm:
+                    continue
+                dedup_norm.add(q_norm)
+                generated_question_texts.append(q_text)
+                qa = self._to_question_answer_v2(topic_id, item)
+                generated_count += 1
+                yield {
+                    "type": "question",
+                    "question": qa.model_dump(),
+                }
+                if generated_count >= target_count:
+                    break
 
         yield {
             "type": "done",
@@ -1120,22 +1281,40 @@ class QuestionGenerator:
             preferred_language=preferred_language,
             requires_programming=requires_programming,
         )
+        target_count = max(1, int(count or 1))
         questions = [
             QuestionAnswer(question=q.question, answer=q.answer, difficulty=q.difficulty)
             for q in v2.questions
         ]
-        if not questions:
-            questions = [
-                QuestionAnswer(
-                    question="Unable to generate questions at this time.",
-                    answer="The LLM did not return valid structured output. Please try again.",
-                    difficulty="easy",
+        if len(questions) < target_count:
+            fallback_items = _build_fallback_question_items(
+                topic_id=topic_id,
+                topic_title=topic_title,
+                doc_content=doc_content,
+                count=target_count - len(questions),
+                difficulty=difficulty,
+                level=level,
+                section_title=section_title,
+                section_content=section_content,
+                existing_questions=[
+                    *(_normalise_existing_questions(existing_questions)),
+                    *[q.question for q in questions],
+                ],
+            )
+            for item in fallback_items:
+                questions.append(
+                    QuestionAnswer(
+                        question=str(item.get("question", "")).strip(),
+                        answer=str(item.get("answer", "")).strip(),
+                        difficulty=str(item.get("difficulty", "medium")).strip().lower() or "medium",
+                    )
                 )
-            ]
+                if len(questions) >= target_count:
+                    break
         return GenerateQuestionsResponse(
             topic_id=topic_id,
             topic_title=topic_title,
-            questions=questions,
+            questions=questions[:target_count],
             provider_used=v2.provider_used,
             model_used=v2.model_used,
         )
@@ -1158,51 +1337,136 @@ class QuestionGenerator:
         preferred_language: str = "",
         requires_programming: bool = False,
     ) -> GenerateQuestionsV2Response:
+        target_count = max(1, int(count or 1))
         mcp_context = await self._mcp_context_for_flow(
             flow="questions",
             query=f"{topic_title} {section_title or ''} interview questions and practical examples",
             topic_id=topic_id,
             topic_title=topic_title,
         )
-        prompt = _build_prompt(
-            topic_id=topic_id,
-            topic_title=topic_title,
-            doc_content=doc_content,
-            count=count,
-            requested_total_count=requested_total_count,
-            existing_questions=existing_questions,
-            difficulty=difficulty,
-            level=level,
-            section_title=section_title,
-            section_content=section_content,
-            response_detail=response_detail,
-            preferred_language=preferred_language,
-            requires_programming=requires_programming,
-            mcp_context=mcp_context,
-        )
-
         validator = lambda item: _validate_question_item(item, topic_id, difficulty, level)
-        raw_items, stats = await _collect_with_retries(
-            llm=self.llm,
-            base_prompt=prompt,
-            llm_config=llm_config,
-            user_identity=user_identity,
-            target_count=count,
-            validator=validator,
-            existing_questions=existing_questions,
+        provider_used = ""
+        model_used = ""
+        retries_used = 0
+        malformed_items_dropped = 0
+        raw_items: list[dict[str, Any]] = []
+        dedup_norm: set[str] = {
+            _normalise_question(q) for q in _normalise_existing_questions(existing_questions)
+        }
+
+        pass_modes: list[dict[str, Any]] = [
+            {
+                "section_title": section_title,
+                "section_content": section_content,
+                "difficulty": difficulty,
+                "preferred_language": preferred_language,
+                "requires_programming": requires_programming,
+            }
+        ]
+        if section_title and section_content:
+            pass_modes.append(
+                {
+                    "section_title": None,
+                    "section_content": None,
+                    "difficulty": difficulty,
+                    "preferred_language": preferred_language,
+                    "requires_programming": requires_programming,
+                }
+            )
+        pass_modes.append(
+            {
+                "section_title": None,
+                "section_content": None,
+                "difficulty": None,
+                "preferred_language": "",
+                "requires_programming": False,
+            }
         )
 
-        questions = [self._to_question_answer_v2(topic_id, item) for item in raw_items]
+        for mode in pass_modes:
+            if len(raw_items) >= target_count:
+                break
+            remaining = target_count - len(raw_items)
+            existing_for_pass = [
+                *(_normalise_existing_questions(existing_questions)),
+                *[str(item.get("question", "")) for item in raw_items],
+            ]
+            prompt = _build_prompt(
+                topic_id=topic_id,
+                topic_title=topic_title,
+                doc_content=doc_content,
+                count=remaining,
+                requested_total_count=requested_total_count,
+                existing_questions=existing_for_pass,
+                difficulty=mode["difficulty"],
+                level=level,
+                section_title=mode["section_title"],
+                section_content=mode["section_content"],
+                response_detail=response_detail,
+                preferred_language=mode["preferred_language"],
+                requires_programming=mode["requires_programming"],
+                mcp_context=mcp_context,
+            )
+            pass_items, pass_stats = await _collect_with_retries(
+                llm=self.llm,
+                base_prompt=prompt,
+                llm_config=llm_config,
+                user_identity=user_identity,
+                target_count=remaining,
+                validator=validator,
+                existing_questions=existing_for_pass,
+            )
+            retries_used += int(pass_stats.get("retries_used", 0))
+            malformed_items_dropped += int(pass_stats.get("malformed_items_dropped", 0))
+            pass_metadata = pass_stats.get("metadata", {}) or {}
+            if pass_metadata.get("provider"):
+                provider_used = str(pass_metadata.get("provider"))
+            if pass_metadata.get("model"):
+                model_used = str(pass_metadata.get("model"))
 
-        metadata = stats.get("metadata", {})
+            for item in pass_items:
+                q_norm = _normalise_question(str(item.get("question", "")))
+                if not q_norm or q_norm in dedup_norm:
+                    continue
+                dedup_norm.add(q_norm)
+                raw_items.append(item)
+                if len(raw_items) >= target_count:
+                    break
+
+        if len(raw_items) < target_count:
+            fallback_items = _build_fallback_question_items(
+                topic_id=topic_id,
+                topic_title=topic_title,
+                doc_content=doc_content,
+                count=target_count - len(raw_items),
+                difficulty=difficulty,
+                level=level,
+                section_title=None,
+                section_content=None,
+                existing_questions=[
+                    *(_normalise_existing_questions(existing_questions)),
+                    *[str(item.get("question", "")) for item in raw_items],
+                ],
+            )
+            for item in fallback_items:
+                q_norm = _normalise_question(str(item.get("question", "")))
+                if not q_norm or q_norm in dedup_norm:
+                    continue
+                dedup_norm.add(q_norm)
+                raw_items.append(item)
+                if len(raw_items) >= target_count:
+                    break
+
+        questions = [self._to_question_answer_v2(topic_id, item) for item in raw_items[:target_count]]
+
         return GenerateQuestionsV2Response(
             topic_id=topic_id,
             topic_title=topic_title,
             questions=questions,
-            provider_used=metadata.get("provider", ""),
-            model_used=metadata.get("model", ""),
-            retries_used=stats.get("retries_used", 0),
-            malformed_items_dropped=stats.get("malformed_items_dropped", 0),
+            provider_used=provider_used,
+            model_used=model_used,
+            retries_used=retries_used,
+            malformed_items_dropped=malformed_items_dropped,
         )
 
     async def generate_quiz(
