@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
-from app.dependencies import require_auth
+from app.dependencies import optional_auth, require_auth
 from app.schemas.models import (
     CreateCustomTopicRequest,
     FeatureGateStatusEnum,
@@ -102,10 +102,12 @@ async def _resolve_topic_detail_for_user(
     *,
     parser: DocParser,
     store: LearningStore,
-    user_id: str,
+    user_id: str | None,
     topic_id: str,
 ) -> TopicDetail | None:
     if is_problem_solving_topic(topic_id):
+        if not user_id:
+            return None
         resolved = await store.run_async(
             store.resolve_topic_ai_settings,
             user_id=user_id,
@@ -124,6 +126,8 @@ async def _resolve_topic_detail_for_user(
     topic = parser.get_topic(topic_id)
     if topic:
         return topic
+    if not user_id:
+        return None
     custom = await store.run_async(
         store.get_custom_topic,
         user_id=user_id,
@@ -208,24 +212,28 @@ async def list_topics(
     q: str | None = Query(default=None, max_length=200),
     limit: int | None = Query(default=None, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    user: dict = Depends(require_auth),
+    user: dict | None = Depends(optional_auth),
 ):
     """Return static topics + user custom topics with shared filters."""
     parser, _, store = _ensure_services()
     static_topics = parser.list_topics(track=track, level=level, q=q)
-    custom_topic_items = await store.run_async(
-        store.list_custom_topics,
-        user_id=user["user"],
-        track=track,
-        level=level,
-        q=q,
-    )
-    custom_topics = [
-        TopicSummary(**item)
-        for item in custom_topic_items
-    ]
+    custom_topics: list[TopicSummary] = []
     dynamic_topics: list[TopicSummary] = []
-    if _passes_topic_filters(
+
+    if user:
+        custom_topic_items = await store.run_async(
+            store.list_custom_topics,
+            user_id=user["user"],
+            track=track,
+            level=level,
+            q=q,
+        )
+        custom_topics = [
+            TopicSummary(**item)
+            for item in custom_topic_items
+        ]
+
+    if user and _passes_topic_filters(
         title=PROBLEM_SOLVING_TITLE,
         description=problem_solving_base_topic()["description"],
         track=PROBLEM_SOLVING_TRACK,
@@ -274,17 +282,26 @@ async def list_topics(
 
 
 @router.get("/{topic_id}", response_model=TopicDetail)
-async def get_topic(topic_id: str, user: dict = Depends(require_auth)):
+async def get_topic(topic_id: str, user: dict | None = Depends(optional_auth)):
     """Return static topic first; then user-scoped custom topic."""
     parser, llm_client, store = _ensure_services()
+    user_id = user["user"] if user else None
     topic = await _resolve_topic_detail_for_user(
         parser=parser,
         store=store,
-        user_id=user["user"],
+        user_id=user_id,
         topic_id=topic_id,
     )
     if topic is None:
         raise HTTPException(status_code=404, detail=f"Topic '{topic_id}' not found")
+
+    if not user:
+        return topic.model_copy(
+            update={
+                "is_dynamic_topic": bool(topic.is_dynamic_topic),
+                "content_ready": bool(topic.content_ready and len(topic.sections) > 0),
+            }
+        )
 
     profile = await _ensure_topic_language_profile(
         llm_client=llm_client,

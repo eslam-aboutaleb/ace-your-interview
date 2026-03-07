@@ -10,6 +10,7 @@ import {
 } from "@/utils/animations";
 import { fetchTopics } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
+import { useAuthStore } from "@/store/authStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
@@ -76,9 +77,16 @@ export default function TopicsList() {
   }, [loadTopics]);
 
   const handleCreateCustomTopic = () => {
+    const { isAuthenticated } = useAuthStore.getState();
+    if (!isAuthenticated) {
+      navigate("/login");
+      return;
+    }
     const topic = customTopic.trim();
     if (topic.length < 2) {
-      setCustomError("Please enter at least 2 characters for the custom topic.");
+      setCustomError(
+        "Please enter at least 2 characters for the custom topic.",
+      );
       return;
     }
     setCustomError("");
@@ -101,7 +109,8 @@ export default function TopicsList() {
             Interview Topics
           </h1>
           <p className="text-gray-400 mt-2">
-            {topics.length} topics &middot; {gapFreeCount} gap-free &middot; {completedTopics.length} completed
+            {topics.length} topics &middot; {gapFreeCount} gap-free &middot;{" "}
+            {completedTopics.length} completed
           </p>
         </div>
       </div>
@@ -150,7 +159,8 @@ export default function TopicsList() {
         <div className="udemy-card p-4 mb-6">
           <h2 className="text-sm font-bold mb-2">Create Custom Topic</h2>
           <p className="text-xs text-udemy-text-muted mb-3">
-            Enter any topic to generate a deep roadmap with 100+ subtopics and full learning-path coverage.
+            Enter any topic to generate a deep roadmap with 100+ subtopics and
+            full learning-path coverage.
           </p>
           <div className="flex flex-col md:flex-row gap-3">
             <input
@@ -176,7 +186,8 @@ export default function TopicsList() {
 
         {coverageGapCount > 0 && (
           <div className="mb-5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            {coverageGapCount} topic(s) are currently flagged with possible coverage gaps.
+            {coverageGapCount} topic(s) are currently flagged with possible
+            coverage gaps.
           </div>
         )}
 
@@ -194,7 +205,9 @@ export default function TopicsList() {
               const isComplete = completedTopics.includes(topic.id);
               const hasCoverageGap = topicHasCoverageGap(topic);
               const title = normalizeEscapedSingleLineText(topic.title);
-              const description = normalizeEscapedSingleLineText(topic.description);
+              const description = normalizeEscapedSingleLineText(
+                topic.description,
+              );
               return (
                 <motion.div key={topic.id} variants={cardVariants}>
                   <Link
@@ -223,7 +236,9 @@ export default function TopicsList() {
                         </p>
                         <div className="flex items-center gap-2 mt-2">
                           <span className="text-[11px] font-semibold rounded-full bg-udemy-purple/10 text-udemy-purple px-2 py-0.5">
-                            {TRACK_LABELS[topic.track] || topic.track || "Topic"}
+                            {TRACK_LABELS[topic.track] ||
+                              topic.track ||
+                              "Topic"}
                           </span>
                           <span
                             className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${

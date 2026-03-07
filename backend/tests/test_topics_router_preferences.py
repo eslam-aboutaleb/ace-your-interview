@@ -6,7 +6,7 @@ import unittest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.dependencies import require_auth
+from app.dependencies import optional_auth, require_auth
 from app.routers import topics
 from app.services.doc_parser import DocParser
 from app.services.learning_store import LearningStore
@@ -69,6 +69,9 @@ API implementation details.
 
         self.app = FastAPI()
         self.app.dependency_overrides[require_auth] = (
+            lambda: {"user": "alice", "provider": "local"}
+        )
+        self.app.dependency_overrides[optional_auth] = (
             lambda: {"user": "alice", "provider": "local"}
         )
         self.app.include_router(topics.router)
