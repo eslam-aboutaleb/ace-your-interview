@@ -106,6 +106,24 @@ Static description.
         get_res = self.client.get("/api/topics/custom-java")
         self.assertEqual(get_res.status_code, 404)
 
+    def test_custom_topic_stream_emits_sections_and_done(self):
+        res = self.client.post(
+            "/api/topics/custom/stream",
+            json={"topic": "Java", "target_sections": 100},
+        )
+        self.assertEqual(res.status_code, 200)
+        events = [json.loads(line) for line in res.text.splitlines() if line.strip()]
+        event_types = [evt.get("type") for evt in events]
+
+        self.assertIn("start", event_types)
+        self.assertIn("progress", event_types)
+        self.assertIn("section", event_types)
+        self.assertIn("done", event_types)
+
+        done_event = next(evt for evt in events if evt.get("type") == "done")
+        self.assertEqual(done_event["topic"]["id"], "custom-java")
+        self.assertEqual(len(done_event["topic"]["sections"]), 100)
+
 
 if __name__ == "__main__":
     unittest.main()

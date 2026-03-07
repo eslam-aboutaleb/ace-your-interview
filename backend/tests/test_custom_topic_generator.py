@@ -45,7 +45,9 @@ class CustomTopicGeneratorTests(unittest.TestCase):
         self.assertEqual(out.title, "Java Interview Roadmap")
         self.assertEqual(out.track, "backend")
         self.assertEqual(len(out.sections), 100)
-        self.assertIn("## Java Topic 1", out.raw_content)
+        self.assertTrue(out.sections[0]["heading"].startswith("Junior:"))
+        self.assertIn("Java Topic", out.sections[0]["heading"])
+        self.assertIn("## Junior:", out.raw_content)
 
     def test_generate_topic_falls_back_when_payload_invalid(self):
         llm = FakeLLM(["not-json", '{"oops":true}', "[]", ""])
@@ -54,7 +56,8 @@ class CustomTopicGeneratorTests(unittest.TestCase):
         out = asyncio.run(generator.generate_topic(topic="Kafka", target_sections=120))
         self.assertEqual(out.id, "custom-kafka")
         self.assertEqual(len(out.sections), 120)
-        self.assertTrue(out.sections[0]["heading"].startswith("Kafka Module"))
+        self.assertTrue(out.sections[0]["heading"].startswith("Junior:"))
+        self.assertIn("Kafka", out.sections[0]["heading"])
         self.assertTrue(out.description)
 
 

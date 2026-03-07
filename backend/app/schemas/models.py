@@ -183,7 +183,7 @@ class UserPreferences(BaseModel):
     max_tokens: int = Field(default=0, ge=0)
     auth_mode: UserAuthModeEnum = UserAuthModeEnum.API_KEY
     llm_source: UserLLMSourceEnum = UserLLMSourceEnum.PERSONAL
-    require_answer_reveal: bool = True
+    require_answer_reveal: bool = False
 
 
 class UserPreferencesUpdateRequest(UserPreferences):
