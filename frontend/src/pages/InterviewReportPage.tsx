@@ -5,6 +5,7 @@ import { Loader2, Trophy, ArrowRight } from "lucide-react";
 import { pageVariants, pageTransition } from "@/utils/animations";
 import { fetchInterviewReport } from "@/services/api";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
+import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
 import type { InterviewReportResponse } from "@/types";
 
 export default function InterviewReportPage() {
@@ -82,7 +83,7 @@ export default function InterviewReportPage() {
             <h2 className="font-bold mb-2">Weak Competencies</h2>
             <ul className="list-disc pl-5 text-sm text-udemy-text-muted space-y-1">
               {report.weak_competencies.map((x, i) => (
-                <li key={`${x}-${i}`}>{x}</li>
+                <li key={`${x}-${i}`}>{normalizeEscapedSingleLineText(x)}</li>
               ))}
             </ul>
           </div>
@@ -91,7 +92,7 @@ export default function InterviewReportPage() {
             <h2 className="font-bold mb-2">Top Strengths</h2>
             <ul className="list-disc pl-5 text-sm text-udemy-text-muted space-y-1">
               {report.strengths.map((x, i) => (
-                <li key={`${x}-${i}`}>{x}</li>
+                <li key={`${x}-${i}`}>{normalizeEscapedSingleLineText(x)}</li>
               ))}
             </ul>
           </div>
@@ -106,7 +107,7 @@ export default function InterviewReportPage() {
                 to={`/topics/${topicId}`}
                 className="text-sm bg-udemy-purple/10 text-udemy-purple px-3 py-1 rounded-full"
               >
-                {topicId}
+                {normalizeEscapedSingleLineText(topicId)}
               </Link>
             ))}
           </div>
@@ -114,7 +115,7 @@ export default function InterviewReportPage() {
           <h3 className="font-semibold mb-2">Next Steps</h3>
           <ol className="list-decimal pl-5 text-sm text-udemy-text-muted space-y-1">
             {report.next_steps.map((s, i) => (
-              <li key={`${s}-${i}`}>{s}</li>
+              <li key={`${s}-${i}`}>{normalizeEscapedSingleLineText(s)}</li>
             ))}
           </ol>
 

@@ -37,6 +37,10 @@ import DifficultyBadge from "@/components/common/DifficultyBadge";
 import ProgressBar from "@/components/common/ProgressBar";
 import WordHighlightChat from "@/components/common/WordHighlightChat";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
+import {
+  normalizeEscapedMultilineText,
+  normalizeEscapedSingleLineText,
+} from "@/utils/textNormalization";
 import type {
   TopicDetail,
   QuestionAnswerV2,
@@ -536,13 +540,15 @@ export default function TopicStudy() {
   }, [allSubmitted, topicId, markTopicComplete]);
 
   const progress = topicId ? getTopicProgress(topicId) : 0;
+  const normalizedTopicTitle = normalizeEscapedSingleLineText(topic?.title || "");
+  const normalizedTopicDescription = normalizeEscapedMultilineText(topic?.description || "");
   const indexedSections = useMemo<IndexedSection[]>(
     () =>
       (topic?.sections || []).map((sec, index) => ({
         index,
-        heading: sec.heading,
-        content: sec.content,
-        searchable: `${sec.heading} ${sec.content}`.toLowerCase(),
+        heading: normalizeEscapedSingleLineText(sec.heading),
+        content: normalizeEscapedMultilineText(sec.content),
+        searchable: `${normalizeEscapedSingleLineText(sec.heading)} ${normalizeEscapedMultilineText(sec.content)}`.toLowerCase(),
       })),
     [topic],
   );
@@ -634,13 +640,15 @@ export default function TopicStudy() {
             <ChevronLeft className="w-4 h-4" />
             Back to all topics
           </Link>
-          <h1 className="text-2xl md:text-3xl font-bold mb-2">{topic.title}</h1>
+          <h1 className="text-2xl md:text-3xl font-bold mb-2">{normalizedTopicTitle}</h1>
           <div className="mb-2">
             <span className="inline-flex items-center rounded-full bg-udemy-purple/20 px-2.5 py-1 text-xs font-semibold text-udemy-purple-light">
               {TRACK_LABELS[topic.track] || topic.track || "Topic"}
             </span>
           </div>
-          <p className="text-gray-400 text-sm max-w-2xl">{topic.description}</p>
+          <p className="text-gray-400 text-sm max-w-2xl whitespace-pre-line">
+            {normalizedTopicDescription}
+          </p>
           <div className="mt-4">
             <ProgressBar percent={progress} className="max-w-md" />
           </div>
@@ -769,11 +777,15 @@ export default function TopicStudy() {
                   )}
                 </div>
                 {curriculumProgress && (
-                  <p className="text-xs text-udemy-text-muted mt-3">{curriculumProgress}</p>
+                  <p className="text-xs text-udemy-text-muted mt-3 whitespace-pre-line">
+                    {normalizeEscapedMultilineText(curriculumProgress)}
+                  </p>
                 )}
                 {curriculumError && (
                   <div className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    {curriculumError}
+                    <span className="whitespace-pre-line">
+                      {normalizeEscapedMultilineText(curriculumError)}
+                    </span>
                   </div>
                 )}
                 {generatingCurriculum && (
@@ -783,7 +795,7 @@ export default function TopicStudy() {
                         key={`${sec.index}-${sec.heading}`}
                         className="text-xs border border-udemy-border rounded px-2 py-1"
                       >
-                        {sec.index}. {sec.heading}
+                        {sec.index}. {normalizeEscapedSingleLineText(sec.heading)}
                       </div>
                     ))}
                   </div>
@@ -805,7 +817,7 @@ export default function TopicStudy() {
               >
                 <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-udemy-purple" />
-                  {topic.sections[activeSection].heading}
+                  {normalizeEscapedSingleLineText(topic.sections[activeSection].heading)}
                 </h2>
                 <MarkdownRenderer
                   content={topic.sections[activeSection].content}
@@ -978,17 +990,21 @@ export default function TopicStudy() {
                   return (
                     <motion.div key={qa.question_id} variants={cardVariants}>
                       <WordHighlightChat
-                        contextQuestion={qa.question}
+                        contextQuestion={normalizeEscapedSingleLineText(qa.question)}
                         contextAnswer={qa.answer}
                         sessionKey={`study:${topic.id}`}
                         topicId={topic.id}
-                        topicTitle={topic.title}
+                        topicTitle={normalizedTopicTitle}
                         topicTrack={topic.track}
-                        sectionTitle={qa.source_section || topic.sections[activeSection]?.heading}
+                        sectionTitle={normalizeEscapedSingleLineText(
+                          qa.source_section || topic.sections[activeSection]?.heading || "",
+                        )}
                         mode="study"
                         showFloatingTrigger={expandedQ === null ? idx === 0 : expandedQ === idx}
                         floatingTriggerWord={
-                          qa.source_section || topic.sections[activeSection]?.heading || topic.title
+                          normalizeEscapedSingleLineText(
+                            qa.source_section || topic.sections[activeSection]?.heading || normalizedTopicTitle,
+                          )
                         }
                         floatingTriggerPrompt="Explain this section in an organized way with practical examples and key tradeoffs."
                         responseDetail={responseDetail}
@@ -1014,7 +1030,7 @@ export default function TopicStudy() {
                               data-word-chat-target="true"
                               className="font-medium text-[15px] leading-relaxed"
                             >
-                              {qa.question}
+                              {normalizeEscapedSingleLineText(qa.question)}
                             </p>
                             <div className="flex items-center gap-2 mt-2">
                               <DifficultyBadge difficulty={qa.difficulty} />
@@ -1112,22 +1128,28 @@ export default function TopicStudy() {
                                         <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
                                           Learning Objective
                                         </h4>
-                                        <p className="text-sm">{qa.learning_objective}</p>
+                                        <p className="text-sm">
+                                          {normalizeEscapedSingleLineText(qa.learning_objective)}
+                                        </p>
                                       </div>
                                       <div className="bg-white border border-udemy-border rounded-lg p-3">
                                         <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
                                           Misconception Trap
                                         </h4>
-                                        <p className="text-sm">{qa.misconception_trap}</p>
+                                        <p className="text-sm">
+                                          {normalizeEscapedSingleLineText(qa.misconception_trap)}
+                                        </p>
                                       </div>
                                       <div className="bg-white border border-udemy-border rounded-lg p-3 md:col-span-2">
                                         <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
                                           Source Grounding
                                         </h4>
                                         <p className="text-xs text-udemy-text-muted mb-1">
-                                          Section: {qa.source_section}
+                                          Section: {normalizeEscapedSingleLineText(qa.source_section)}
                                         </p>
-                                        <p className="text-sm italic">&ldquo;{qa.source_quote}&rdquo;</p>
+                                        <p className="text-sm italic whitespace-pre-line">
+                                          &ldquo;{normalizeEscapedMultilineText(qa.source_quote)}&rdquo;
+                                        </p>
                                       </div>
                                     </div>
                                   </>
