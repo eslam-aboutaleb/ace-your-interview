@@ -157,14 +157,14 @@ export default function Dashboard() {
     >
       {/* Hero banner */}
       <div className="bg-udemy-dark text-white">
-        <div className="max-w-[1340px] mx-auto px-6 py-10">
+        <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
             <h1 className="text-3xl md:text-4xl font-bold mb-3">
-              Ace Your Interview
+              Too lazy for this interview
             </h1>
             <p className="text-gray-300 text-lg max-w-2xl mb-6">
               Practice backend, frontend, system design (including
@@ -215,7 +215,7 @@ export default function Dashboard() {
       </div>
 
       {curriculumNoticePending && (
-        <div className="max-w-[1340px] mx-auto px-6 pt-4">
+        <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-4">
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-3">
             <span>Curriculum updated; progress restarted.</span>
             <button
@@ -229,7 +229,7 @@ export default function Dashboard() {
       )}
 
       {/* Overall progress */}
-      <div className="max-w-[1340px] mx-auto px-6 -mt-3">
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 -mt-3">
         <div className="bg-white rounded-lg shadow-card p-4 flex items-center gap-4">
           <span className="text-sm font-semibold text-udemy-text-muted whitespace-nowrap">
             Overall Progress
@@ -243,7 +243,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="max-w-[1340px] mx-auto px-6 pt-6">
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-6">
         <div className="udemy-card p-4">
           <div className="flex flex-col md:flex-row md:items-end gap-3">
             <div className="flex-1">
@@ -277,7 +277,7 @@ export default function Dashboard() {
       </div>
 
       {/* Course grid */}
-      <div className="max-w-[1340px] mx-auto px-6 py-8">
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold">Interview Topics</h2>
           <span className="text-sm text-udemy-text-muted">
