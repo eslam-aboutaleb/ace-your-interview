@@ -60,6 +60,36 @@ class CustomTopicGeneratorTests(unittest.TestCase):
         self.assertIn("Kafka", out.sections[0]["heading"])
         self.assertTrue(out.description)
 
+    def test_generate_topic_enforces_core_coverage_dimensions(self):
+        payload = {
+            "title": "Java Interview Roadmap",
+            "description": "Java preparation path.",
+            "track": "backend",
+            "levels": ["junior", "mid", "senior"],
+            "sections": [
+                {
+                    "heading": f"Java fundamentals lesson {i}",
+                    "content": "Fundamental basics and terminology only.",
+                }
+                for i in range(1, 101)
+            ],
+        }
+        llm = FakeLLM([json.dumps(payload)])
+        generator = CustomTopicGenerator(llm)
+
+        out = asyncio.run(generator.generate_topic(topic="Java", target_sections=100))
+        headings_corpus = " ".join(str(s.get("heading", "")).lower() for s in out.sections)
+
+        self.assertIn("workflow, tooling, and delivery", headings_corpus)
+        self.assertIn("implementation patterns and integration", headings_corpus)
+        self.assertIn("debugging and root cause analysis", headings_corpus)
+        self.assertIn("testing and quality verification", headings_corpus)
+        self.assertIn("performance and scalability", headings_corpus)
+        self.assertIn("security and threat mitigation", headings_corpus)
+        self.assertIn("reliability and failure recovery", headings_corpus)
+        self.assertIn("architecture tradeoffs and system design", headings_corpus)
+        self.assertIn("operations, observability, and runbooks", headings_corpus)
+
 
 if __name__ == "__main__":
     unittest.main()

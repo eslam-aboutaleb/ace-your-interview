@@ -705,44 +705,44 @@ export default function TopicStudy() {
                               className="overflow-hidden"
                             >
                               <div className="px-5 pb-5 pt-0 border-t border-udemy-border">
-                                <div className="mt-4 bg-white rounded-lg p-4 border border-udemy-border">
-                                  <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
-                                    {settings.requireAnswerReveal
-                                      ? "Your Attempt (Before Reveal)"
-                                      : "Your Attempt"}
-                                  </h4>
-                                  <textarea
-                                    value={answerDrafts[idx] || ""}
-                                    onChange={(e) =>
-                                      setAnswerDrafts((prev) => ({
-                                        ...prev,
-                                        [idx]: e.target.value,
-                                      }))
-                                    }
-                                    rows={4}
-                                    placeholder="Type your answer in your own words..."
-                                    className="w-full border border-udemy-border rounded p-3 text-sm"
-                                  />
-                                  <div className="mt-3">
-                                    <label className="text-xs font-medium text-udemy-text-muted block mb-1">
-                                      Confidence: {confidenceByIdx[idx] || 3}/5
-                                    </label>
-                                    <input
-                                      type="range"
-                                      min={1}
-                                      max={5}
-                                      step={1}
-                                      value={confidenceByIdx[idx] || 3}
+                                {settings.requireAnswerReveal && (
+                                  <div className="mt-4 bg-white rounded-lg p-4 border border-udemy-border">
+                                    <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
+                                      Your Attempt (Before Reveal)
+                                    </h4>
+                                    <textarea
+                                      value={answerDrafts[idx] || ""}
                                       onChange={(e) =>
-                                        setConfidenceByIdx((prev) => ({
+                                        setAnswerDrafts((prev) => ({
                                           ...prev,
-                                          [idx]: Number(e.target.value),
+                                          [idx]: e.target.value,
                                         }))
                                       }
-                                      className="w-full accent-udemy-purple"
+                                      rows={4}
+                                      placeholder="Type your answer in your own words..."
+                                      className="w-full border border-udemy-border rounded p-3 text-sm"
                                     />
+                                    <div className="mt-3">
+                                      <label className="text-xs font-medium text-udemy-text-muted block mb-1">
+                                        Confidence: {confidenceByIdx[idx] || 3}/5
+                                      </label>
+                                      <input
+                                        type="range"
+                                        min={1}
+                                        max={5}
+                                        step={1}
+                                        value={confidenceByIdx[idx] || 3}
+                                        onChange={(e) =>
+                                          setConfidenceByIdx((prev) => ({
+                                            ...prev,
+                                            [idx]: Number(e.target.value),
+                                          }))
+                                        }
+                                        className="w-full accent-udemy-purple"
+                                      />
+                                    </div>
                                   </div>
-                                </div>
+                                )}
 
                                 {!isAnswerVisible && (
                                   <button
