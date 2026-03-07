@@ -8,6 +8,10 @@ import {
   isCustomTopicStreamError,
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
+import {
+  normalizeEscapedMultilineText,
+  normalizeEscapedSingleLineText,
+} from "@/utils/textNormalization";
 
 type StreamedSection = {
   index: number;
@@ -141,7 +145,9 @@ export default function CustomTopicBuild() {
         </div>
 
         <div className="mt-4 text-sm">
-          <p className="text-udemy-text-muted">{progressMessage}</p>
+          <p className="text-udemy-text-muted whitespace-pre-line">
+            {normalizeEscapedMultilineText(progressMessage)}
+          </p>
           <p className="mt-1 font-medium">
             Generated sections: {generatedCount} / {targetSections}
           </p>
@@ -150,7 +156,9 @@ export default function CustomTopicBuild() {
         {errorMsg && (
           <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <div>{errorMsg}</div>
+            <div className="whitespace-pre-line">
+              {normalizeEscapedMultilineText(errorMsg)}
+            </div>
           </div>
         )}
 
@@ -168,7 +176,7 @@ export default function CustomTopicBuild() {
                   className="rounded border border-udemy-border px-3 py-2"
                 >
                   <p className="text-sm font-semibold">
-                    {sec.index}. {sec.heading}
+                    {sec.index}. {normalizeEscapedSingleLineText(sec.heading)}
                   </p>
                 </div>
               ))

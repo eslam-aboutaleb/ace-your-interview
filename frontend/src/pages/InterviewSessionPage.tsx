@@ -10,6 +10,7 @@ import {
 } from "@/services/api";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
+import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
 import type { InterviewSessionResponse, InterviewTurnResponse } from "@/types";
 
 export default function InterviewSessionPage() {
@@ -212,8 +213,10 @@ export default function InterviewSessionPage() {
 
         <div className="udemy-card p-6">
           <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-2">Current Question</h2>
-          <p className="text-lg font-medium leading-relaxed">
-            {data.session.current_question || "Generating next question..."}
+          <p className="text-lg font-medium leading-relaxed whitespace-pre-line">
+            {normalizeEscapedMultilineText(
+              data.session.current_question || "Generating next question...",
+            )}
           </p>
           {isCoding && (
             <p className="text-xs text-udemy-text-muted mt-2">

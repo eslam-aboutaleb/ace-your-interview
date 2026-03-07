@@ -36,6 +36,10 @@ import { useProgressStore } from "@/store/progressStore";
 import DifficultyBadge from "@/components/common/DifficultyBadge";
 import WordHighlightChat from "@/components/common/WordHighlightChat";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
+import {
+  normalizeEscapedMultilineText,
+  normalizeEscapedSingleLineText,
+} from "@/utils/textNormalization";
 import type {
   InterviewLevel,
   LearningTrack,
@@ -121,7 +125,9 @@ export default function QuizMode() {
   const currentContextAnswer = current
     ? [
         current.explanation,
-        current.source_quote ? `Source quote: ${current.source_quote}` : "",
+        current.source_quote
+          ? `Source quote: ${normalizeEscapedMultilineText(current.source_quote)}`
+          : "",
       ]
         .filter(Boolean)
         .join("\n\n")
@@ -134,7 +140,15 @@ export default function QuizMode() {
 
   useEffect(() => {
     fetchTopics()
-      .then(setTopics)
+      .then((loaded) =>
+        setTopics(
+          loaded.map((topic) => ({
+            ...topic,
+            title: normalizeEscapedSingleLineText(topic.title),
+            description: normalizeEscapedSingleLineText(topic.description),
+          })),
+        ),
+      )
       .catch(() => setErrorMsg("Failed to load topics."))
       .finally(() => setLoadingTopics(false));
   }, []);
@@ -623,15 +637,19 @@ export default function QuizMode() {
                   </div>
 
                   <WordHighlightChat
-                    contextQuestion={current.question}
+                    contextQuestion={normalizeEscapedSingleLineText(current.question)}
                     contextAnswer={currentContextAnswer}
                     sessionKey={`quiz:${current.topic_id || "unknown"}`}
                     topicId={current.topic_id}
-                    topicTitle={currentTopic?.title || current.topic_id}
+                    topicTitle={
+                      normalizeEscapedSingleLineText(currentTopic?.title || current.topic_id)
+                    }
                     topicTrack={currentTopic?.track || ""}
                     mode="quiz"
                     showFloatingTrigger
-                    floatingTriggerWord={currentTopic?.title || current.topic_id}
+                    floatingTriggerWord={
+                      normalizeEscapedSingleLineText(currentTopic?.title || current.topic_id)
+                    }
                     floatingTriggerPrompt="Explain this quiz concept in an organized way and include practical tradeoffs."
                     responseDetail={currentTopicAi?.responseDetail || "concise"}
                     preferredLanguage={currentTopicAi?.preferredLanguage || ""}
@@ -643,7 +661,7 @@ export default function QuizMode() {
                       data-word-chat-target="true"
                       className="text-lg md:text-xl font-bold leading-relaxed mb-6 mt-4"
                     >
-                      {current.question}
+                      {normalizeEscapedSingleLineText(current.question)}
                     </h2>
 
                     <div className="space-y-3 mb-6">
@@ -693,7 +711,7 @@ export default function QuizMode() {
                               )}
                             </span>
                             <span className="text-[15px] leading-relaxed pt-1">
-                              {choice.text}
+                              {normalizeEscapedSingleLineText(choice.text)}
                             </span>
                           </button>
                         );
@@ -744,9 +762,9 @@ export default function QuizMode() {
                             {current.source_quote && (
                               <p
                                 data-word-chat-target="true"
-                                className="text-xs text-udemy-text-muted mt-2 italic"
+                                className="text-xs text-udemy-text-muted mt-2 italic whitespace-pre-line"
                               >
-                                Source: &ldquo;{current.source_quote}&rdquo;
+                                Source: &ldquo;{normalizeEscapedMultilineText(current.source_quote)}&rdquo;
                               </p>
                             )}
                           </div>
@@ -889,7 +907,9 @@ export default function QuizMode() {
                       className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm bg-udemy-bg rounded p-2"
                     >
                       <div className="min-w-0">
-                        <span className="font-medium">{w.topic_id}</span>
+                        <span className="font-medium">
+                          {normalizeEscapedSingleLineText(w.topic_id)}
+                        </span>
                         <span className="text-udemy-text-muted ml-2">
                           mastery {Math.round(w.mastery_score * 100)}% · due {w.due_count}
                         </span>
@@ -920,7 +940,9 @@ export default function QuizMode() {
                   const reviewTopicAi = topicAiById[q.topic_id];
                   const reviewContextAnswer = [
                     q.explanation,
-                    q.source_quote ? `Source quote: ${q.source_quote}` : "",
+                    q.source_quote
+                      ? `Source quote: ${normalizeEscapedMultilineText(q.source_quote)}`
+                      : "",
                   ]
                     .filter(Boolean)
                     .join("\n\n");
@@ -932,11 +954,13 @@ export default function QuizMode() {
                       animate="show"
                     >
                       <WordHighlightChat
-                        contextQuestion={q.question}
+                        contextQuestion={normalizeEscapedSingleLineText(q.question)}
                         contextAnswer={reviewContextAnswer}
                         sessionKey={`quiz:${q.topic_id || "unknown"}`}
                         topicId={q.topic_id}
-                        topicTitle={reviewTopic?.title || q.topic_id}
+                        topicTitle={
+                          normalizeEscapedSingleLineText(reviewTopic?.title || q.topic_id)
+                        }
                         topicTrack={reviewTopic?.track || ""}
                         mode="quiz"
                         responseDetail={reviewTopicAi?.responseDetail || "concise"}
@@ -966,7 +990,7 @@ export default function QuizMode() {
                                 data-word-chat-target="true"
                                 className="text-sm font-medium line-clamp-2"
                               >
-                                {q.question}
+                                {normalizeEscapedSingleLineText(q.question)}
                               </p>
                               <div className="flex items-center gap-2 mt-1">
                                 <span
@@ -1029,9 +1053,9 @@ export default function QuizMode() {
                                       </div>
                                       <p
                                         data-word-chat-target="true"
-                                        className="text-xs text-udemy-text-muted mt-2 italic"
+                                        className="text-xs text-udemy-text-muted mt-2 italic whitespace-pre-line"
                                       >
-                                        Source: &ldquo;{q.source_quote}&rdquo;
+                                        Source: &ldquo;{normalizeEscapedMultilineText(q.source_quote)}&rdquo;
                                       </p>
                                     </div>
                                   )}
