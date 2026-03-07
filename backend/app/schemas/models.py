@@ -91,6 +91,8 @@ class LLMConfigRequest(BaseModel):
 class GenerateQuestionsRequest(BaseModel):
     topic_id: str
     count: int = Field(default=5, ge=1, le=100)
+    requested_total_count: Optional[int] = Field(default=None, ge=1, le=100)
+    existing_questions: list[str] = Field(default_factory=list, max_length=200)
     difficulty: Optional[str] = Field(default=None, pattern="^(easy|medium|hard)$")
     level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
     response_detail: Optional[ResponseDetailEnum] = None

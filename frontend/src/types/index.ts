@@ -191,6 +191,8 @@ export interface LLMConfig {
 export interface GenerateQuestionsRequest {
   topic_id: string;
   count: number;
+  requested_total_count?: number;
+  existing_questions?: string[];
   difficulty?: string;
   level?: InterviewLevel | null;
   response_detail?: ResponseDetail;

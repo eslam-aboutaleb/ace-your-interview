@@ -1,8 +1,11 @@
+import asyncio
+import json
 import unittest
 
 from app.services.question_generator import (
     _build_prompt,
     _build_quiz_prompt,
+    _collect_with_retries,
     _validate_question_item,
     _validate_quiz_item,
 )
@@ -68,21 +71,89 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
         self.assertFalse(valid2)
         self.assertEqual(issue2, "mcq_labels_must_be_abcd")
 
-    def test_question_level_mismatch_rejected(self):
+    def test_question_level_and_difficulty_are_coerced_for_reliability(self):
         item = {
             "question": "How would you design retries for this API?",
             "answer": "Use bounded retries with backoff and jitter while keeping idempotency guarantees and observability metrics.",
-            "difficulty": "medium",
-            "learning_objective": "Evaluate reliability reasoning.",
-            "source_section": "Retries",
-            "source_quote": "Retries must be bounded to avoid overload.",
-            "misconception_trap": "Assuming retries are always safe.",
-            "reasoning_summary": "Retries need limits and idempotency.",
+            "difficulty": "hard",
             "target_level": "senior",
         }
         valid, issue = _validate_question_item(item, "topic-reliability", "medium", "junior")
-        self.assertFalse(valid)
-        self.assertEqual(issue, "level_mismatch")
+        self.assertTrue(valid, issue)
+        self.assertEqual(item["difficulty"], "medium")
+        self.assertEqual(item["target_level"], "junior")
+        self.assertTrue(item["learning_objective"])
+        self.assertTrue(item["source_section"])
+        self.assertTrue(item["source_quote"])
+        self.assertTrue(item["misconception_trap"])
+        self.assertTrue(item["reasoning_summary"])
+
+    def test_collect_with_retries_respects_existing_questions_seed(self):
+        class FakeLLM:
+            def __init__(self):
+                self.calls = 0
+
+            async def completion(self, prompt, llm_config=None, user_identity=None):
+                self.calls += 1
+                if self.calls == 1:
+                    payload = [
+                        {
+                            "question": "How would you design retries for this API?",
+                            "answer": "Use bounded retries with backoff and jitter while keeping idempotency guarantees and observability metrics.",
+                            "difficulty": "medium",
+                            "learning_objective": "Evaluate reliability reasoning.",
+                            "source_section": "Retries",
+                            "source_quote": "Retries must be bounded to avoid overload.",
+                            "misconception_trap": "Assuming retries are always safe.",
+                            "reasoning_summary": "Retries need limits and idempotency.",
+                            "target_level": "mid",
+                        }
+                    ]
+                else:
+                    payload = [
+                        {
+                            "question": "When should idempotency keys be required?",
+                            "answer": "Require idempotency keys for externally retried write operations to prevent duplicate side effects and support safe retries under network uncertainty.",
+                            "difficulty": "medium",
+                            "learning_objective": "Identify safe retry boundaries.",
+                            "source_section": "Reliability",
+                            "source_quote": "Idempotency prevents duplicate mutation effects.",
+                            "misconception_trap": "Assuming retries are harmless without idempotency.",
+                            "reasoning_summary": "Map retries to mutation safety guarantees.",
+                            "target_level": "mid",
+                        }
+                    ]
+                return {
+                    "success": True,
+                    "analysis": json.dumps(payload),
+                    "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
+                    "error": "",
+                }
+
+        prompt = _build_prompt(
+            topic_id="topic-reliability",
+            topic_title="Reliability",
+            doc_content="Retries and idempotency guidance.",
+            count=1,
+            level="mid",
+            requested_total_count=5,
+            existing_questions=["How would you design retries for this API?"],
+        )
+        validator = lambda item: _validate_question_item(
+            item, "topic-reliability", "medium", "mid"
+        )
+        items, _stats = asyncio.run(
+            _collect_with_retries(
+                llm=FakeLLM(),
+                base_prompt=prompt,
+                target_count=1,
+                llm_config=None,
+                validator=validator,
+                existing_questions=["How would you design retries for this API?"],
+            )
+        )
+        self.assertEqual(len(items), 1)
+        self.assertIn("idempotency", items[0]["question"].lower())
 
     def test_question_prompt_requires_adaptive_markdown_answers(self):
         prompt = _build_prompt(

@@ -300,6 +300,7 @@ export default function TopicStudy() {
       const activeS = topic.sections[activeSection];
       const basePayload = {
         topic_id: topicId,
+        requested_total_count: questionCount,
         difficulty: difficulty || undefined,
         level,
         response_detail: responseDetail,
@@ -321,14 +322,15 @@ export default function TopicStudy() {
       };
       const payloadWithCount = (
         count: number,
-        opts?: { includeSection?: boolean },
+        opts?: { includeSection?: boolean; existingQuestions?: string[] },
       ) => {
         const includeSection = opts?.includeSection !== false;
+        const existingQuestions = opts?.existingQuestions || [];
         if (!includeSection) {
           const { section_title, section_content, ...rest } = basePayload;
-          return { ...rest, count };
+          return { ...rest, count, existing_questions: existingQuestions };
         }
-        return { ...basePayload, count };
+        return { ...basePayload, count, existing_questions: existingQuestions };
       };
       const questionKey = (q: Pick<QuestionAnswerV2, "question">) =>
         q.question.trim().toLowerCase().replace(/\s+/g, " ");
@@ -377,13 +379,14 @@ export default function TopicStudy() {
           if (controller.signal.aborted || merged.length >= questionCount) break;
           const includeSection = mode === "section";
 
-          for (let attempt = 0; attempt < 2; attempt += 1) {
+          for (let attempt = 0; attempt < 4; attempt += 1) {
             if (controller.signal.aborted || merged.length >= questionCount) break;
             const remaining = questionCount - merged.length;
+            const existingQuestions = merged.map((q) => q.question);
 
             try {
               const res = await generateQuestionsV2(
-                payloadWithCount(remaining, { includeSection }),
+                payloadWithCount(remaining, { includeSection, existingQuestions }),
               );
               merged = mergeUniqueQuestions(merged, res.questions).slice(0, questionCount);
               setProviderInfo({
@@ -400,7 +403,10 @@ export default function TopicStudy() {
 
             try {
               const legacy = await generateQuestions(
-                payloadWithCount(questionCount - merged.length, { includeSection }),
+                payloadWithCount(questionCount - merged.length, {
+                  includeSection,
+                  existingQuestions: merged.map((q) => q.question),
+                }),
               );
               const upgraded = mapLegacyQuestions(legacy, merged.length);
               merged = mergeUniqueQuestions(merged, upgraded).slice(0, questionCount);
@@ -422,7 +428,7 @@ export default function TopicStudy() {
       const streamedQuestions: QuestionAnswerV2[] = [];
       try {
         await generateQuestionsV2Stream(
-          payloadWithCount(questionCount),
+          payloadWithCount(questionCount, { existingQuestions: [] }),
           {
             onQuestion: (event) => {
               const merged = mergeUniqueQuestions(streamedQuestions, [event.question]);
