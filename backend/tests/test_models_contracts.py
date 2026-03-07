@@ -2,9 +2,12 @@ import unittest
 
 from app.schemas.models import (
     CreateCustomTopicRequest,
+    CreateInterviewSessionRequest,
+    FeedbackModeEnum,
     GenerateQuestionsRequest,
     GenerateQuizRequest,
     GenerateTopicContentRequest,
+    InterviewerStyleEnum,
     InterviewTrendsResponse,
     InterviewTypeEnum,
     StudyPlanResponse,
@@ -30,6 +33,11 @@ class ModelContractTests(unittest.TestCase):
 
     def test_interview_type_supports_coding(self):
         self.assertEqual(InterviewTypeEnum.CODING.value, "coding")
+
+    def test_interview_session_request_defaults_style_and_feedback(self):
+        req = CreateInterviewSessionRequest(track="backend")
+        self.assertEqual(req.interviewer_style, InterviewerStyleEnum.NEUTRAL)
+        self.assertEqual(req.feedback_mode, FeedbackModeEnum.CONCISE)
 
     def test_study_plan_response_contract(self):
         payload = StudyPlanResponse(

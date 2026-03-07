@@ -10,6 +10,9 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+_DEFAULT_INTERVIEWER_STYLE = "neutral"
+_DEFAULT_FEEDBACK_MODE = "concise"
+
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -42,6 +45,8 @@ class InterviewStore:
                     turns_completed INTEGER NOT NULL,
                     status TEXT NOT NULL,
                     target_role TEXT NOT NULL,
+                    interviewer_style TEXT NOT NULL DEFAULT 'neutral',
+                    feedback_mode TEXT NOT NULL DEFAULT 'concise',
                     job_description_text TEXT NOT NULL,
                     resume_summary_text TEXT NOT NULL,
                     focus_areas_json TEXT NOT NULL,
@@ -93,6 +98,16 @@ class InterviewStore:
                 ON interview_turns(session_id, turn_index)
                 """
             )
+            existing_columns = {
+                str(row["name"]) for row in self._conn.execute("PRAGMA table_info(interview_sessions)").fetchall()
+            }
+            required_columns = {
+                "interviewer_style": "TEXT NOT NULL DEFAULT 'neutral'",
+                "feedback_mode": "TEXT NOT NULL DEFAULT 'concise'",
+            }
+            for column, ddl in required_columns.items():
+                if column not in existing_columns:
+                    self._conn.execute(f"ALTER TABLE interview_sessions ADD COLUMN {column} {ddl}")
 
     @staticmethod
     def _loads_list(raw: str) -> list[str]:
@@ -128,6 +143,10 @@ class InterviewStore:
             "turns_completed": int(row["turns_completed"]),
             "status": row["status"],
             "target_role": row["target_role"],
+            "interviewer_style": (
+                row["interviewer_style"] if "interviewer_style" in row.keys() else _DEFAULT_INTERVIEWER_STYLE
+            ),
+            "feedback_mode": row["feedback_mode"] if "feedback_mode" in row.keys() else _DEFAULT_FEEDBACK_MODE,
             "focus_areas": self._loads_list(row["focus_areas_json"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -147,6 +166,8 @@ class InterviewStore:
         job_description_text: str,
         resume_summary_text: str,
         focus_areas: list[str],
+        interviewer_style: str = _DEFAULT_INTERVIEWER_STYLE,
+        feedback_mode: str = _DEFAULT_FEEDBACK_MODE,
     ) -> dict[str, Any]:
         now = _utc_now_iso()
         session_id = f"is_{uuid.uuid4().hex[:16]}"
@@ -159,10 +180,11 @@ class InterviewStore:
                     INSERT INTO interview_sessions(
                         session_id, user_id, track, level, interview_type,
                         turn_count, turns_completed, status,
-                        target_role, job_description_text, resume_summary_text,
+                        target_role, interviewer_style, feedback_mode,
+                        job_description_text, resume_summary_text,
                         focus_areas_json, asked_questions_json,
                         current_question, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -173,6 +195,8 @@ class InterviewStore:
                         turn_count,
                         "active",
                         target_role,
+                        interviewer_style,
+                        feedback_mode,
                         job_description_text,
                         resume_summary_text,
                         self._dumps(focus),
@@ -191,6 +215,8 @@ class InterviewStore:
             "turns_completed": 0,
             "status": "active",
             "target_role": target_role,
+            "interviewer_style": interviewer_style,
+            "feedback_mode": feedback_mode,
             "focus_areas": focus,
             "created_at": now,
             "updated_at": now,

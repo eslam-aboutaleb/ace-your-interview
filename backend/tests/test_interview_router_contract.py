@@ -66,6 +66,26 @@ class InterviewRouterContractTests(unittest.TestCase):
                 payload = create_res.json()
                 session_id = payload["session"]["session_id"]
                 self.assertTrue(payload["session"]["current_question"])
+                self.assertEqual(payload["session"]["interviewer_style"], "neutral")
+                self.assertEqual(payload["session"]["feedback_mode"], "concise")
+
+                explicit_res = client.post(
+                    "/api/interview-sessions",
+                    json={
+                        "track": "backend",
+                        "level": "mid",
+                        "interview_type": "behavioral",
+                        "turn_count": 1,
+                        "target_role": "Backend Engineer",
+                        "interviewer_style": "challenging",
+                        "feedback_mode": "deep",
+                        "focus_areas": ["leadership"],
+                    },
+                )
+                self.assertEqual(explicit_res.status_code, 200)
+                explicit_payload = explicit_res.json()
+                self.assertEqual(explicit_payload["session"]["interviewer_style"], "challenging")
+                self.assertEqual(explicit_payload["session"]["feedback_mode"], "deep")
 
                 answer_res = client.post(
                     f"/api/interview-sessions/{session_id}/answer",

@@ -93,6 +93,8 @@ async def create_session(
         interview_type=body.interview_type.value,
         turn_count=body.turn_count,
         target_role=body.target_role.strip(),
+        interviewer_style=body.interviewer_style.value,
+        feedback_mode=body.feedback_mode.value,
         job_description_text=body.job_description_text.strip(),
         resume_summary_text=body.resume_summary_text.strip(),
         focus_areas=[x.strip() for x in body.focus_areas if x.strip()],
