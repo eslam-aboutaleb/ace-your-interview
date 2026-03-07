@@ -4,7 +4,6 @@ import {
   BookOpen,
   Settings,
   BarChart3,
-  GraduationCap,
   ListChecks,
   MessageSquare,
   LogOut,
@@ -33,9 +32,10 @@ export default function Header() {
             to="/"
             className="flex items-center gap-2.5 hover:opacity-90 transition-opacity"
           >
-            <GraduationCap className="w-8 h-8 text-udemy-purple-light" />
+            <span className="text-2xl">😴</span>
             <span className="hidden sm:inline text-lg font-bold tracking-tight">
-              Ace Your <span className="text-udemy-purple-light">Interview</span>
+              Too lazy for this{" "}
+              <span className="text-udemy-purple-light">interview</span>
             </span>
           </Link>
 
@@ -107,7 +107,9 @@ export default function Header() {
                   strokeLinecap="round"
                   strokeDasharray="97.39"
                   initial={{ strokeDashoffset: 97.39 }}
-                  animate={{ strokeDashoffset: 97.39 - (97.39 * progress) / 100 }}
+                  animate={{
+                    strokeDashoffset: 97.39 - (97.39 * progress) / 100,
+                  }}
                   transition={{ type: "spring", stiffness: 100, damping: 15 }}
                 />
               </svg>
@@ -136,14 +138,23 @@ export default function Header() {
           <Link to="/quiz" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
             <ListChecks className="w-4 h-4 sm:w-5 sm:h-5" />
           </Link>
-          <Link to="/interview" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
+          <Link
+            to="/interview"
+            className="p-1.5 sm:p-2 hover:bg-white/10 rounded"
+          >
             <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
           </Link>
-          <Link to="/user-settings" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
+          <Link
+            to="/user-settings"
+            className="p-1.5 sm:p-2 hover:bg-white/10 rounded"
+          >
             <User className="w-4 h-4 sm:w-5 sm:h-5" />
           </Link>
           {user?.is_admin && (
-            <Link to="/settings" className="p-1.5 sm:p-2 hover:bg-white/10 rounded">
+            <Link
+              to="/settings"
+              className="p-1.5 sm:p-2 hover:bg-white/10 rounded"
+            >
               <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
             </Link>
           )}

@@ -347,7 +347,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1280px] mx-auto px-6 py-8">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1280px] mx-auto px-4 sm:px-6 py-8">
       <div className="udemy-card p-6 mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-3">
           <SettingsIcon className="w-6 h-6 text-udemy-purple" />
@@ -387,7 +387,7 @@ export default function SettingsPage() {
                   </div>
                 ))}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="text"
                   placeholder="github-username"
@@ -399,7 +399,7 @@ export default function SettingsPage() {
                 <button
                   onClick={() => handleAddUser("github")}
                   disabled={loadingAllowed || !newGithubUser.trim()}
-                  className="btn-secondary text-xs flex items-center gap-1 px-3 py-2"
+                  className="btn-secondary w-full sm:w-auto justify-center text-xs flex items-center gap-1 px-3 py-2"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   Add
@@ -426,7 +426,7 @@ export default function SettingsPage() {
                   </div>
                 ))}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="email"
                   placeholder="user@gmail.com"
@@ -438,7 +438,7 @@ export default function SettingsPage() {
                 <button
                   onClick={() => handleAddUser("google")}
                   disabled={loadingAllowed || !newGoogleEmail.trim()}
-                  className="btn-secondary text-xs flex items-center gap-1 px-3 py-2"
+                  className="btn-secondary w-full sm:w-auto justify-center text-xs flex items-center gap-1 px-3 py-2"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   Add
@@ -476,7 +476,7 @@ export default function SettingsPage() {
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="text"
                     placeholder="github-username"
@@ -488,7 +488,7 @@ export default function SettingsPage() {
                   <button
                     onClick={() => handleAddLlmServiceUser("github")}
                     disabled={loadingLlmService || !newLlmGithubUser.trim()}
-                    className="btn-secondary text-xs flex items-center gap-1 px-3 py-2"
+                    className="btn-secondary w-full sm:w-auto justify-center text-xs flex items-center gap-1 px-3 py-2"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Add
@@ -515,7 +515,7 @@ export default function SettingsPage() {
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="email"
                     placeholder="user@gmail.com"
@@ -527,7 +527,7 @@ export default function SettingsPage() {
                   <button
                     onClick={() => handleAddLlmServiceUser("google")}
                     disabled={loadingLlmService || !newLlmGoogleEmail.trim()}
-                    className="btn-secondary text-xs flex items-center gap-1 px-3 py-2"
+                    className="btn-secondary w-full sm:w-auto justify-center text-xs flex items-center gap-1 px-3 py-2"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Add
@@ -747,7 +747,7 @@ function StatusRow({
   version: string;
 }) {
   return (
-    <div className="flex items-center justify-between p-3 bg-udemy-bg rounded-lg">
+    <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-udemy-bg rounded-lg">
       <div className="flex items-center gap-2">
         {ok ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-red-500" />}
         <span className="text-sm font-medium">{label}</span>

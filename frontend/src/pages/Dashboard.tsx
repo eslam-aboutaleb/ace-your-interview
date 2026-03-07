@@ -8,7 +8,6 @@ import {
   Sparkles,
   ChevronRight,
   MessageSquare,
-  Loader2,
 } from "lucide-react";
 import {
   containerVariants,
@@ -17,13 +16,11 @@ import {
   pageTransition,
 } from "@/utils/animations";
 import {
-  createCustomTopic,
   fetchInterviewStats,
   fetchTopicMastery,
   fetchTopics,
 } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
-import { useSettingsStore } from "@/store/settingsStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
 import type { TopicSummary } from "@/types";
@@ -62,11 +59,9 @@ const TRACK_LABELS: Record<string, string> = {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const settings = useSettingsStore();
   const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [customTopic, setCustomTopic] = useState("");
-  const [creatingCustom, setCreatingCustom] = useState(false);
   const [customError, setCustomError] = useState("");
   const [interviewStats, setInterviewStats] = useState({
     total_sessions: 0,
@@ -114,34 +109,18 @@ export default function Dashboard() {
       });
   }, [loadTopics, setMastery]);
 
-  const handleCreateCustomTopic = async () => {
+  const handleCreateCustomTopic = () => {
     const topic = customTopic.trim();
     if (topic.length < 2) {
-      setCustomError("Please enter at least 2 characters for the custom topic.");
+      setCustomError(
+        "Please enter at least 2 characters for the custom topic.",
+      );
       return;
     }
 
-    setCreatingCustom(true);
     setCustomError("");
-    try {
-      const created = await createCustomTopic({
-        topic,
-        llm_config: {
-          provider: settings.provider,
-          model: settings.model,
-          temperature: settings.temperature,
-          max_tokens: settings.maxTokens,
-        },
-      });
-      await loadTopics();
-      setCustomTopic("");
-      navigate(`/topics/${created.id}`);
-    } catch (err) {
-      console.error(err);
-      setCustomError("Could not generate the custom topic roadmap. Please try again.");
-    } finally {
-      setCreatingCustom(false);
-    }
+    setCustomTopic("");
+    navigate(`/topics/custom/build?topic=${encodeURIComponent(topic)}`);
   };
 
   const progress = totalProgress();
@@ -216,7 +195,7 @@ export default function Dashboard() {
 
       {curriculumNoticePending && (
         <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-4">
-          <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-3">
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <span>Curriculum updated; progress restarted.</span>
             <button
               onClick={dismissCurriculumNotice}
@@ -261,11 +240,9 @@ export default function Dashboard() {
             </div>
             <button
               onClick={handleCreateCustomTopic}
-              disabled={creatingCustom}
-              className="btn-primary min-w-[220px] disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              className="btn-primary w-full sm:w-auto sm:min-w-[220px] inline-flex items-center justify-center gap-2"
             >
-              {creatingCustom && <Loader2 className="w-4 h-4 animate-spin" />}
-              {creatingCustom ? "Analyzing..." : "Analyze & Build Roadmap"}
+              Analyze & Build Roadmap
             </button>
           </div>
           {customError && (
@@ -278,7 +255,7 @@ export default function Dashboard() {
 
       {/* Course grid */}
       <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
           <h2 className="text-xl font-bold">Interview Topics</h2>
           <span className="text-sm text-udemy-text-muted">
             {topics.length} topics &middot; {completedCount} completed
@@ -330,7 +307,9 @@ export default function Dashboard() {
 
                         <div className="mb-3">
                           <span className="inline-flex items-center rounded-full bg-udemy-purple/10 px-2 py-1 text-[11px] font-semibold text-udemy-purple">
-                            {TRACK_LABELS[topic.track] || topic.track || "Topic"}
+                            {TRACK_LABELS[topic.track] ||
+                              topic.track ||
+                              "Topic"}
                           </span>
                         </div>
 

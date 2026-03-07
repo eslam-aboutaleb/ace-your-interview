@@ -280,8 +280,7 @@ export default function WordHighlightChat({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
-            className="absolute right-0 top-0 z-50 w-[380px] h-[480px] max-h-[75vh] bg-white rounded-xl shadow-2xl border border-udemy-border flex flex-col overflow-hidden max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:h-[62vh] max-sm:max-h-[72vh] max-sm:w-auto"
-            style={{ maxWidth: "calc(100vw - 2rem)" }}
+            className="fixed inset-x-2 z-50 bottom-[calc(0.5rem+var(--sab))] h-[68dvh] max-h-[calc(100dvh-1rem-var(--sab))] bg-white rounded-xl shadow-2xl border border-udemy-border flex flex-col overflow-hidden sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-0 sm:w-[380px] sm:h-[480px] sm:max-h-[75vh]"
           >
             <div className="relative sticky top-0 z-10 flex items-center px-4 py-3 pr-11 bg-udemy-purple text-white">
               <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -317,7 +316,7 @@ export default function WordHighlightChat({
                   className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[85%] rounded-lg px-3 py-2 text-[13px] leading-relaxed ${
+                    className={`max-w-[85%] rounded-lg px-3 py-2 text-[13px] leading-relaxed break-words ${
                       m.role === "user"
                         ? "bg-udemy-purple text-white rounded-br-sm"
                         : "bg-udemy-bg text-udemy-text rounded-bl-sm"
@@ -326,7 +325,7 @@ export default function WordHighlightChat({
                     {m.role === "assistant" ? (
                       <MarkdownRenderer content={m.content} compact className="text-[13px]" />
                     ) : (
-                      m.content
+                      <span className="whitespace-pre-wrap break-words">{m.content}</span>
                     )}
                   </div>
                 </motion.div>

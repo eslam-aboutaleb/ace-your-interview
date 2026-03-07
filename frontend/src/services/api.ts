@@ -5,9 +5,15 @@ import type {
   TopicSummary,
   TopicDetail,
   CreateCustomTopicRequest,
+  CustomTopicStreamDoneEvent,
+  CustomTopicStreamEvent,
+  CustomTopicStreamHandlers,
   GenerateQuestionsRequest,
   GenerateQuestionsResponse,
   GenerateQuestionsV2Response,
+  GenerateQuestionsStreamDoneEvent,
+  GenerateQuestionsStreamEvent,
+  GenerateQuestionsStreamHandlers,
   GenerateQuizRequest,
   GenerateQuizResponse,
   GenerateQuizV2Response,
@@ -80,6 +86,73 @@ function _policyCode(error: any): string {
   return "";
 }
 
+function _policyCodeFromDetail(detail: unknown): string {
+  if (typeof detail === "object" && detail && typeof (detail as any).code === "string") {
+    return (detail as any).code;
+  }
+  if (typeof detail === "string") {
+    if (detail.includes("llm_service_approval_required")) return "llm_service_approval_required";
+    if (detail.includes("study_app_llm_not_assigned")) return "study_app_llm_not_assigned";
+    if (detail.includes("personal_credential_required")) return "personal_credential_required";
+  }
+  return "";
+}
+
+function _redirectToPolicySettings(code: string) {
+  if (!code || window.location.pathname.startsWith("/user-settings")) return;
+  window.location.href = `/user-settings?policy=${encodeURIComponent(code)}`;
+}
+
+function _normalizeApiBaseUrl(): string {
+  return String(import.meta.env.VITE_API_URL || "/api").replace(/\/+$/, "");
+}
+
+function _resolveApiPath(path: string): string {
+  const base = _normalizeApiBaseUrl();
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (base.startsWith("http://") || base.startsWith("https://")) {
+    return `${base}${normalizedPath}`;
+  }
+  return `${base}${normalizedPath}`;
+}
+
+export class QuestionsStreamError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly fallbackEligible: boolean;
+
+  constructor(
+    message: string,
+    opts: { code?: string; status?: number; fallbackEligible?: boolean } = {},
+  ) {
+    super(message);
+    this.name = "QuestionsStreamError";
+    this.code = opts.code || "";
+    this.status = opts.status || 0;
+    this.fallbackEligible = !!opts.fallbackEligible;
+  }
+}
+
+export function isQuestionsStreamError(error: unknown): error is QuestionsStreamError {
+  return error instanceof QuestionsStreamError;
+}
+
+export class CustomTopicStreamError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(message: string, opts: { code?: string; status?: number } = {}) {
+    super(message);
+    this.name = "CustomTopicStreamError";
+    this.code = opts.code || "";
+    this.status = opts.status || 0;
+  }
+}
+
+export function isCustomTopicStreamError(error: unknown): error is CustomTopicStreamError {
+  return error instanceof CustomTopicStreamError;
+}
+
 // Redirect to /login on 401
 api.interceptors.response.use(
   (response) => response,
@@ -133,6 +206,115 @@ export async function createCustomTopic(
   return data;
 }
 
+export async function createCustomTopicStream(
+  req: CreateCustomTopicRequest,
+  handlers: CustomTopicStreamHandlers,
+  signal?: AbortSignal,
+): Promise<CustomTopicStreamDoneEvent> {
+  const response = await fetch(_resolveApiPath("/topics/custom/stream"), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+    signal,
+  });
+
+  if (!response.ok) {
+    let detail: unknown = null;
+    try {
+      const payload = await response.json();
+      detail = payload?.detail ?? payload;
+    } catch {
+      detail = null;
+    }
+    const policyCode = _policyCodeFromDetail(detail);
+    if (policyCode) {
+      _redirectToPolicySettings(policyCode);
+      throw new CustomTopicStreamError("LLM access policy blocked this request.", {
+        code: policyCode,
+        status: response.status,
+      });
+    }
+    throw new CustomTopicStreamError("Custom topic streaming endpoint unavailable.", {
+      code: "stream_unavailable",
+      status: response.status,
+    });
+  }
+
+  if (!response.body) {
+    throw new CustomTopicStreamError("Streaming response body is empty.", {
+      code: "stream_unavailable",
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let doneEvent: CustomTopicStreamDoneEvent | null = null;
+
+  const dispatchEvent = (event: CustomTopicStreamEvent) => {
+    if (event.type === "start") {
+      handlers.onStart?.(event);
+      return;
+    }
+    if (event.type === "progress") {
+      handlers.onProgress?.(event);
+      return;
+    }
+    if (event.type === "section") {
+      handlers.onSection?.(event);
+      return;
+    }
+    if (event.type === "done") {
+      doneEvent = event;
+      handlers.onDone?.(event);
+      return;
+    }
+    handlers.onError?.(event);
+    throw new CustomTopicStreamError(event.message || "Custom topic generation failed.", {
+      code: event.code || "generation_failed",
+      status: 200,
+    });
+  };
+
+  const parseAndDispatch = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let parsed: CustomTopicStreamEvent;
+    try {
+      parsed = JSON.parse(trimmed) as CustomTopicStreamEvent;
+    } catch {
+      throw new CustomTopicStreamError("Invalid custom topic streaming event payload.", {
+        code: "invalid_stream_payload",
+      });
+    }
+    dispatchEvent(parsed);
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      parseAndDispatch(line);
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    parseAndDispatch(tail);
+  }
+  if (!doneEvent) {
+    throw new CustomTopicStreamError(
+      "Custom topic streaming ended before completion event.",
+      { code: "incomplete_stream" },
+    );
+  }
+  return doneEvent;
+}
+
 // ── Questions ───────────────────────────────────────────────
 export async function generateQuestions(
   req: GenerateQuestionsRequest,
@@ -152,6 +334,121 @@ export async function generateQuestionsV2(
     req,
   );
   return data;
+}
+
+export async function generateQuestionsV2Stream(
+  req: GenerateQuestionsRequest,
+  handlers: GenerateQuestionsStreamHandlers,
+  signal?: AbortSignal,
+): Promise<GenerateQuestionsStreamDoneEvent> {
+  const response = await fetch(_resolveApiPath("/questions/generate-v2/stream"), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+    signal,
+  });
+
+  if (!response.ok) {
+    let detail: unknown = null;
+    try {
+      const payload = await response.json();
+      detail = payload?.detail ?? payload;
+    } catch {
+      detail = null;
+    }
+    const policyCode = _policyCodeFromDetail(detail);
+    if (policyCode) {
+      _redirectToPolicySettings(policyCode);
+      throw new QuestionsStreamError("LLM access policy blocked this request.", {
+        code: policyCode,
+        status: response.status,
+      });
+    }
+    throw new QuestionsStreamError("Streaming endpoint unavailable.", {
+      code: "stream_unavailable",
+      status: response.status,
+      fallbackEligible: response.status === 404 || response.status === 405,
+    });
+  }
+
+  if (!response.body) {
+    throw new QuestionsStreamError("Streaming response body is empty.", {
+      code: "stream_unavailable",
+      fallbackEligible: true,
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let doneEvent: GenerateQuestionsStreamDoneEvent | null = null;
+
+  const dispatchEvent = (event: GenerateQuestionsStreamEvent) => {
+    if (event.type === "start") {
+      handlers.onStart?.(event);
+      return;
+    }
+    if (event.type === "question") {
+      handlers.onQuestion?.(event);
+      return;
+    }
+    if (event.type === "done") {
+      doneEvent = event;
+      handlers.onDone?.(event);
+      return;
+    }
+    handlers.onError?.(event);
+    if (event.code === "llm_service_approval_required"
+      || event.code === "study_app_llm_not_assigned"
+      || event.code === "personal_credential_required") {
+      _redirectToPolicySettings(event.code);
+    }
+    throw new QuestionsStreamError(event.message || "Question generation failed.", {
+      code: event.code || "generation_failed",
+      status: response.status,
+      fallbackEligible: false,
+    });
+  };
+
+  const processLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let parsed: GenerateQuestionsStreamEvent;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      throw new QuestionsStreamError("Invalid streaming event payload.", {
+        code: "stream_parse_failed",
+        fallbackEligible: true,
+      });
+    }
+    dispatchEvent(parsed);
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      processLine(line);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    processLine(buffer);
+  }
+
+  if (!doneEvent) {
+    throw new QuestionsStreamError("Streaming ended before completion event.", {
+      code: "stream_incomplete",
+      fallbackEligible: true,
+    });
+  }
+  return doneEvent;
 }
 
 // ── Quiz ────────────────────────────────────────────────────
