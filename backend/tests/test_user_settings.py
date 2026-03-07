@@ -91,7 +91,7 @@ class UserSettingsRouterTests(unittest.TestCase):
         self.assertEqual(get_res.status_code, 200)
         payload = get_res.json()
         self.assertFalse(payload["has_saved_preferences"])
-        self.assertTrue(payload["preferences"]["require_answer_reveal"])
+        self.assertFalse(payload["preferences"]["require_answer_reveal"])
 
         pref_res = self.client.put(
             "/api/user-settings/preferences",

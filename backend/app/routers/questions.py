@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.dependencies import require_auth
@@ -109,6 +112,40 @@ async def generate_questions_v2(
         section_title=body.section_title,
         section_content=body.section_content,
     )
+
+
+@router.post("/generate-v2/stream")
+async def generate_questions_v2_stream(
+    body: GenerateQuestionsRequest,
+    user: dict = Depends(require_auth),
+):
+    """Generate grounded interview questions with incremental NDJSON events."""
+    llm_client, _, _ = _ensure_services()
+    if not get_settings().enable_v2_generation:
+        raise HTTPException(status_code=404, detail="v2 generation disabled")
+
+    resolved = _resolve_topic_for_user(topic_id=body.topic_id, user_id=user["user"])
+    if not resolved:
+        raise HTTPException(status_code=404, detail=f"Topic '{body.topic_id}' not found")
+    topic, doc_content = resolved
+    generator = QuestionGenerator(llm_client)
+
+    async def _event_stream():
+        async for event in generator.generate_v2_stream(
+            topic_id=body.topic_id,
+            topic_title=topic.title,
+            doc_content=doc_content,
+            count=body.count,
+            difficulty=body.difficulty,
+            level=body.level,
+            llm_config=body.llm_config,
+            user_identity=user,
+            section_title=body.section_title,
+            section_content=body.section_content,
+        ):
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(_event_stream(), media_type="application/x-ndjson")
 
 
 @router.post("/quiz/generate", response_model=GenerateQuizResponse)

@@ -300,7 +300,6 @@ Rules:
 - headings must be unique and non-overlapping
 - content must be concrete, practical, and interview-oriented
 - include architecture, implementation, debugging, performance, security/reliability, and operations where relevant
-- keep each section concise but meaningful
 """
 
 

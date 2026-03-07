@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import re
 from collections import Counter
-from typing import Any, Callable, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 
 from app.schemas.models import (
     GenerateQuestionsResponse,
@@ -23,7 +24,18 @@ from app.schemas.models import (
     QuizQuestionV2,
 )
 from app.services.llm_client import LLMClient
-from app.services.llm_policy import raise_if_policy_blocked_result
+from app.services.llm_policy import (
+    APPROVAL_REQUIRED_CODE,
+    APPROVAL_REQUIRED_MESSAGE,
+    PERSONAL_CREDENTIAL_REQUIRED_CODE,
+    PERSONAL_CREDENTIAL_REQUIRED_MESSAGE,
+    STUDY_APP_NOT_ASSIGNED_CODE,
+    STUDY_APP_NOT_ASSIGNED_MESSAGE,
+    LLMServiceApprovalRequiredError,
+    PersonalCredentialRequiredError,
+    StudyAppLLMNotAssignedError,
+    raise_if_policy_blocked_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -493,6 +505,274 @@ class QuestionGenerator:
     def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
 
+    @staticmethod
+    def _to_question_answer_v2(topic_id: str, item: dict[str, Any]) -> QuestionAnswerV2:
+        return QuestionAnswerV2(
+            question_id=_question_id(topic_id, item["question"]),
+            topic_id=topic_id,
+            question=item["question"].strip(),
+            answer=item["answer"].strip(),
+            difficulty=item["difficulty"],
+            learning_objective=item["learning_objective"].strip(),
+            source_section=item["source_section"].strip(),
+            source_quote=item["source_quote"].strip(),
+            misconception_trap=item["misconception_trap"].strip(),
+            reasoning_summary=item["reasoning_summary"].strip(),
+        )
+
+    @staticmethod
+    def _policy_error_payload(exc: Exception) -> tuple[str, str]:
+        if isinstance(exc, LLMServiceApprovalRequiredError):
+            return APPROVAL_REQUIRED_CODE, APPROVAL_REQUIRED_MESSAGE
+        if isinstance(exc, StudyAppLLMNotAssignedError):
+            return STUDY_APP_NOT_ASSIGNED_CODE, STUDY_APP_NOT_ASSIGNED_MESSAGE
+        if isinstance(exc, PersonalCredentialRequiredError):
+            return PERSONAL_CREDENTIAL_REQUIRED_CODE, PERSONAL_CREDENTIAL_REQUIRED_MESSAGE
+        return "generation_failed", str(exc).strip() or "Question generation failed"
+
+    async def generate_v2_stream(
+        self,
+        topic_id: str,
+        topic_title: str,
+        doc_content: str,
+        count: int = 5,
+        difficulty: Optional[str] = None,
+        level: Optional[str] = None,
+        llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
+        section_title: Optional[str] = None,
+        section_content: Optional[str] = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        target_count = max(0, int(count))
+        prompt_base = _build_prompt(
+            topic_title=topic_title,
+            doc_content=doc_content,
+            count=1,
+            difficulty=difficulty,
+            level=level,
+            section_title=section_title,
+            section_content=section_content,
+        )
+
+        dedup_norm: set[str] = set()
+        existing_questions: list[str] = []
+        dedup_lock = asyncio.Lock()
+        semaphore = asyncio.Semaphore(max(1, min(3, target_count or 1)))
+
+        async def _generate_one() -> dict[str, Any]:
+            retries_used = 0
+            malformed_dropped = 0
+            metadata: dict[str, Any] = {}
+            prompt = prompt_base
+            issue_counter: Counter[str] = Counter()
+            last_error = ""
+
+            try:
+                for _ in range(_MAX_ATTEMPTS):
+                    async with semaphore:
+                        result = await self.llm.completion(
+                            prompt,
+                            llm_config,
+                            user_identity=user_identity,
+                        )
+                    raise_if_policy_blocked_result(result)
+                    metadata = result.get("metadata", {})
+
+                    if not result.get("success"):
+                        retries_used += 1
+                        last_error = str(result.get("error", "unknown_error"))
+                        issue_counter["transport_or_provider_error"] += 1
+                        async with dedup_lock:
+                            existing_snapshot = list(existing_questions)
+                        prompt = _build_retry_prompt(
+                            base_prompt=prompt_base,
+                            missing_count=1,
+                            issues=f"transport_or_provider_error: {last_error}",
+                            existing_questions=existing_snapshot,
+                        )
+                        continue
+
+                    parsed = _parse_questions_json(result.get("analysis", ""))
+                    if not parsed:
+                        retries_used += 1
+                        malformed_dropped += 1
+                        issue_counter["json_parse_failed"] += 1
+                        async with dedup_lock:
+                            existing_snapshot = list(existing_questions)
+                        prompt = _build_retry_prompt(
+                            base_prompt=prompt_base,
+                            missing_count=1,
+                            issues="json_parse_failed",
+                            existing_questions=existing_snapshot,
+                        )
+                        continue
+
+                    selected_item: dict[str, Any] | None = None
+                    for item in parsed:
+                        if not isinstance(item, dict):
+                            malformed_dropped += 1
+                            issue_counter["non_dict_item"] += 1
+                            continue
+
+                        valid, issue = _validate_question_item(item, topic_id, difficulty, level)
+                        if not valid:
+                            malformed_dropped += 1
+                            issue_counter[issue] += 1
+                            continue
+
+                        q_text = str(item.get("question", "")).strip()
+                        q_norm = _normalise_question(q_text)
+                        if not q_norm:
+                            malformed_dropped += 1
+                            issue_counter["invalid_question"] += 1
+                            continue
+
+                        async with dedup_lock:
+                            if q_norm in dedup_norm:
+                                duplicate = True
+                            else:
+                                dedup_norm.add(q_norm)
+                                existing_questions.append(q_text)
+                                duplicate = False
+                        if duplicate:
+                            malformed_dropped += 1
+                            issue_counter["duplicate_question"] += 1
+                            continue
+
+                        selected_item = item
+                        break
+
+                    if selected_item is not None:
+                        qa = self._to_question_answer_v2(topic_id, selected_item)
+                        return {
+                            "question": qa.model_dump(),
+                            "metadata": metadata,
+                            "retries_used": retries_used,
+                            "malformed_items_dropped": malformed_dropped,
+                        }
+
+                    retries_used += 1
+                    top_issues = (
+                        ", ".join(f"{k}:{v}" for k, v in issue_counter.most_common(5))
+                        or "insufficient_valid_items"
+                    )
+                    async with dedup_lock:
+                        existing_snapshot = list(existing_questions)
+                    prompt = _build_retry_prompt(
+                        base_prompt=prompt_base,
+                        missing_count=1,
+                        issues=top_issues,
+                        existing_questions=existing_snapshot,
+                    )
+
+                if issue_counter:
+                    logger.warning(
+                        "Streaming slot failed to produce valid question after retries=%d issues=%s last_error=%s",
+                        retries_used,
+                        dict(issue_counter),
+                        last_error,
+                    )
+                return {
+                    "question": None,
+                    "metadata": metadata,
+                    "retries_used": retries_used,
+                    "malformed_items_dropped": malformed_dropped,
+                }
+            except (
+                LLMServiceApprovalRequiredError,
+                StudyAppLLMNotAssignedError,
+                PersonalCredentialRequiredError,
+            ) as exc:
+                code, message = self._policy_error_payload(exc)
+                return {
+                    "error": {"code": code, "message": message},
+                    "metadata": metadata,
+                    "retries_used": retries_used,
+                    "malformed_items_dropped": malformed_dropped,
+                }
+            except Exception as exc:
+                logger.exception("Streaming question generation failed: %s", exc)
+                return {
+                    "error": {
+                        "code": "generation_failed",
+                        "message": str(exc).strip() or "Question generation failed",
+                    },
+                    "metadata": metadata,
+                    "retries_used": retries_used,
+                    "malformed_items_dropped": malformed_dropped,
+                }
+
+        yield {
+            "type": "start",
+            "topic_id": topic_id,
+            "topic_title": topic_title,
+            "target_count": target_count,
+        }
+
+        if target_count == 0:
+            yield {
+                "type": "done",
+                "topic_id": topic_id,
+                "topic_title": topic_title,
+                "generated_count": 0,
+                "provider_used": "",
+                "model_used": "",
+                "retries_used": 0,
+                "malformed_items_dropped": 0,
+            }
+            return
+
+        provider_used = ""
+        model_used = ""
+        retries_used = 0
+        malformed_items_dropped = 0
+        generated_count = 0
+
+        tasks = [asyncio.create_task(_generate_one()) for _ in range(target_count)]
+        for pending in asyncio.as_completed(tasks):
+            result = await pending
+            retries_used += int(result.get("retries_used", 0))
+            malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
+            metadata = result.get("metadata", {}) or {}
+            if metadata.get("provider"):
+                provider_used = str(metadata.get("provider"))
+            if metadata.get("model"):
+                model_used = str(metadata.get("model"))
+
+            error = result.get("error")
+            if error:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                yield {
+                    "type": "error",
+                    "code": str(error.get("code", "generation_failed")),
+                    "message": str(error.get("message", "Question generation failed")),
+                }
+                return
+
+            question = result.get("question")
+            if not isinstance(question, dict):
+                continue
+
+            generated_count += 1
+            yield {
+                "type": "question",
+                "question": question,
+            }
+
+        yield {
+            "type": "done",
+            "topic_id": topic_id,
+            "topic_title": topic_title,
+            "generated_count": generated_count,
+            "provider_used": provider_used,
+            "model_used": model_used,
+            "retries_used": retries_used,
+            "malformed_items_dropped": malformed_items_dropped,
+        }
+
     async def generate(
         self,
         topic_id: str,
@@ -571,21 +851,7 @@ class QuestionGenerator:
             validator=validator,
         )
 
-        questions = [
-            QuestionAnswerV2(
-                question_id=_question_id(topic_id, item["question"]),
-                topic_id=topic_id,
-                question=item["question"].strip(),
-                answer=item["answer"].strip(),
-                difficulty=item["difficulty"],
-                learning_objective=item["learning_objective"].strip(),
-                source_section=item["source_section"].strip(),
-                source_quote=item["source_quote"].strip(),
-                misconception_trap=item["misconception_trap"].strip(),
-                reasoning_summary=item["reasoning_summary"].strip(),
-            )
-            for item in raw_items
-        ]
+        questions = [self._to_question_answer_v2(topic_id, item) for item in raw_items]
 
         metadata = stats.get("metadata", {})
         return GenerateQuestionsV2Response(

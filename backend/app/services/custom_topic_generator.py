@@ -67,6 +67,101 @@ def _normalise_levels(levels: Any) -> list[str]:
     return out or list(_DEFAULT_LEVELS)
 
 
+def _level_rank(level: str) -> int:
+    if level == "junior":
+        return 0
+    if level == "mid":
+        return 1
+    return 2
+
+
+def _level_for_position(index: int, total: int) -> str:
+    if total <= 0:
+        return "junior"
+    junior_cutoff = max(1, total // 3)
+    mid_cutoff = max(junior_cutoff + 1, (2 * total) // 3)
+    if index < junior_cutoff:
+        return "junior"
+    if index < mid_cutoff:
+        return "mid"
+    return "senior"
+
+
+def _format_heading(level: str, heading: str) -> str:
+    stripped = heading.strip()
+    if not stripped:
+        return ""
+    prefix = f"{level.title()}:"
+    if stripped.lower().startswith(("junior:", "mid:", "senior:")):
+        return stripped[:200]
+    return f"{prefix} {stripped}"[:200]
+
+
+def _autofill_section(topic: str, index: int, total: int) -> dict[str, str]:
+    level = _level_for_position(index, total)
+    level_templates = {
+        "junior": [
+            "Fundamentals and terminology",
+            "Setup and development environment",
+            "Core syntax and mental models",
+            "Data structures and primitives",
+            "Control flow and basic patterns",
+            "Error handling basics",
+            "Testing fundamentals",
+            "Debugging and troubleshooting basics",
+            "Common beginner interview pitfalls",
+            "Hands-on practice exercises",
+        ],
+        "mid": [
+            "Architecture patterns and tradeoffs",
+            "Performance optimization techniques",
+            "State management and data flow",
+            "API and integration design",
+            "Concurrency and parallelism in practice",
+            "Security and reliability considerations",
+            "Code quality and maintainability",
+            "Observability and production diagnostics",
+            "Advanced testing strategies",
+            "Scenario-based interview drills",
+        ],
+        "senior": [
+            "System-level design decisions",
+            "Scalability and capacity planning",
+            "Resilience and failure mode strategy",
+            "Cost, performance, and risk tradeoffs",
+            "Governance and technical leadership",
+            "Migration and modernization strategy",
+            "Cross-team collaboration patterns",
+            "Operational excellence at scale",
+            "Deep architecture interview cases",
+            "Senior-level decision communication",
+        ],
+    }
+    templates = level_templates[level]
+    template = templates[index % len(templates)]
+    facets = [
+        "Core Concepts",
+        "Hands-on Practice",
+        "Design Tradeoffs",
+        "Debugging Patterns",
+        "Performance Lens",
+        "Reliability Lens",
+        "Security Lens",
+        "Testing Lens",
+        "Interview Scenarios",
+        "Anti-patterns",
+        "Production Notes",
+        "Case Study",
+    ]
+    facet = facets[index % len(facets)]
+    heading = _format_heading(level, f"{topic} {template} - {facet}")
+    content = (
+        f"Focus on {template.lower()} for {topic}, with practical implementation details, "
+        "tradeoff analysis, and interview-ready reasoning depth for this level."
+    )
+    return {"heading": heading, "content": content[:1800]}
+
+
 def _parse_json_object(raw: str) -> dict[str, Any]:
     text = (raw or "").strip()
     if not text:
@@ -97,41 +192,49 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
 
 
 def _normalise_sections(sections: Any, topic: str, target_sections: int) -> list[dict[str, str]]:
-    normalised: list[dict[str, str]] = []
+    ranked_sections: list[tuple[int, int, dict[str, str]]] = []
     seen: set[str] = set()
     if isinstance(sections, list):
-        for item in sections:
+        for idx, item in enumerate(sections):
             if not isinstance(item, dict):
                 continue
             heading = str(item.get("heading", "")).strip()
             content = str(item.get("content", "")).strip()
             if len(heading) < 3 or len(content) < 10:
                 continue
-            heading_key = heading.lower()
+            level_raw = str(item.get("level", "")).strip().lower()
+            level = level_raw if level_raw in _VALID_LEVELS else _level_for_position(idx, target_sections)
+            formatted_heading = _format_heading(level, heading)
+            heading_key = formatted_heading.lower()
             if heading_key in seen:
                 continue
             seen.add(heading_key)
-            normalised.append(
-                {
-                    "heading": heading[:200],
-                    "content": content[:1800],
-                }
+            ranked_sections.append(
+                (
+                    _level_rank(level),
+                    idx,
+                    {
+                        "heading": formatted_heading,
+                        "content": content[:1800],
+                    },
+                )
             )
-            if len(normalised) >= target_sections:
+            if len(ranked_sections) >= target_sections:
                 break
+
+    ranked_sections.sort(key=lambda item: (item[0], item[1]))
+    normalised = [item[2] for item in ranked_sections]
 
     if len(normalised) < target_sections:
         for idx in range(len(normalised), target_sections):
-            section_no = idx + 1
-            normalised.append(
-                {
-                    "heading": f"{topic} Module {section_no}",
-                    "content": (
-                        f"Core concepts, practical implementation details, and common interview "
-                        f"tradeoffs for {topic}. Focus on what matters at junior, mid, and senior levels."
-                    ),
-                }
-            )
+            fill = _autofill_section(topic, idx, target_sections)
+            heading_key = fill["heading"].lower()
+            if heading_key in seen:
+                continue
+            seen.add(heading_key)
+            normalised.append(fill)
+            if len(normalised) >= target_sections:
+                break
 
     return normalised[:target_sections]
 
@@ -144,6 +247,9 @@ def _build_raw_content(title: str, description: str, sections: list[dict[str, st
 
 
 def _build_prompt(topic: str, target_sections: int) -> str:
+    junior_count = target_sections // 3
+    mid_count = target_sections // 3
+    senior_count = target_sections - junior_count - mid_count
     return f"""You are an expert curriculum architect and technical interview coach.
 
 Create a deep learning roadmap for the custom topic: "{topic}".
@@ -157,14 +263,21 @@ Return ONLY valid JSON object with this exact schema:
   "sections": [
     {{
       "heading": "specific subtopic title",
-      "content": "2-4 concise sentences with practical learning notes"
+      "content": "2-4 concise sentences with practical learning notes",
+      "level": "junior|mid|senior"
     }}
   ]
 }}
 
 Hard constraints:
 - sections length must be exactly {target_sections}.
+- Ensure level progression and ordering:
+  - first {junior_count} sections are junior,
+  - next {mid_count} sections are mid,
+  - final {senior_count} sections are senior.
 - Subtopics must be granular and non-duplicative.
+- Each heading must be a real, concrete topic name.
+- Do NOT use generic headings like "Module 1", "Part A", "Topic X", or placeholders.
 - Cover fundamentals through advanced architecture and interview tradeoffs.
 - Keep each section content concise and practical.
 - Output JSON only with escaped newlines/quotes/backslashes.

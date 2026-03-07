@@ -95,7 +95,7 @@ class UserSettingsStore:
             "max_tokens": 0,
             "auth_mode": "api_key",
             "llm_source": "personal",
-            "require_answer_reveal": True,
+            "require_answer_reveal": False,
         }
 
     def _encrypt(self, value: str) -> str:
@@ -168,7 +168,7 @@ class UserSettingsStore:
 
         raw_require_answer_reveal = raw.get(
             "require_answer_reveal",
-            defaults.get("require_answer_reveal", True),
+            defaults.get("require_answer_reveal", False),
         )
         if isinstance(raw_require_answer_reveal, bool):
             require_answer_reveal = raw_require_answer_reveal
@@ -181,9 +181,9 @@ class UserSettingsStore:
             elif norm in {"0", "false", "no", "off"}:
                 require_answer_reveal = False
             else:
-                require_answer_reveal = bool(defaults.get("require_answer_reveal", True))
+                require_answer_reveal = bool(defaults.get("require_answer_reveal", False))
         else:
-            require_answer_reveal = bool(defaults.get("require_answer_reveal", True))
+            require_answer_reveal = bool(defaults.get("require_answer_reveal", False))
 
         return {
             "provider": provider,
