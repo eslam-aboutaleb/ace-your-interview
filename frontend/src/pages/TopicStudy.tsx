@@ -319,7 +319,17 @@ export default function TopicStudy() {
             }
           : {}),
       };
-      const payloadWithCount = (count: number) => ({ ...basePayload, count });
+      const payloadWithCount = (
+        count: number,
+        opts?: { includeSection?: boolean },
+      ) => {
+        const includeSection = opts?.includeSection !== false;
+        if (!includeSection) {
+          const { section_title, section_content, ...rest } = basePayload;
+          return { ...rest, count };
+        }
+        return { ...basePayload, count };
+      };
       const questionKey = (q: Pick<QuestionAnswerV2, "question">) =>
         q.question.trim().toLowerCase().replace(/\s+/g, " ");
       const mergeUniqueQuestions = (
@@ -359,40 +369,50 @@ export default function TopicStudy() {
         seed: QuestionAnswerV2[],
       ): Promise<QuestionAnswerV2[]> => {
         let merged = mergeUniqueQuestions([], seed).slice(0, questionCount);
+        const retryModes: Array<"section" | "topic"> = activeS
+          ? ["section", "topic"]
+          : ["topic"];
 
-        for (let attempt = 0; attempt < 2; attempt += 1) {
+        for (const mode of retryModes) {
           if (controller.signal.aborted || merged.length >= questionCount) break;
-          const remaining = questionCount - merged.length;
+          const includeSection = mode === "section";
 
-          try {
-            const res = await generateQuestionsV2(payloadWithCount(remaining));
-            merged = mergeUniqueQuestions(merged, res.questions).slice(0, questionCount);
-            setProviderInfo({
-              provider: res.provider_used,
-              model: res.model_used,
-              retries: res.retries_used,
-              malformed: res.malformed_items_dropped,
-            });
-          } catch {
-            // Best-effort v2 top-up. Legacy fallback below.
-          }
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            if (controller.signal.aborted || merged.length >= questionCount) break;
+            const remaining = questionCount - merged.length;
 
-          if (controller.signal.aborted || merged.length >= questionCount) break;
+            try {
+              const res = await generateQuestionsV2(
+                payloadWithCount(remaining, { includeSection }),
+              );
+              merged = mergeUniqueQuestions(merged, res.questions).slice(0, questionCount);
+              setProviderInfo({
+                provider: res.provider_used,
+                model: res.model_used,
+                retries: res.retries_used,
+                malformed: res.malformed_items_dropped,
+              });
+            } catch {
+              // Best-effort v2 top-up. Legacy fallback below.
+            }
 
-          try {
-            const legacy = await generateQuestions(
-              payloadWithCount(questionCount - merged.length),
-            );
-            const upgraded = mapLegacyQuestions(legacy, merged.length);
-            merged = mergeUniqueQuestions(merged, upgraded).slice(0, questionCount);
-            setProviderInfo({
-              provider: legacy.provider_used,
-              model: legacy.model_used,
-              retries: 0,
-              malformed: 0,
-            });
-          } catch {
-            // Legacy fallback is best effort; caller handles partial results.
+            if (controller.signal.aborted || merged.length >= questionCount) break;
+
+            try {
+              const legacy = await generateQuestions(
+                payloadWithCount(questionCount - merged.length, { includeSection }),
+              );
+              const upgraded = mapLegacyQuestions(legacy, merged.length);
+              merged = mergeUniqueQuestions(merged, upgraded).slice(0, questionCount);
+              setProviderInfo({
+                provider: legacy.provider_used,
+                model: legacy.model_used,
+                retries: 0,
+                malformed: 0,
+              });
+            } catch {
+              // Legacy fallback is best effort; caller handles partial results.
+            }
           }
         }
 
