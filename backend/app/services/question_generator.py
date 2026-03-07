@@ -638,11 +638,43 @@ def _build_fallback_question_items(
         if not q_norm or q_norm in dedup or _is_near_duplicate_question(question, seen_questions):
             continue
 
-        answer = (
-            f"Start by defining clear requirements for **{focus}** in the context of {source_scope}.\n\n"
-            "Then evaluate constraints, tradeoffs, and failure modes before choosing an approach.\n\n"
-            "A strong answer should justify decisions with practical implementation and validation steps."
-        )
+        # Rotate through multiple tutoring-style answer templates so
+        # fallback answers actually educate the student about the concept.
+        _answer_templates = [
+            (
+                f"**{focus}** is a key concept within {source_scope}. "
+                f"At its core, it addresses how systems handle the specific challenge described by {focus}. "
+                f"When working with this in practice, the most important considerations are correctness, "
+                f"edge-case handling, and understanding the failure modes. A common mistake is to overlook "
+                f"boundary conditions — always validate inputs and expected behaviour before scaling up. "
+                f"In interviews, demonstrate that you understand *why* this matters, not just *how* to implement it."
+            ),
+            (
+                f"To understand **{focus}** in the context of {source_scope}, start with the fundamental "
+                f"problem it solves. This concept exists because real systems need a reliable way to handle "
+                f"{focus.lower()}. The recommended approach involves: (1) clarifying requirements and constraints, "
+                f"(2) choosing an appropriate strategy based on the scale and reliability needs, and "
+                f"(3) validating through testing and monitoring. When discussing this in an interview, "
+                f"show awareness of tradeoffs — there is rarely a single 'correct' answer."
+            ),
+            (
+                f"**{focus}** in {source_scope} involves understanding both the theoretical foundations "
+                f"and the practical implementation details. A strong practitioner knows the main patterns, "
+                f"can identify when each is appropriate, and understands the cost/benefit tradeoffs. "
+                f"Common pitfalls include over-engineering simple cases and under-engineering complex ones. "
+                f"Focus on building a mental model of how {focus.lower()} behaves under different conditions — "
+                f"this is what separates surface-level knowledge from true understanding."
+            ),
+            (
+                f"When working with **{focus}** in {source_scope}, the key is to approach it systematically. "
+                f"First, understand what problem it solves and why alternative approaches fall short. "
+                f"Then, learn the standard implementation patterns and their performance characteristics. "
+                f"Finally, practice debugging common issues — knowing how things break is just as "
+                f"important as knowing how they work. For interviews, prepare concrete examples that "
+                f"demonstrate your hands-on experience with {focus.lower()}."
+            ),
+        ]
+        answer = _answer_templates[idx % len(_answer_templates)]
         item: dict[str, Any] = {
             "question": question,
             "answer": answer,

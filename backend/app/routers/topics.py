@@ -688,7 +688,7 @@ async def create_custom_topic(
     generator = CustomTopicGenerator(llm_client, _mcp_gateway)
     generated = await generator.generate_topic(
         topic=body.topic,
-        target_sections=body.target_sections,
+        target_sections=body.target_sections,  # None → auto-estimate
         llm_config=body.llm_config,
         user_identity=user,
     )
@@ -718,12 +718,12 @@ async def create_custom_topic_stream(
 
     async def _event_stream():
         topic_name = body.topic.strip()
-        target = int(body.target_sections)
+        target = body.target_sections  # None → auto-estimate in generator
         yield json.dumps(
             {
                 "type": "start",
                 "topic": topic_name,
-                "target_sections": target,
+                "target_sections": target or 0,
             }
         ) + "\n"
 

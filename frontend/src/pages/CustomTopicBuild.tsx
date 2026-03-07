@@ -22,8 +22,8 @@ type StreamedSection = {
 
 function clampTargetSections(value: number): number {
   if (!Number.isFinite(value)) return 120;
-  if (value < 100) return 100;
-  if (value > 150) return 150;
+  if (value < 50) return 50;
+  if (value > 300) return 300;
   return Math.round(value);
 }
 
@@ -35,13 +35,18 @@ export default function CustomTopicBuild() {
 
   const topic = (searchParams.get("topic") || "").trim();
   const targetSections = useMemo(
-    () => clampTargetSections(Number(searchParams.get("target_sections") || "120")),
+    () =>
+      clampTargetSections(Number(searchParams.get("target_sections") || "120")),
     [searchParams],
   );
 
   const [started, setStarted] = useState(false);
-  const [progressMessage, setProgressMessage] = useState("Starting analysis...");
-  const [streamedSections, setStreamedSections] = useState<StreamedSection[]>([]);
+  const [progressMessage, setProgressMessage] = useState(
+    "Starting analysis...",
+  );
+  const [streamedSections, setStreamedSections] = useState<StreamedSection[]>(
+    [],
+  );
   const [doneTopicId, setDoneTopicId] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -61,7 +66,7 @@ export default function CustomTopicBuild() {
     createCustomTopicStream(
       {
         topic,
-        target_sections: targetSections,
+        ...(targetSections != null ? { target_sections: targetSections } : {}),
         llm_config: {
           provider: settings.provider,
           model: settings.model,
@@ -107,7 +112,15 @@ export default function CustomTopicBuild() {
         abortRef.current = null;
       }
     };
-  }, [navigate, settings.maxTokens, settings.model, settings.provider, settings.temperature, targetSections, topic]);
+  }, [
+    navigate,
+    settings.maxTokens,
+    settings.model,
+    settings.provider,
+    settings.temperature,
+    targetSections,
+    topic,
+  ]);
 
   const generatedCount = streamedSections.length;
 
@@ -128,7 +141,8 @@ export default function CustomTopicBuild() {
               Building Custom Topic
             </h1>
             <p className="text-sm text-udemy-text-muted mt-1">
-              Topic: <span className="font-semibold text-udemy-text">{topic}</span>
+              Topic:{" "}
+              <span className="font-semibold text-udemy-text">{topic}</span>
             </p>
           </div>
           {doneTopicId ? (
@@ -149,7 +163,7 @@ export default function CustomTopicBuild() {
             {normalizeEscapedMultilineText(progressMessage)}
           </p>
           <p className="mt-1 font-medium">
-            Generated sections: {generatedCount} / {targetSections}
+            Generated sections: {generatedCount}{targetSections ? ` / ${targetSections}` : ""}
           </p>
         </div>
 
