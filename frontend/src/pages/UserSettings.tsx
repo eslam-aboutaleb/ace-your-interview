@@ -131,7 +131,12 @@ export default function UserSettingsPage() {
         setSavingPrefs(false);
         return;
       }
-      const effectiveAuthMode: UserAuthMode = canUseAccountMode ? authMode : "api_key";
+      const effectiveAuthMode: UserAuthMode =
+        selectedSource === "study_app"
+          ? "api_key"
+          : canUseAccountMode
+            ? authMode
+            : "api_key";
       const assignmentProvider = data?.study_app_assignment?.provider || settings.provider;
       const assignmentModel = data?.study_app_assignment?.model || settings.model;
 

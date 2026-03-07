@@ -157,6 +157,31 @@ class UserSettingsRouterTests(unittest.TestCase):
         self.assertEqual(payload["preferences"]["provider"], "google")
         self.assertEqual(payload["preferences"]["auth_mode"], "account")
 
+    def test_study_app_preferences_force_api_key_auth_mode(self):
+        self.store._llm_service_access.add_user("google", "learner@example.com")
+        identity_key = identity_key_for_user({"user": "learner@example.com", "provider": "google"})
+        self.store._llm_assignments_store.set_assignment(
+            identity_key=identity_key,
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+        pref_res = self.client.put(
+            "/api/user-settings/preferences",
+            json={
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "temperature": 0.6,
+                "max_tokens": 256,
+                "auth_mode": "account",
+                "llm_source": "study_app",
+                "require_answer_reveal": True,
+            },
+        )
+        self.assertEqual(pref_res.status_code, 200)
+        self.assertEqual(pref_res.json()["llm_source"], "study_app")
+        self.assertEqual(pref_res.json()["auth_mode"], "api_key")
+
     def test_using_backend_fallback_flag_false_when_not_approved(self):
         os.environ["OPENAI_API_KEY"] = "sk-backend-openai"
 

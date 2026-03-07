@@ -121,9 +121,11 @@ async def update_preferences(
     body: UserPreferencesUpdateRequest,
     user: dict = Depends(require_auth),
 ):
+    payload = body.model_dump(mode="json")
+    identity_key = identity_key_for_user(user)
+    store = _ensure_store()
+
     if body.llm_source.value == "study_app":
-        identity_key = identity_key_for_user(user)
-        store = _ensure_store()
         if not store.is_identity_approved_for_backend_fallback(identity_key):
             raise HTTPException(
                 status_code=403,
@@ -132,16 +134,15 @@ async def update_preferences(
                     "message": APPROVAL_REQUIRED_MESSAGE,
                 },
             )
-
-    if body.auth_mode.value == "account" and body.provider != "google":
+        # Study App mode uses backend-funded credentials only; personal auth mode is not applicable.
+        payload["auth_mode"] = "api_key"
+    elif body.auth_mode.value == "account" and body.provider != "google":
         raise HTTPException(
             status_code=422,
             detail="auth_mode=account is only supported for provider=google",
         )
 
-    store = _ensure_store()
-    identity_key = identity_key_for_user(user)
-    prefs = store.save_preferences(identity_key, body.model_dump())
+    prefs = store.save_preferences(identity_key, payload)
     return UserPreferences(**prefs)
 
 
