@@ -6,6 +6,7 @@ export type LearningTrack =
   | "system_design"
   | "ai_stack";
 export type InterviewLevel = "junior" | "mid" | "senior";
+export type ResponseDetail = "concise" | "very_detailed";
 export type InterviewType =
   | "behavioral"
   | "technical"
@@ -36,6 +37,10 @@ export interface TopicDetail {
   levels: InterviewLevel[];
   sections: TopicSection[];
   raw_content: string;
+  requires_programming: boolean;
+  language_options: string[];
+  selected_language: string;
+  response_detail: ResponseDetail;
 }
 
 export interface CreateCustomTopicRequest {
@@ -126,6 +131,8 @@ export interface GenerateQuestionsRequest {
   count: number;
   difficulty?: string;
   level?: InterviewLevel | null;
+  response_detail?: ResponseDetail;
+  preferred_language?: string;
   llm_config?: LLMConfig;
   section_title?: string;
   section_content?: string;
@@ -289,6 +296,9 @@ export interface ChatFollowUpRequest {
   topic_track?: string;
   section_title?: string;
   mode?: "study" | "quiz";
+  response_detail?: ResponseDetail;
+  preferred_language?: string;
+  requires_programming?: boolean;
   user_message: string;
   history: ChatMessage[];
   llm_config?: LLMConfig;
@@ -338,7 +348,22 @@ export interface GenerateQuizRequest {
   question_types: QuizQuestionType[];
   difficulty?: string;
   level?: InterviewLevel | null;
+  response_detail?: ResponseDetail;
+  preferred_language?: string;
   llm_config?: LLMConfig;
+}
+
+export interface TopicPreferencesResponse {
+  topic_id: string;
+  response_detail: ResponseDetail;
+  preferred_language: string;
+  requires_programming: boolean;
+  language_options: string[];
+}
+
+export interface TopicPreferencesUpdateRequest {
+  response_detail?: ResponseDetail;
+  preferred_language?: string;
 }
 
 export interface GenerateQuizResponse {

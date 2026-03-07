@@ -11,7 +11,7 @@ import { MessageCircle, Send, X, Loader2, Sparkles } from "lucide-react";
 import { chatFollowUp } from "@/services/api";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
-import type { ChatMessage } from "@/types";
+import type { ChatMessage, ResponseDetail } from "@/types";
 
 interface Props {
   contextQuestion: string;
@@ -23,6 +23,12 @@ interface Props {
   sectionTitle?: string;
   mode?: "study" | "quiz";
   selectionTargetSelector?: string;
+  showFloatingTrigger?: boolean;
+  floatingTriggerWord?: string;
+  floatingTriggerPrompt?: string;
+  responseDetail?: ResponseDetail;
+  preferredLanguage?: string;
+  requiresProgramming?: boolean;
   /** Unique key to reset transient UI state when Q&A changes */
   qaKey: string;
   children: ReactNode;
@@ -47,6 +53,12 @@ export default function WordHighlightChat({
   sectionTitle = "",
   mode,
   selectionTargetSelector = DEFAULT_SELECTION_SELECTOR,
+  showFloatingTrigger = false,
+  floatingTriggerWord = "",
+  floatingTriggerPrompt = "",
+  responseDetail = "concise",
+  preferredLanguage = "",
+  requiresProgramming = false,
   qaKey,
   children,
 }: Props) {
@@ -176,13 +188,35 @@ export default function WordHighlightChat({
     setTimeout(updateSelection, 0);
   }, [updateSelection]);
 
-  const openChat = () => {
-    if (!selectedText) return;
+  const openChat = (word: string, seedPrompt: string) => {
+    const normalizedWord = (word || "").trim();
+    if (!normalizedWord) return;
     setMessages(messageCacheBySession.get(sessionKey) || []);
-    setChatWord(selectedText);
+    setChatWord(normalizedWord);
     setChatOpen(true);
     setTooltipPos(null);
-    setInput(`What does "${selectedText}" mean in this context?`);
+    setInput(seedPrompt.trim());
+  };
+
+  const openSelectionChat = () => {
+    if (!selectedText) return;
+    openChat(
+      selectedText,
+      `What does "${selectedText}" mean in this context?`,
+    );
+  };
+
+  const openFloatingChat = () => {
+    const fallbackWord =
+      floatingTriggerWord.trim() ||
+      selectedText.trim() ||
+      sectionTitle.trim() ||
+      topicTitle.trim() ||
+      "this topic";
+    const prompt =
+      floatingTriggerPrompt.trim() ||
+      `Explain "${fallbackWord}" in this topic context with practical examples.`;
+    openChat(fallbackWord, prompt);
   };
 
   const closeChat = () => {
@@ -211,6 +245,9 @@ export default function WordHighlightChat({
         topic_track: topicTrack,
         section_title: sectionTitle,
         mode,
+        response_detail: responseDetail,
+        preferred_language: preferredLanguage,
+        requires_programming: requiresProgramming,
         user_message: msg,
         history: newMessages,
         llm_config: {
@@ -259,7 +296,7 @@ export default function WordHighlightChat({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 5, scale: 0.9 }}
             transition={{ duration: 0.15 }}
-            onClick={openChat}
+            onClick={openSelectionChat}
             className="absolute z-50 flex items-center gap-1.5 bg-udemy-purple text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg hover:bg-udemy-purple/90 transition-colors whitespace-nowrap max-sm:px-3 max-sm:py-2"
             style={{
               left: tooltipPos.x,
@@ -269,6 +306,23 @@ export default function WordHighlightChat({
           >
             <MessageCircle className="w-3.5 h-3.5" />
             Ask about this
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showFloatingTrigger && !chatOpen && (
+          <motion.button
+            initial={{ opacity: 0, y: 10, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.9 }}
+            transition={{ duration: 0.2 }}
+            onClick={openFloatingChat}
+            className="fixed right-4 bottom-[calc(1rem+var(--sab))] z-40 w-12 h-12 rounded-full bg-udemy-purple text-white shadow-xl hover:bg-udemy-purple/90 flex items-center justify-center"
+            aria-label="Open AI assistant"
+            title="Ask AI about this topic"
+          >
+            <Sparkles className="w-5 h-5" />
           </motion.button>
         )}
       </AnimatePresence>

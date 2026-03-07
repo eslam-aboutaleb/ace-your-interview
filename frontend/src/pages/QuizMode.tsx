@@ -25,6 +25,7 @@ import {
 } from "@/utils/animations";
 import {
   fetchTopics,
+  fetchTopic,
   generateQuiz,
   generateQuizV2,
   recordLearningAttempt,
@@ -38,6 +39,7 @@ import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import type {
   InterviewLevel,
   LearningTrack,
+  ResponseDetail,
   TopicSummary,
   QuizQuestionType,
   QuizQuestionV2,
@@ -95,6 +97,16 @@ export default function QuizMode() {
   const [expandedReview, setExpandedReview] = useState<number | null>(null);
   const [weakAreas, setWeakAreas] = useState<WeakAreaItem[]>([]);
   const [loadingWeakAreas, setLoadingWeakAreas] = useState(false);
+  const [topicAiById, setTopicAiById] = useState<
+    Record<
+      string,
+      {
+        responseDetail: ResponseDetail;
+        preferredLanguage: string;
+        requiresProgramming: boolean;
+      }
+    >
+  >({});
 
   const settings = useSettingsStore();
   const { recordAttempt, setMastery } = useProgressStore();
@@ -105,6 +117,7 @@ export default function QuizMode() {
     [topics],
   );
   const currentTopic = current ? topicsById.get(current.topic_id) : undefined;
+  const currentTopicAi = current ? topicAiById[current.topic_id] : undefined;
   const currentContextAnswer = current
     ? [
         current.explanation,
@@ -169,12 +182,49 @@ export default function QuizMode() {
     setGenerating(true);
     setErrorMsg("");
     try {
+      const selectedTopicIds = Array.from(selectedTopics);
+      const topicDetails = await Promise.all(
+        selectedTopicIds.map(async (id) => {
+          try {
+            const detail = await fetchTopic(id);
+            return [id, detail] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const nextTopicAiById: Record<
+        string,
+        {
+          responseDetail: ResponseDetail;
+          preferredLanguage: string;
+          requiresProgramming: boolean;
+        }
+      > = {};
+      for (const entry of topicDetails) {
+        if (!entry) continue;
+        const [id, detail] = entry;
+        nextTopicAiById[id] = {
+          responseDetail: detail.response_detail || "concise",
+          preferredLanguage: detail.selected_language || "",
+          requiresProgramming: !!detail.requires_programming,
+        };
+      }
+      setTopicAiById(nextTopicAiById);
+
+      const singleTopicSettings =
+        selectedTopicIds.length === 1 ? nextTopicAiById[selectedTopicIds[0]] : undefined;
       const req = {
-        topic_ids: Array.from(selectedTopics),
+        topic_ids: selectedTopicIds,
         count: questionCount,
         question_types: Array.from(questionTypes),
         difficulty: difficulty || undefined,
         level,
+        response_detail: singleTopicSettings?.responseDetail,
+        preferred_language:
+          singleTopicSettings?.requiresProgramming && singleTopicSettings?.preferredLanguage
+            ? singleTopicSettings.preferredLanguage
+            : undefined,
         llm_config: {
           provider: settings.provider,
           model: settings.model,
@@ -580,6 +630,12 @@ export default function QuizMode() {
                     topicTitle={currentTopic?.title || current.topic_id}
                     topicTrack={currentTopic?.track || ""}
                     mode="quiz"
+                    showFloatingTrigger
+                    floatingTriggerWord={currentTopic?.title || current.topic_id}
+                    floatingTriggerPrompt="Explain this quiz concept in an organized way and include practical tradeoffs."
+                    responseDetail={currentTopicAi?.responseDetail || "concise"}
+                    preferredLanguage={currentTopicAi?.preferredLanguage || ""}
+                    requiresProgramming={!!currentTopicAi?.requiresProgramming}
                     selectionTargetSelector='[data-word-chat-target="true"]'
                     qaKey={`quiz:${current.question_id}`}
                   >
@@ -861,6 +917,7 @@ export default function QuizMode() {
                   const ans = answers[idx];
                   const isCorrect = ans?.correct;
                   const reviewTopic = topicsById.get(q.topic_id);
+                  const reviewTopicAi = topicAiById[q.topic_id];
                   const reviewContextAnswer = [
                     q.explanation,
                     q.source_quote ? `Source quote: ${q.source_quote}` : "",
@@ -882,6 +939,9 @@ export default function QuizMode() {
                         topicTitle={reviewTopic?.title || q.topic_id}
                         topicTrack={reviewTopic?.track || ""}
                         mode="quiz"
+                        responseDetail={reviewTopicAi?.responseDetail || "concise"}
+                        preferredLanguage={reviewTopicAi?.preferredLanguage || ""}
+                        requiresProgramming={!!reviewTopicAi?.requiresProgramming}
                         selectionTargetSelector='[data-word-chat-target="true"]'
                         qaKey={`quiz-review:${q.question_id}`}
                       >

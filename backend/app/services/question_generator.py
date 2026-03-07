@@ -36,6 +36,8 @@ from app.services.llm_policy import (
     StudyAppLLMNotAssignedError,
     raise_if_policy_blocked_result,
 )
+from app.services.markdown_formatter import format_markdown_readable
+from app.services.mcp_gateway import MCPGateway
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,10 @@ def _build_prompt(
     level: Optional[str] = None,
     section_title: Optional[str] = None,
     section_content: Optional[str] = None,
+    response_detail: str = "concise",
+    preferred_language: str = "",
+    requires_programming: bool = False,
+    mcp_context: str = "",
 ) -> str:
     target_level = _normalise_level(level)
     diff_clause = ""
@@ -96,6 +102,22 @@ def _build_prompt(
     else:
         scope = f'"{topic_title}"'
         content = _clamp_content(doc_content)
+
+    detail_clause = (
+        "Be concise and high-signal."
+        if response_detail != "very_detailed"
+        else "Be very detailed with layered explanation depth and concrete examples."
+    )
+    code_clause = ""
+    if requires_programming and preferred_language:
+        code_clause = f'Include one practical fenced code example in "{preferred_language}" when code clarifies the answer.'
+    elif not requires_programming:
+        code_clause = "Avoid code blocks unless code is explicitly required by the question."
+    mcp_block = (
+        f"\n\nExternal context (optional, use only if relevant and factual):\n{mcp_context[:2500]}"
+        if mcp_context
+        else ""
+    )
 
     return f"""You are an expert technical interviewer and educator.
 
@@ -122,8 +144,9 @@ Rules:
 - Questions must be standalone and non-duplicative.
 - Questions must cover conceptual + practical angles.
 - Answers must be grounded in the provided documentation.
+- {detail_clause}
 - Format answers as markdown, but keep structure adaptive:
-  - default to clear prose paragraphs for normal explanations,
+  - long answers must be split into short readable paragraphs with blank lines,
   - use bullets only when listing steps/checklists/categories,
   - use headings only when the answer naturally has sections,
   - use tables only for direct comparisons/category matrices.
@@ -131,6 +154,7 @@ Rules:
   - one row per line,
   - include a separator row (e.g. `| --- | --- |`).
 - You may include fenced code blocks when code clarifies an implementation detail.
+- {code_clause if code_clause else "Use code examples only when they materially improve clarity."}
 - You may include fenced Mermaid diagrams when architecture or flows are better shown visually.
 - If you include fences, always use explicit language tags (for example: ```python, ```mermaid).
 - Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.
@@ -143,7 +167,7 @@ Rules:
 - Keep markdown compact and practical.
 
 Documentation:
-{content}"""
+{content}{mcp_block}"""
 
 
 def _build_quiz_prompt(
@@ -152,6 +176,9 @@ def _build_quiz_prompt(
     question_types: list[str] | None = None,
     difficulty: Optional[str] = None,
     level: Optional[str] = None,
+    response_detail: str = "concise",
+    preferred_language: str = "",
+    mcp_context: str = "",
 ) -> str:
     target_level = _normalise_level(level)
     types = question_types or ["mcq", "true_false"]
@@ -166,9 +193,33 @@ def _build_quiz_prompt(
     else:
         type_instructions = "All questions must be true_false with exactly 2 options: A=True, B=False."
 
+    detail_clause = (
+        "Keep explanations concise and high-signal."
+        if response_detail != "very_detailed"
+        else "Provide very detailed explanations with practical depth."
+    )
     docs_text = ""
     for tc in topics_content:
-        docs_text += f"\n\n--- Topic: {tc['title']} (id: {tc['id']}) ---\n{tc['content'][:_MAX_TOPIC_CONTEXT]}"
+        topic_requires_programming = bool(tc.get("requires_programming"))
+        topic_language = str(tc.get("preferred_language", "")).strip().lower()
+        topic_detail = str(tc.get("response_detail", response_detail)).strip().lower()
+        topic_notes = [f"detail={topic_detail or response_detail}"]
+        if topic_requires_programming and topic_language:
+            topic_notes.append(f"preferred_language={topic_language}")
+        docs_text += (
+            f"\n\n--- Topic: {tc['title']} (id: {tc['id']}) [{', '.join(topic_notes)}] ---\n"
+            f"{tc['content'][:_MAX_TOPIC_CONTEXT]}"
+        )
+    mcp_block = (
+        f"\n\nExternal context (optional, use only if relevant and factual):\n{mcp_context[:2500]}"
+        if mcp_context
+        else ""
+    )
+    code_clause = ""
+    if preferred_language:
+        code_clause = (
+            f'\n- If code materially clarifies an explanation, prefer fenced "{preferred_language}" snippets.'
+        )
 
     return f"""You are an expert technical quiz creator.
 
@@ -198,8 +249,9 @@ Rules:
 - correct_answer must match one choice label.
 - Avoid trick ambiguity; one clearly correct answer.
 - Distribute questions across topics as evenly as possible.
+- {detail_clause}
 - Format explanations as markdown, but keep structure adaptive:
-  - default to clear prose paragraphs for normal explanations,
+  - long explanations must be split into short readable paragraphs with blank lines,
   - use bullets only when listing steps/checklists/categories,
   - use headings only when the explanation naturally has sections,
   - use tables only for direct comparisons/category matrices.
@@ -207,6 +259,7 @@ Rules:
   - one row per line,
   - include a separator row (e.g. `| --- | --- |`).
 - You may include fenced code blocks when code clarifies an implementation detail.
+- Avoid unnecessary code blocks for non-programming topics.{code_clause}
 - You may include fenced Mermaid diagrams when architecture or flows are better shown visually.
 - If you include fences, always use explicit language tags (for example: ```yaml, ```mermaid).
 - Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.
@@ -218,7 +271,7 @@ Rules:
 - Keep markdown compact and practical.
 
 Documentation:
-{docs_text[:_MAX_DOC_CONTEXT]}"""
+{docs_text[:_MAX_DOC_CONTEXT]}{mcp_block}"""
 
 
 def _build_retry_prompt(base_prompt: str, missing_count: int, issues: str, existing_questions: list[str]) -> str:
@@ -573,8 +626,26 @@ async def _collect_with_retries(
 class QuestionGenerator:
     """Uses LiteLLM to generate interview Q&A and quizzes."""
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, mcp_gateway: MCPGateway | None = None):
         self.llm = llm_client
+        self.mcp = mcp_gateway
+
+    async def _mcp_context_for_flow(
+        self,
+        *,
+        flow: str,
+        query: str,
+        topic_id: str = "",
+        topic_title: str = "",
+    ) -> str:
+        if self.mcp is None:
+            return ""
+        return await self.mcp.gather_context(
+            flow=flow,
+            query=query,
+            topic_id=topic_id,
+            topic_title=topic_title,
+        )
 
     @staticmethod
     def _to_question_answer_v2(topic_id: str, item: dict[str, Any]) -> QuestionAnswerV2:
@@ -582,7 +653,7 @@ class QuestionGenerator:
             question_id=_question_id(topic_id, item["question"]),
             topic_id=topic_id,
             question=item["question"].strip(),
-            answer=item["answer"].strip(),
+            answer=format_markdown_readable(item["answer"].strip()),
             difficulty=item["difficulty"],
             learning_objective=item["learning_objective"].strip(),
             source_section=item["source_section"].strip(),
@@ -613,8 +684,17 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
+        response_detail: str = "concise",
+        preferred_language: str = "",
+        requires_programming: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(0, int(count))
+        mcp_context = await self._mcp_context_for_flow(
+            flow="questions",
+            query=f"{topic_title} {section_title or ''} interview questions and practical examples",
+            topic_id=topic_id,
+            topic_title=topic_title,
+        )
         prompt_base = _build_prompt(
             topic_title=topic_title,
             doc_content=doc_content,
@@ -623,6 +703,10 @@ class QuestionGenerator:
             level=level,
             section_title=section_title,
             section_content=section_content,
+            response_detail=response_detail,
+            preferred_language=preferred_language,
+            requires_programming=requires_programming,
+            mcp_context=mcp_context,
         )
 
         dedup_norm: set[str] = set()
@@ -889,6 +973,9 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
+        response_detail: str = "concise",
+        preferred_language: str = "",
+        requires_programming: bool = False,
     ) -> GenerateQuestionsResponse:
         v2 = await self.generate_v2(
             topic_id=topic_id,
@@ -901,6 +988,9 @@ class QuestionGenerator:
             user_identity=user_identity,
             section_title=section_title,
             section_content=section_content,
+            response_detail=response_detail,
+            preferred_language=preferred_language,
+            requires_programming=requires_programming,
         )
         questions = [
             QuestionAnswer(question=q.question, answer=q.answer, difficulty=q.difficulty)
@@ -934,7 +1024,16 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
+        response_detail: str = "concise",
+        preferred_language: str = "",
+        requires_programming: bool = False,
     ) -> GenerateQuestionsV2Response:
+        mcp_context = await self._mcp_context_for_flow(
+            flow="questions",
+            query=f"{topic_title} {section_title or ''} interview questions and practical examples",
+            topic_id=topic_id,
+            topic_title=topic_title,
+        )
         prompt = _build_prompt(
             topic_title=topic_title,
             doc_content=doc_content,
@@ -943,6 +1042,10 @@ class QuestionGenerator:
             level=level,
             section_title=section_title,
             section_content=section_content,
+            response_detail=response_detail,
+            preferred_language=preferred_language,
+            requires_programming=requires_programming,
+            mcp_context=mcp_context,
         )
 
         validator = lambda item: _validate_question_item(item, topic_id, difficulty, level)
@@ -975,6 +1078,8 @@ class QuestionGenerator:
         question_types: list[str] | None = None,
         difficulty: Optional[str] = None,
         level: Optional[str] = None,
+        response_detail: str | None = None,
+        preferred_language: str = "",
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
     ) -> GenerateQuizResponse:
@@ -984,6 +1089,8 @@ class QuestionGenerator:
             question_types=question_types,
             difficulty=difficulty,
             level=level,
+            response_detail=response_detail,
+            preferred_language=preferred_language,
             llm_config=llm_config,
             user_identity=user_identity,
         )
@@ -1013,10 +1120,31 @@ class QuestionGenerator:
         question_types: list[str] | None = None,
         difficulty: Optional[str] = None,
         level: Optional[str] = None,
+        response_detail: str | None = None,
+        preferred_language: str = "",
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
     ) -> GenerateQuizV2Response:
-        prompt = _build_quiz_prompt(topics_content, count, question_types, difficulty, level)
+        effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
+        mcp_context = await self._mcp_context_for_flow(
+            flow="quiz",
+            query=" ".join(
+                [
+                    " ".join(str(tc.get("title", "")).strip() for tc in topics_content[:4]),
+                    "technical quiz generation",
+                ]
+            ).strip(),
+        )
+        prompt = _build_quiz_prompt(
+            topics_content,
+            count,
+            question_types,
+            difficulty,
+            level,
+            response_detail=effective_detail,
+            preferred_language=(preferred_language or "").strip().lower(),
+            mcp_context=mcp_context,
+        )
         allowed_topics = {str(tc["id"]) for tc in topics_content}
         allowed_types = set(question_types or ["mcq", "true_false"])
         validator = lambda item: _validate_quiz_item(
@@ -1048,7 +1176,7 @@ class QuestionGenerator:
                     type=QuizQuestionType(item["type"]),
                     choices=choices,
                     correct_answer=str(item["correct_answer"]).strip(),
-                    explanation=item["explanation"].strip(),
+                    explanation=format_markdown_readable(item["explanation"].strip()),
                     difficulty=item["difficulty"],
                     topic_id=topic_id,
                     source_quote=item["source_quote"].strip(),

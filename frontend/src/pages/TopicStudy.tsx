@@ -22,6 +22,7 @@ import {
 } from "@/utils/animations";
 import {
   fetchTopic,
+  updateTopicPreferences,
   generateQuestions,
   generateQuestionsV2,
   generateQuestionsV2Stream,
@@ -39,6 +40,7 @@ import type {
   QuestionAnswerV2,
   InterviewLevel,
   LearningTrack,
+  ResponseDetail,
 } from "@/types";
 
 const TRACK_LABELS: Record<LearningTrack, string> = {
@@ -94,6 +96,11 @@ export default function TopicStudy() {
     malformed: 0,
   });
   const [errorMsg, setErrorMsg] = useState("");
+  const [responseDetail, setResponseDetail] = useState<ResponseDetail>("concise");
+  const [requiresProgramming, setRequiresProgramming] = useState(false);
+  const [languageOptions, setLanguageOptions] = useState<string[]>([]);
+  const [preferredLanguage, setPreferredLanguage] = useState("");
+  const [savingTopicPrefs, setSavingTopicPrefs] = useState(false);
   const navRef = useRef<HTMLElement | null>(null);
   const generationAbortRef = useRef<AbortController | null>(null);
 
@@ -114,7 +121,13 @@ export default function TopicStudy() {
     setCourseSearchQuery("");
     setNavScrollTop(0);
     fetchTopic(topicId)
-      .then(setTopic)
+      .then((loaded) => {
+        setTopic(loaded);
+        setResponseDetail(loaded.response_detail || "concise");
+        setRequiresProgramming(!!loaded.requires_programming);
+        setLanguageOptions(loaded.language_options || []);
+        setPreferredLanguage(loaded.selected_language || "");
+      })
       .catch(() => setErrorMsg("Failed to load this topic. Please retry."))
       .finally(() => setLoading(false));
   }, [topicId]);
@@ -133,6 +146,26 @@ export default function TopicStudy() {
     );
     return () => window.clearTimeout(handle);
   }, [courseSearchInput]);
+
+  const saveTopicPreferences = useCallback(
+    async (next: { response_detail?: ResponseDetail; preferred_language?: string }) => {
+      if (!topicId) return;
+      setSavingTopicPrefs(true);
+      try {
+        const saved = await updateTopicPreferences(topicId, next);
+        setResponseDetail(saved.response_detail);
+        setRequiresProgramming(saved.requires_programming);
+        setLanguageOptions(saved.language_options || []);
+        setPreferredLanguage(saved.preferred_language || "");
+      } catch (err) {
+        console.error(err);
+        setErrorMsg("Failed to save topic preferences.");
+      } finally {
+        setSavingTopicPrefs(false);
+      }
+    },
+    [topicId],
+  );
 
   const handleGenerate = useCallback(async () => {
     if (!topicId || !topic) return;
@@ -155,6 +188,10 @@ export default function TopicStudy() {
         count: questionCount,
         difficulty: difficulty || undefined,
         level,
+        response_detail: responseDetail,
+        preferred_language: requiresProgramming
+          ? preferredLanguage || undefined
+          : undefined,
         llm_config: {
           provider: settings.provider,
           model: settings.model,
@@ -263,7 +300,18 @@ export default function TopicStudy() {
         setGenerating(false);
       }
     }
-  }, [topicId, topic, activeSection, questionCount, difficulty, level, settings]);
+  }, [
+    topicId,
+    topic,
+    activeSection,
+    questionCount,
+    difficulty,
+    level,
+    settings,
+    responseDetail,
+    preferredLanguage,
+    requiresProgramming,
+  ]);
 
   const toggleQuestion = (idx: number) => {
     if (expandedQ === idx) {
@@ -563,6 +611,50 @@ export default function TopicStudy() {
 
                 <div>
                   <label className="block text-xs font-medium text-udemy-text-muted mb-1">
+                    Response Detail
+                  </label>
+                  <select
+                    value={responseDetail}
+                    onChange={(e) => {
+                      const next = e.target.value as ResponseDetail;
+                      setResponseDetail(next);
+                      void saveTopicPreferences({ response_detail: next });
+                    }}
+                    className="border border-udemy-border rounded px-3 py-2 text-sm"
+                    disabled={savingTopicPrefs}
+                  >
+                    <option value="concise">Concise</option>
+                    <option value="very_detailed">Very Detailed</option>
+                  </select>
+                </div>
+
+                {requiresProgramming && (
+                  <div>
+                    <label className="block text-xs font-medium text-udemy-text-muted mb-1">
+                      Code Language
+                    </label>
+                    <select
+                      value={preferredLanguage}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setPreferredLanguage(next);
+                        void saveTopicPreferences({ preferred_language: next });
+                      }}
+                      className="border border-udemy-border rounded px-3 py-2 text-sm min-w-[150px]"
+                      disabled={savingTopicPrefs}
+                    >
+                      <option value="">Auto</option>
+                      {languageOptions.map((lang) => (
+                        <option key={lang} value={lang}>
+                          {lang}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-medium text-udemy-text-muted mb-1">
                     Interview Level
                   </label>
                   <select
@@ -654,6 +746,14 @@ export default function TopicStudy() {
                         topicTrack={topic.track}
                         sectionTitle={qa.source_section || topic.sections[activeSection]?.heading}
                         mode="study"
+                        showFloatingTrigger={expandedQ === null ? idx === 0 : expandedQ === idx}
+                        floatingTriggerWord={
+                          qa.source_section || topic.sections[activeSection]?.heading || topic.title
+                        }
+                        floatingTriggerPrompt="Explain this section in an organized way with practical examples and key tradeoffs."
+                        responseDetail={responseDetail}
+                        preferredLanguage={preferredLanguage}
+                        requiresProgramming={requiresProgramming}
                         selectionTargetSelector='[data-word-chat-target="true"]'
                         qaKey={`${topicId}-${qa.question_id}`}
                       >

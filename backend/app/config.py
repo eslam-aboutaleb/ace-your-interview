@@ -46,6 +46,30 @@ class Settings(BaseSettings):
     llm_service_users_file: str = "llm_service_users.json"
     llm_assignments_file: str = "llm_assignments.json"
 
+    # MCP gateway
+    enable_mcp_gateway: bool = False
+    mcp_rollout_stage: int = 1  # 1=custom+chat, 2=+questions+quiz, 3=+interview
+    mcp_timeout_seconds: float = 8.0
+    mcp_max_context_chars: int = 6000
+
+    mcp_enable_custom_topic: bool = True
+    mcp_enable_chat: bool = True
+    mcp_enable_questions: bool = True
+    mcp_enable_quiz: bool = True
+    mcp_enable_interview: bool = True
+
+    # Tavily
+    tavily_api_key: str = ""
+    mcp_tavily_enabled: bool = False
+
+    # Firecrawl
+    firecrawl_api_key: str = ""
+    mcp_firecrawl_enabled: bool = False
+
+    # GitHub (optional token for higher limits)
+    github_token: str = ""
+    mcp_github_enabled: bool = False
+
     model_config = {"env_prefix": "STUDY_", "env_file": ".env", "extra": "ignore"}
 
 

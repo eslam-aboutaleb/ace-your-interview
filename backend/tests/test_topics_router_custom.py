@@ -40,6 +40,7 @@ class TopicsRouterCustomTests(unittest.TestCase):
         self.prev_parser = topics._parser
         self.prev_llm = topics._llm_client
         self.prev_store = topics._learning_store
+        self.prev_mcp = topics._mcp_gateway
 
         self.tempdir = tempfile.TemporaryDirectory()
         handbook = os.path.join(self.tempdir.name, "owner-handbook")
@@ -71,6 +72,7 @@ Static description.
         topics._parser = self.prev_parser
         topics._llm_client = self.prev_llm
         topics._learning_store = self.prev_store
+        topics._mcp_gateway = self.prev_mcp
         self.tempdir.cleanup()
 
     def test_custom_topic_create_list_and_get(self):

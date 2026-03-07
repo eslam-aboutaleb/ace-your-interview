@@ -6,17 +6,32 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import require_auth
 from app.schemas.models import ChatFollowUpRequest, ChatFollowUpResponse
+from app.services.doc_parser import DocParser
+from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
 from app.services.llm_policy import raise_if_policy_blocked_result
+from app.services.markdown_formatter import format_markdown_readable
+from app.services.mcp_gateway import MCPGateway
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 _llm_client: LLMClient | None = None
+_parser: DocParser | None = None
+_learning_store: LearningStore | None = None
+_mcp_gateway: MCPGateway | None = None
 
 
-def init(llm_client: LLMClient):
-    global _llm_client
+def init(
+    llm_client: LLMClient,
+    parser: DocParser | None = None,
+    learning_store: LearningStore | None = None,
+    mcp_gateway: MCPGateway | None = None,
+):
+    global _llm_client, _parser, _learning_store, _mcp_gateway
     _llm_client = llm_client
+    _parser = parser
+    _learning_store = learning_store
+    _mcp_gateway = mcp_gateway
 
 
 @router.post("/follow-up", response_model=ChatFollowUpResponse)
@@ -27,6 +42,33 @@ async def chat_follow_up(
     """Answer a follow-up question about a highlighted word/phrase in a Q&A."""
     if _llm_client is None:
         raise HTTPException(status_code=503, detail="Service not initialised")
+
+    resolved_detail = body.response_detail.value if body.response_detail else "concise"
+    resolved_language = (body.preferred_language or "").strip().lower()
+    resolved_requires_programming = bool(body.requires_programming)
+
+    if body.topic_id and _learning_store is not None:
+        topic_detail = None
+        if _parser is not None:
+            static = _parser.get_topic(body.topic_id)
+            if static:
+                topic_detail = static.model_dump(mode="json")
+        if topic_detail is None:
+            custom = _learning_store.get_custom_topic(user_id=user["user"], topic_id=body.topic_id)
+            if custom:
+                topic_detail = custom
+        if topic_detail is not None:
+            resolved = _learning_store.resolve_topic_ai_settings(
+                user_id=user["user"],
+                topic_id=body.topic_id,
+                topic_detail=topic_detail,
+            )
+            if body.response_detail is None:
+                resolved_detail = resolved.get("response_detail", "concise")
+            if body.preferred_language is None:
+                resolved_language = resolved.get("preferred_language", "")
+            if body.requires_programming is None:
+                resolved_requires_programming = bool(resolved.get("requires_programming", False))
 
     # Build conversation history for context
     history_text = ""
@@ -51,6 +93,31 @@ async def chat_follow_up(
         if topic_context_lines
         else "- Topic metadata not provided."
     )
+    mcp_context = ""
+    if _mcp_gateway is not None:
+        mcp_context = await _mcp_gateway.gather_context(
+            flow="chat",
+            query=f"{body.topic_title or body.topic_id} {body.word} {body.user_message}",
+            topic_id=body.topic_id,
+            topic_title=body.topic_title,
+        )
+    mcp_block = (
+        f"\n\nExternal context (optional, use only if helpful and factual):\n{mcp_context}"
+        if mcp_context
+        else ""
+    )
+    detail_clause = (
+        "Use concise responses by default."
+        if resolved_detail == "concise"
+        else "Provide very detailed responses with layered explanation depth."
+    )
+    language_clause = ""
+    if resolved_requires_programming and resolved_language:
+        language_clause = (
+            f'\n- Include one practical fenced code example in "{resolved_language}" when code adds clarity.'
+        )
+    elif not resolved_requires_programming:
+        language_clause = "\n- Avoid code blocks unless the user explicitly asks for code."
 
     prompt = f"""You are a helpful study assistant. The user is studying technical documentation and has a follow-up question.
 
@@ -69,24 +136,25 @@ User's question: {body.user_message}
 Provide a clear, educational explanation grounded in the context above.
 Rules:
 - Be concise but thorough.
+- {detail_clause}
 - Keep the explanation oriented to the provided topic context and this Q&A.
 - If the question drifts outside topic scope, answer briefly and connect back to the current topic.
 - If the highlighted word is technical, define it and explain why it matters here.
 - Include one short quote from the context when possible.
 - If the answer is uncertain from context, explicitly say what is uncertain and avoid inventing facts.
 - Format as markdown with adaptive structure:
-  - default to concise prose paragraphs,
+  - use short paragraphs with blank lines for long responses,
   - use bullets only when listing steps/checklists/categories,
   - use headings only when sections improve clarity,
   - use tables only for direct comparisons/category matrices.
 - If you use a table, output valid GFM table syntax:
   - one row per line,
   - include a separator row (e.g. `| --- | --- |`).
-- You may include fenced code blocks when code clarifies the explanation.
+- You may include fenced code blocks when code clarifies the explanation.{language_clause}
 - You may include fenced Mermaid diagrams when system behavior is easier to explain visually.
 - If you include fences, always use explicit language tags (for example: ```python, ```mermaid).
 - End with one practical takeaway sentence.
-Return markdown only."""
+Return markdown only.{mcp_block}"""
 
     result = await _llm_client.completion(
         prompt,
@@ -97,8 +165,9 @@ Return markdown only."""
 
     if result["success"] and result["analysis"]:
         metadata = result.get("metadata", {})
+        reply = format_markdown_readable(result["analysis"])
         return ChatFollowUpResponse(
-            reply=result["analysis"],
+            reply=reply,
             provider_used=metadata.get("provider", ""),
             model_used=metadata.get("model", ""),
         )
