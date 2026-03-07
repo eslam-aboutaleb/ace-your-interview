@@ -14,6 +14,8 @@ export type InterviewType =
   | "ai_fundamentals"
   | "coding"
   | "mixed";
+export type InterviewerStyle = "supportive" | "neutral" | "challenging";
+export type FeedbackMode = "concise" | "deep";
 
 export interface TopicSummary {
   id: string;
@@ -560,6 +562,8 @@ export interface InterviewSession {
   turns_completed: number;
   status: "active" | "completed";
   target_role: string;
+  interviewer_style: InterviewerStyle;
+  feedback_mode: FeedbackMode;
   focus_areas: string[];
   created_at: string;
   updated_at: string;
@@ -601,6 +605,8 @@ export interface CreateInterviewSessionRequest {
   interview_type: InterviewType;
   turn_count: number;
   target_role: string;
+  interviewer_style?: InterviewerStyle;
+  feedback_mode?: FeedbackMode;
   job_description_text: string;
   resume_summary_text: string;
   focus_areas: string[];

@@ -191,6 +191,9 @@ export default function InterviewSessionPage() {
           <p className="text-gray-400 text-sm mt-1">
             {data.session.track} · {data.session.level} · {data.session.interview_type}
           </p>
+          <p className="text-gray-400 text-xs mt-1">
+            style: {data.session.interviewer_style} · feedback: {data.session.feedback_mode}
+          </p>
           <div className="mt-4 bg-white/15 h-2 rounded-full overflow-hidden">
             <div
               className="bg-udemy-purple-light h-full"

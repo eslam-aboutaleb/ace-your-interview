@@ -14,8 +14,10 @@ import {
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import type {
+  FeedbackMode,
   InterviewLevel,
   InterviewSession,
+  InterviewerStyle,
   InterviewType,
   LearningTrack,
 } from "@/types";
@@ -35,6 +37,8 @@ export default function InterviewSetup() {
   const [level, setLevel] = useState<InterviewLevel>("mid");
   const [interviewType, setInterviewType] = useState<InterviewType>("mixed");
   const [turnCount, setTurnCount] = useState(5);
+  const [interviewerStyle, setInterviewerStyle] = useState<InterviewerStyle>("neutral");
+  const [feedbackMode, setFeedbackMode] = useState<FeedbackMode>("concise");
   const [targetRole, setTargetRole] = useState("");
   const [jobDescriptionText, setJobDescriptionText] = useState("");
   const [resumeSummaryText, setResumeSummaryText] = useState("");
@@ -68,6 +72,8 @@ export default function InterviewSetup() {
         interview_type: interviewType,
         turn_count: turnCount,
         target_role: targetRole.trim(),
+        interviewer_style: interviewerStyle,
+        feedback_mode: feedbackMode,
         job_description_text: jobDescriptionText.trim(),
         resume_summary_text: resumeSummaryText.trim(),
         focus_areas: focusAreas,
@@ -179,6 +185,31 @@ export default function InterviewSetup() {
                         {n}
                       </option>
                     ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Interviewer Style</label>
+                  <select
+                    value={interviewerStyle}
+                    onChange={(e) => setInterviewerStyle(e.target.value as InterviewerStyle)}
+                    className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
+                  >
+                    <option value="supportive">Supportive</option>
+                    <option value="neutral">Neutral</option>
+                    <option value="challenging">Challenging</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Feedback Depth</label>
+                  <select
+                    value={feedbackMode}
+                    onChange={(e) => setFeedbackMode(e.target.value as FeedbackMode)}
+                    className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
+                  >
+                    <option value="concise">Concise</option>
+                    <option value="deep">Deep</option>
                   </select>
                 </div>
               </div>

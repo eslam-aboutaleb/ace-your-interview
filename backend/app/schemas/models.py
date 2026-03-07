@@ -41,6 +41,17 @@ class InterviewTypeEnum(str, Enum):
     MIXED = "mixed"
 
 
+class InterviewerStyleEnum(str, Enum):
+    SUPPORTIVE = "supportive"
+    NEUTRAL = "neutral"
+    CHALLENGING = "challenging"
+
+
+class FeedbackModeEnum(str, Enum):
+    CONCISE = "concise"
+    DEEP = "deep"
+
+
 class ResponseDetailEnum(str, Enum):
     CONCISE = "concise"
     VERY_DETAILED = "very_detailed"
@@ -498,6 +509,8 @@ class InterviewSession(BaseModel):
     turns_completed: int
     status: str
     target_role: str = ""
+    interviewer_style: InterviewerStyleEnum = InterviewerStyleEnum.NEUTRAL
+    feedback_mode: FeedbackModeEnum = FeedbackModeEnum.CONCISE
     focus_areas: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -539,6 +552,8 @@ class CreateInterviewSessionRequest(BaseModel):
     interview_type: InterviewTypeEnum = InterviewTypeEnum.MIXED
     turn_count: int = Field(default=5, ge=1, le=20)
     target_role: str = Field(default="", max_length=200)
+    interviewer_style: InterviewerStyleEnum = InterviewerStyleEnum.NEUTRAL
+    feedback_mode: FeedbackModeEnum = FeedbackModeEnum.CONCISE
     job_description_text: str = Field(default="", max_length=20000)
     resume_summary_text: str = Field(default="", max_length=20000)
     focus_areas: list[str] = Field(default_factory=list, max_length=30)
