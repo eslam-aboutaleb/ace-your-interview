@@ -1,6 +1,8 @@
 """Study-app backend configuration."""
 
 from functools import lru_cache
+from typing import Any
+
 from pydantic_settings import BaseSettings
 
 
@@ -28,6 +30,11 @@ class Settings(BaseSettings):
     enable_v2_generation: bool = True
     enable_adaptive_learning: bool = True
     enable_mock_interview_v1: bool = False
+    enable_topic_videos: bool = False
+    youtube_api_key: str = ""
+    topic_videos_default_limit: int = 3
+    topic_videos_cache_ttl_hours: int = 168
+    topic_videos_disable_on_quota: bool = True
 
     # CORS
     cors_origins: str = "http://localhost:5174,http://localhost:5173,http://127.0.0.1:5174"
@@ -44,9 +51,18 @@ class Settings(BaseSettings):
     allowed_google_emails: str = ""
     admin_users: str = ""
     credentials_encryption_key: str = ""
+    allow_insecure_dev_encryption_fallback: bool = False
+    insecure_dev_credentials_encryption_secret: str = ""
     user_settings_file: str = "user_llm_settings.json"
     llm_service_users_file: str = "llm_service_users.json"
     llm_assignments_file: str = "llm_assignments.json"
+    enable_rate_limiting: bool = True
+    oauth_rate_limit_requests: int = 20
+    oauth_rate_limit_window_seconds: int = 300
+    session_rate_limit_requests: int = 90
+    session_rate_limit_window_seconds: int = 60
+    llm_rate_limit_requests: int = 30
+    llm_rate_limit_window_seconds: int = 60
 
     # MCP gateway
     enable_mcp_gateway: bool = False
@@ -74,9 +90,46 @@ class Settings(BaseSettings):
     github_token: str = ""
     mcp_github_enabled: bool = False
 
+    # Voice agent
+    enable_voice_agent: bool = False
+    voice_tiers_enabled: str = "browser"  # comma-separated: browser,cloud,realtime
+    voice_default_tier: str = "browser"
+    voice_stt_provider: str = "groq"       # groq or openai
+    voice_stt_model: str = "whisper-large-v3"
+    voice_tts_provider: str = "edge"       # edge (free) or openai
+    voice_tts_voice: str = "en-US-AriaNeural"
+    voice_openai_realtime_model: str = "gpt-4o-realtime-preview"
+
     model_config = {"env_prefix": "STUDY_", "env_file": ".env", "extra": "ignore"}
 
 
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+
+
+_WEAK_AUTH_SECRET_VALUES = {
+    "",
+    "changeme",
+    "change-me",
+    "default",
+    "dev-secret",
+    "insecure",
+    "password",
+    "replace-me",
+    "secret",
+    "test",
+    "your-secret-key",
+}
+
+
+def resolve_auth_secret_key(settings: Any) -> str:
+    """Validate and return the JWT signing secret."""
+    secret = str(getattr(settings, "auth_secret_key", "") or "").strip()
+    normalized = secret.lower()
+    if not secret or len(secret) < 32 or normalized in _WEAK_AUTH_SECRET_VALUES:
+        raise RuntimeError(
+            "STUDY_AUTH_SECRET_KEY must be set to a strong value (at least 32 characters) "
+            "and must not use common placeholder values."
+        )
+    return secret

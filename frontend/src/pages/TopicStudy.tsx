@@ -11,6 +11,7 @@ import {
   Play,
   AlertTriangle,
   Search,
+  ExternalLink,
   X,
 } from "lucide-react";
 import {
@@ -22,6 +23,9 @@ import {
 } from "@/utils/animations";
 import {
   fetchTopic,
+  fetchTopicVideosStatus,
+  fetchTopicSectionVideos,
+  recordTopicVideoEvent,
   updateTopicPreferences,
   generateTopicContentStream,
   isTopicContentStreamError,
@@ -47,6 +51,7 @@ import type {
   InterviewLevel,
   LearningTrack,
   ResponseDetail,
+  VideoResource,
 } from "@/types";
 
 const TRACK_LABELS: Record<LearningTrack, string> = {
@@ -113,6 +118,11 @@ export default function TopicStudy() {
   const [curriculumSections, setCurriculumSections] = useState<
     { index: number; heading: string }[]
   >([]);
+  const [topicVideosEnabled, setTopicVideosEnabled] = useState(false);
+  const [topicVideosStatusLoaded, setTopicVideosStatusLoaded] = useState(false);
+  const [sectionVideos, setSectionVideos] = useState<VideoResource[]>([]);
+  const [videosLoading, setVideosLoading] = useState(false);
+  const [videosError, setVideosError] = useState("");
   const navRef = useRef<HTMLElement | null>(null);
   const generationAbortRef = useRef<AbortController | null>(null);
   const curriculumAbortRef = useRef<AbortController | null>(null);
@@ -146,6 +156,31 @@ export default function TopicStudy() {
   }, [topicId]);
 
   useEffect(() => {
+    if (!topicId) return;
+    let active = true;
+    setTopicVideosStatusLoaded(false);
+    setTopicVideosEnabled(false);
+    setSectionVideos([]);
+    setVideosError("");
+    fetchTopicVideosStatus()
+      .then((status) => {
+        if (!active) return;
+        setTopicVideosEnabled(!!status.enabled);
+      })
+      .catch(() => {
+        if (!active) return;
+        setTopicVideosEnabled(false);
+      })
+      .finally(() => {
+        if (!active) return;
+        setTopicVideosStatusLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [topicId]);
+
+  useEffect(() => {
     return () => {
       generationAbortRef.current?.abort();
       generationAbortRef.current = null;
@@ -161,6 +196,60 @@ export default function TopicStudy() {
     );
     return () => window.clearTimeout(handle);
   }, [courseSearchInput]);
+
+  useEffect(() => {
+    if (!topicId || !topic || !topicVideosEnabled || !topicVideosStatusLoaded) {
+      setSectionVideos([]);
+      setVideosError("");
+      setVideosLoading(false);
+      return;
+    }
+    const section = topic.sections[activeSection];
+    if (!section) {
+      setSectionVideos([]);
+      setVideosError("");
+      setVideosLoading(false);
+      return;
+    }
+
+    let active = true;
+    setVideosLoading(true);
+    setVideosError("");
+    fetchTopicSectionVideos(topicId, {
+      section_index: activeSection,
+      preferred_language: preferredLanguage || undefined,
+      limit: 3,
+    })
+      .then((res) => {
+        if (!active) return;
+        if (!res.enabled || res.status === "disabled_quota_exhausted") {
+          setTopicVideosEnabled(false);
+          setSectionVideos([]);
+          return;
+        }
+        setSectionVideos(Array.isArray(res.videos) ? res.videos : []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSectionVideos([]);
+        setVideosError("Could not load video recommendations right now.");
+      })
+      .finally(() => {
+        if (!active) return;
+        setVideosLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    topicId,
+    topic,
+    activeSection,
+    preferredLanguage,
+    topicVideosEnabled,
+    topicVideosStatusLoaded,
+  ]);
 
   const saveTopicPreferences = useCallback(
     async (next: { response_detail?: ResponseDetail; preferred_language?: string }) => {
@@ -568,6 +657,33 @@ export default function TopicStudy() {
   const progress = topicId ? getTopicProgress(topicId) : 0;
   const normalizedTopicTitle = normalizeEscapedSingleLineText(topic?.title || "");
   const normalizedTopicDescription = normalizeEscapedMultilineText(topic?.description || "");
+  const formatVideoDuration = (seconds: number): string => {
+    const safe = Math.max(0, Number(seconds || 0));
+    const mins = Math.floor(safe / 60);
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    if (hrs > 0) {
+      return `${hrs}h ${remMins}m`;
+    }
+    return `${mins}m`;
+  };
+  const handleVideoClick = useCallback(
+    (video: VideoResource) => {
+      if (!topicId || !topic?.sections[activeSection]) return;
+      void recordTopicVideoEvent({
+        event_name: "video_click",
+        topic_id: topicId,
+        section_index: activeSection,
+        section_heading: topic.sections[activeSection].heading,
+        video_id: video.video_id,
+        metadata: {
+          url: video.url,
+          source: video.source,
+        },
+      });
+    },
+    [topicId, topic, activeSection],
+  );
   const indexedSections = useMemo<IndexedSection[]>(
     () =>
       (topic?.sections || []).map((sec, index) => ({
@@ -850,6 +966,54 @@ export default function TopicStudy() {
                   className="text-[14px]"
                 />
               </motion.div>
+            )}
+
+            {topicVideosStatusLoaded && topicVideosEnabled && topic.sections[activeSection] && (
+              <div className="udemy-card p-4 sm:p-6 mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-udemy-text-muted uppercase tracking-wide">
+                    Recommended Videos
+                  </h3>
+                  {videosLoading && <Loader2 className="w-4 h-4 animate-spin text-udemy-text-muted" />}
+                </div>
+
+                {videosError && (
+                  <div className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    {videosError}
+                  </div>
+                )}
+
+                {!videosLoading && sectionVideos.length === 0 && !videosError && (
+                  <p className="text-sm text-udemy-text-muted">
+                    No video recommendations were found for this section yet.
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  {sectionVideos.map((video) => (
+                    <a
+                      key={video.video_id}
+                      href={video.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => handleVideoClick(video)}
+                      className="block rounded-lg border border-udemy-border p-3 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold line-clamp-2">
+                            {normalizeEscapedSingleLineText(video.title)}
+                          </p>
+                          <p className="text-xs text-udemy-text-muted mt-1">
+                            {normalizeEscapedSingleLineText(video.channel)} · {formatVideoDuration(video.duration_seconds)}
+                          </p>
+                        </div>
+                        <ExternalLink className="w-4 h-4 text-udemy-text-muted flex-shrink-0 mt-0.5" />
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </div>
             )}
 
             <div className="udemy-card p-4 sm:p-6 mb-6">
@@ -1164,17 +1328,6 @@ export default function TopicStudy() {
                                         </h4>
                                         <p className="text-sm">
                                           {normalizeEscapedSingleLineText(qa.misconception_trap)}
-                                        </p>
-                                      </div>
-                                      <div className="bg-white border border-udemy-border rounded-lg p-3 md:col-span-2">
-                                        <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
-                                          Source Grounding
-                                        </h4>
-                                        <p className="text-xs text-udemy-text-muted mb-1">
-                                          Section: {normalizeEscapedSingleLineText(qa.source_section)}
-                                        </p>
-                                        <p className="text-sm italic whitespace-pre-line">
-                                          &ldquo;{normalizeEscapedMultilineText(qa.source_quote)}&rdquo;
                                         </p>
                                       </div>
                                     </div>

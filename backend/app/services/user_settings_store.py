@@ -13,11 +13,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.config import get_settings
 from app.schemas.models import MODEL_SUGGESTIONS, USER_SETTINGS_PROVIDER_WHITELIST
+from app.services.http_clients import get_oauth_http_client
 from app.services.llm_assignments_store import LLMAssignmentsStore, normalise_identity
 from app.services.llm_policy import (
     PERSONAL_CREDENTIAL_REQUIRED_CODE,
@@ -41,6 +41,33 @@ def identity_key_for_user(user_identity: dict | None) -> str:
     return f"{provider}:{user}"
 
 
+def resolve_credentials_encryption_secret(settings: Any) -> str:
+    secret = str(settings.credentials_encryption_key or "").strip()
+    if secret:
+        return secret
+
+    environment = str(getattr(settings, "environment", "") or "").strip().lower()
+    allow_fallback = bool(getattr(settings, "allow_insecure_dev_encryption_fallback", False))
+    fallback_secret = str(
+        getattr(settings, "insecure_dev_credentials_encryption_secret", "") or ""
+    ).strip()
+
+    if environment == "development" and allow_fallback:
+        if not fallback_secret:
+            raise RuntimeError(
+                "STUDY_INSECURE_DEV_CREDENTIALS_ENCRYPTION_SECRET must be set when "
+                "STUDY_ALLOW_INSECURE_DEV_ENCRYPTION_FALLBACK=true"
+            )
+        logger.warning("Using explicitly configured development credentials encryption fallback secret.")
+        return fallback_secret
+
+    raise RuntimeError(
+        "STUDY_CREDENTIALS_ENCRYPTION_KEY must be set. For local development only, set "
+        "STUDY_ALLOW_INSECURE_DEV_ENCRYPTION_FALLBACK=true and provide "
+        "STUDY_INSECURE_DEV_CREDENTIALS_ENCRYPTION_SECRET."
+    )
+
+
 class UserSettingsStore:
     """JSON-backed encrypted store for user LLM preferences and credentials."""
 
@@ -56,8 +83,11 @@ class UserSettingsStore:
         self._settings = settings
         self._llm_service_access = llm_service_access or LLMServiceAccess()
         self._llm_assignments_store = llm_assignments_store or LLMAssignmentsStore()
+        self._cache_data: dict[str, Any] | None = None
+        self._cache_mtime_ns: int | None = None
+        self._cache_size: int | None = None
 
-        secret = settings.credentials_encryption_key.strip() or "dev-only-insecure-secret"
+        secret = resolve_credentials_encryption_secret(settings)
         digest = hashlib.sha256(secret.encode("utf-8")).digest()
         key = base64.urlsafe_b64encode(digest)
         self._cipher = Fernet(key)
@@ -110,17 +140,43 @@ class UserSettingsStore:
             logger.warning("Failed to decrypt user secret: invalid token")
             return None
 
+    @staticmethod
+    def _empty_data() -> dict[str, Any]:
+        return {"users": {}}
+
     def _load(self) -> dict[str, Any]:
         if not self._path.exists():
-            return {"users": {}}
+            self._cache_data = self._empty_data()
+            self._cache_mtime_ns = None
+            self._cache_size = None
+            return self._cache_data
+
+        try:
+            stat = self._path.stat()
+            mtime_ns = int(stat.st_mtime_ns)
+            size = int(stat.st_size)
+        except OSError:
+            return self._empty_data()
+
+        if (
+            self._cache_data is not None
+            and self._cache_mtime_ns == mtime_ns
+            and self._cache_size == size
+        ):
+            return self._cache_data
+
+        data = self._empty_data()
         try:
             with open(self._path) as f:
-                data = json.load(f)
-            if isinstance(data, dict) and isinstance(data.get("users"), dict):
-                return data
+                loaded = json.load(f)
+            if isinstance(loaded, dict) and isinstance(loaded.get("users"), dict):
+                data = loaded
         except Exception as exc:
             logger.warning("Failed to load user settings store: %s", exc)
-        return {"users": {}}
+        self._cache_data = data
+        self._cache_mtime_ns = mtime_ns
+        self._cache_size = size
+        return data
 
     def _save(self, data: dict[str, Any]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,6 +185,14 @@ class UserSettingsStore:
             with os.fdopen(fd, "w") as f:
                 json.dump(data, f, indent=2, sort_keys=True)
             os.replace(temp_path, self._path)
+            self._cache_data = data
+            try:
+                stat = self._path.stat()
+                self._cache_mtime_ns = int(stat.st_mtime_ns)
+                self._cache_size = int(stat.st_size)
+            except OSError:
+                self._cache_mtime_ns = None
+                self._cache_size = None
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
@@ -353,18 +417,19 @@ class UserSettingsStore:
             return None
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    "https://oauth2.googleapis.com/token",
-                    data={
-                        "client_id": self._settings.google_client_id,
-                        "client_secret": self._settings.google_client_secret,
-                        "grant_type": "refresh_token",
-                        "refresh_token": refresh_token,
-                    },
-                )
-                resp.raise_for_status()
-                payload = resp.json()
+            client = get_oauth_http_client()
+            resp = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": self._settings.google_client_id,
+                    "client_secret": self._settings.google_client_secret,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
         except Exception as exc:
             logger.warning("Google OAuth refresh failed for %s: %s", identity_key, exc)
             return None

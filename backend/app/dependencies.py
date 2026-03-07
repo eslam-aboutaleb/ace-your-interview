@@ -1,5 +1,7 @@
 """Shared FastAPI dependencies."""
 
+from ipaddress import ip_address
+
 from fastapi import Cookie, Depends, HTTPException, Request
 
 from app.config import get_settings
@@ -7,15 +9,34 @@ from app.services.auth import decode_jwt_token
 
 
 def _is_localhost_request(request: Request) -> bool:
-    host = (request.url.hostname or "").lower()
-    return host in {"localhost", "127.0.0.1", "::1"}
+    host = (request.url.hostname or "").strip().lower().rstrip(".")
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
-def _is_local_frontend_config() -> bool:
-    frontend = (get_settings().frontend_url or "").lower()
+def _is_local_frontend_config(frontend_url: str) -> bool:
+    frontend = (frontend_url or "").strip().lower()
     return frontend.startswith("http://localhost") or frontend.startswith(
         "http://127.0.0.1"
     )
+
+
+def _is_loopback_client_request(request: Request) -> bool:
+    client_host = (request.client.host if request.client else "").strip()
+    if not client_host:
+        return False
+    try:
+        return ip_address(client_host).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_dev_environment(environment: str) -> bool:
+    return (environment or "").strip().lower() in {"development", "dev", "local", "test"}
 
 
 def _normalise_identity(provider: str, user: str) -> tuple[str, str]:
@@ -44,8 +65,10 @@ async def require_auth(request: Request, session: str = Cookie(default=None)) ->
 
     if (
         settings.dev_auth_bypass_localhost
-        and _is_local_frontend_config()
+        and _is_dev_environment(settings.environment)
+        and _is_local_frontend_config(settings.frontend_url)
         and _is_localhost_request(request)
+        and _is_loopback_client_request(request)
     ):
         if session:
             try:

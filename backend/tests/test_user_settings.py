@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.dependencies import require_auth
 from app.routers import user_settings
+from app.services.oauth_state import create_oauth_state
 from app.services.user_settings_store import UserSettingsStore, identity_key_for_user
 
 
@@ -23,16 +24,7 @@ class _FakeHTTPResponse:
         return self._payload
 
 
-class _FakeAsyncClient:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
+class _FakeOAuthClient:
     async def post(self, *args, **kwargs):
         return _FakeHTTPResponse(
             {
@@ -54,6 +46,7 @@ class UserSettingsRouterTests(unittest.TestCase):
             "STUDY_GOOGLE_CLIENT_ID": os.environ.get("STUDY_GOOGLE_CLIENT_ID"),
             "STUDY_GOOGLE_CLIENT_SECRET": os.environ.get("STUDY_GOOGLE_CLIENT_SECRET"),
             "STUDY_FRONTEND_URL": os.environ.get("STUDY_FRONTEND_URL"),
+            "STUDY_AUTH_SECRET_KEY": os.environ.get("STUDY_AUTH_SECRET_KEY"),
             "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
         }
         os.environ["STUDY_USER_SETTINGS_FILE"] = os.path.join(self.tmpdir.name, "user_settings.json")
@@ -63,6 +56,7 @@ class UserSettingsRouterTests(unittest.TestCase):
         os.environ["STUDY_GOOGLE_CLIENT_ID"] = "test-google-client-id"
         os.environ["STUDY_GOOGLE_CLIENT_SECRET"] = "test-google-client-secret"
         os.environ["STUDY_FRONTEND_URL"] = "http://localhost:5174"
+        os.environ["STUDY_AUTH_SECRET_KEY"] = "a" * 64
         get_settings.cache_clear()
 
         self.store = UserSettingsStore()
@@ -134,15 +128,20 @@ class UserSettingsRouterTests(unittest.TestCase):
     def test_google_callback_stores_tokens(self):
         from unittest.mock import patch
 
-        self.client.cookies.set("oauth_user_settings_state", "state-123")
-        self.client.cookies.set(
-            "oauth_user_settings_identity",
-            "google:learner@example.com",
+        state_token = create_oauth_state(
+            {
+                "purpose": "user_settings_google_connect",
+                "identity_key": "google:learner@example.com",
+            }
         )
 
-        with patch("app.routers.user_settings.httpx.AsyncClient", _FakeAsyncClient):
+        with patch(
+            "app.routers.user_settings.get_oauth_http_client",
+            return_value=_FakeOAuthClient(),
+        ):
             cb = self.client.get(
-                "/api/user-settings/google/callback?code=code-123&state=state-123",
+                "/api/user-settings/google/callback",
+                params={"code": "code-123", "state": state_token},
                 follow_redirects=False,
             )
 
@@ -156,6 +155,13 @@ class UserSettingsRouterTests(unittest.TestCase):
         self.assertTrue(providers["google"]["account_connected"])
         self.assertEqual(payload["preferences"]["provider"], "google")
         self.assertEqual(payload["preferences"]["auth_mode"], "account")
+
+    def test_google_connect_uses_signed_state_without_oauth_cookies(self):
+        connect = self.client.get("/api/user-settings/google/connect", follow_redirects=False)
+        self.assertIn(connect.status_code, (302, 307))
+        self.assertIn("state=", connect.headers.get("location", ""))
+        self.assertNotIn("oauth_user_settings_state", connect.headers.get("set-cookie", ""))
+        self.assertNotIn("oauth_user_settings_identity", connect.headers.get("set-cookie", ""))
 
     def test_study_app_preferences_force_api_key_auth_mode(self):
         self.store._llm_service_access.add_user("google", "learner@example.com")

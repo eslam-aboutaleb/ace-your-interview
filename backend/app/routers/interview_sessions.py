@@ -221,7 +221,8 @@ async def submit_answer(
             rubric = eval_payload["rubric"]
             overall = int(rubric.get("overall", 60))
             confidence_signal = max(1, min(5, int(rubric.get("confidence_signal", 3))))
-            _learning_store.record_attempt(
+            await _learning_store.run_async(
+                _learning_store.record_attempt,
                 user_id=user["user"],
                 question_id=f"interview:{session_id}:{turn_index}",
                 topic_id=topic_id,

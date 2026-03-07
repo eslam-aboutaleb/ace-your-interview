@@ -108,6 +108,22 @@ Static description.
         get_res = self.client.get("/api/topics/custom-java")
         self.assertEqual(get_res.status_code, 404)
 
+    def test_topics_list_supports_opt_in_limit_offset_pagination(self):
+        self.client.post("/api/topics/custom", json={"topic": "Java", "target_sections": 100})
+        self.client.post("/api/topics/custom", json={"topic": "Python", "target_sections": 100})
+
+        full = self.client.get("/api/topics")
+        self.assertEqual(full.status_code, 200)
+        total = len(full.json())
+        self.assertGreaterEqual(total, 2)
+
+        paged = self.client.get("/api/topics?limit=1&offset=1")
+        self.assertEqual(paged.status_code, 200)
+        self.assertEqual(len(paged.json()), 1)
+        self.assertEqual(paged.headers.get("X-Total-Count"), str(total))
+        self.assertEqual(paged.headers.get("X-Offset"), "1")
+        self.assertEqual(paged.headers.get("X-Limit"), "1")
+
     def test_custom_topic_stream_emits_sections_and_done(self):
         res = self.client.post(
             "/api/topics/custom/stream",

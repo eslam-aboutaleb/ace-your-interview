@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from fastapi import FastAPI
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.dependencies import require_auth
 from app.routers import auth
+from app.services.oauth_state import create_oauth_state, verify_oauth_state
 
 
 class AuthAdminTests(unittest.TestCase):
@@ -17,7 +19,15 @@ class AuthAdminTests(unittest.TestCase):
         self.prev_admin_users = os.environ.get("STUDY_ADMIN_USERS")
         self.prev_llm_service_users_file = os.environ.get("STUDY_LLM_SERVICE_USERS_FILE")
         self.prev_llm_assignments_file = os.environ.get("STUDY_LLM_ASSIGNMENTS_FILE")
+        self.prev_auth_secret = os.environ.get("STUDY_AUTH_SECRET_KEY")
+        self.prev_frontend_url = os.environ.get("STUDY_FRONTEND_URL")
+        self.prev_github_client_id = os.environ.get("STUDY_GITHUB_CLIENT_ID")
+        self.prev_google_client_id = os.environ.get("STUDY_GOOGLE_CLIENT_ID")
         os.environ["STUDY_ADMIN_USERS"] = "google:admin@example.com,ops@example.com"
+        os.environ["STUDY_AUTH_SECRET_KEY"] = "a" * 64
+        os.environ["STUDY_FRONTEND_URL"] = "http://localhost:5174"
+        os.environ["STUDY_GITHUB_CLIENT_ID"] = "github-client-id"
+        os.environ["STUDY_GOOGLE_CLIENT_ID"] = "google-client-id"
 
         self.tmpdir = tempfile.TemporaryDirectory()
         self.allowed_file = Path(self.tmpdir.name) / "allowed_users.json"
@@ -52,6 +62,22 @@ class AuthAdminTests(unittest.TestCase):
             os.environ.pop("STUDY_LLM_ASSIGNMENTS_FILE", None)
         else:
             os.environ["STUDY_LLM_ASSIGNMENTS_FILE"] = self.prev_llm_assignments_file
+        if self.prev_auth_secret is None:
+            os.environ.pop("STUDY_AUTH_SECRET_KEY", None)
+        else:
+            os.environ["STUDY_AUTH_SECRET_KEY"] = self.prev_auth_secret
+        if self.prev_frontend_url is None:
+            os.environ.pop("STUDY_FRONTEND_URL", None)
+        else:
+            os.environ["STUDY_FRONTEND_URL"] = self.prev_frontend_url
+        if self.prev_github_client_id is None:
+            os.environ.pop("STUDY_GITHUB_CLIENT_ID", None)
+        else:
+            os.environ["STUDY_GITHUB_CLIENT_ID"] = self.prev_github_client_id
+        if self.prev_google_client_id is None:
+            os.environ.pop("STUDY_GOOGLE_CLIENT_ID", None)
+        else:
+            os.environ["STUDY_GOOGLE_CLIENT_ID"] = self.prev_google_client_id
         auth._LLM_SERVICE_ACCESS = None
         auth._LLM_ASSIGNMENTS = None
         get_settings.cache_clear()
@@ -187,6 +213,43 @@ class AuthAdminTests(unittest.TestCase):
         payload = me.json()
         self.assertEqual(payload["identity_key"], "google:admin@example.com")
         self.assertEqual(payload["assignment"]["provider"], "anthropic")
+
+    def test_oauth_login_uses_signed_state_without_oauth_cookie(self):
+        response = self.client.get("/api/auth/github", follow_redirects=False)
+        self.assertIn(response.status_code, (302, 307))
+        location = response.headers.get("location", "")
+        state = parse_qs(urlparse(location).query).get("state", [""])[0]
+        payload = verify_oauth_state(state, expected_purpose="auth_github")
+        self.assertEqual(payload.get("purpose"), "auth_github")
+        self.assertNotIn("oauth_state", response.headers.get("set-cookie", ""))
+
+    def test_oauth_callback_sets_strict_session_cookie(self):
+        async def _fake_exchange_google_code(code: str, redirect_uri: str) -> str:
+            self.assertEqual(code, "code-123")
+            self.assertTrue(redirect_uri.endswith("/api/auth/google/callback"))
+            return "admin@example.com"
+
+        state = create_oauth_state({"purpose": "auth_google"})
+        with patch("app.routers.auth.auth_service.exchange_google_code", _fake_exchange_google_code):
+            with patch("app.routers.auth.auth_service.is_allowed", return_value=True):
+                response = self.client.get(
+                    "/api/auth/google/callback",
+                    params={"code": "code-123", "state": state},
+                    follow_redirects=False,
+                )
+
+        self.assertIn(response.status_code, (302, 307))
+        self.assertIn("session=", response.headers.get("set-cookie", ""))
+        self.assertIn("samesite=strict", response.headers.get("set-cookie", "").lower())
+
+    def test_oauth_callback_rejects_invalid_state(self):
+        response = self.client.get(
+            "/api/auth/github/callback",
+            params={"code": "bad", "state": "tampered"},
+            follow_redirects=False,
+        )
+        self.assertIn(response.status_code, (302, 307))
+        self.assertIn("error=invalid_state", response.headers.get("location", ""))
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.config import get_settings
+from app.config import get_settings, resolve_auth_secret_key
 from app.dependencies import require_auth
 from app.routers import (
     auth,
@@ -22,9 +22,11 @@ from app.routers import (
     questions,
     topics,
     user_settings,
+    voice,
 )
 from app.services.doc_parser import DocParser
 from app.services.llm_assignments_store import LLMAssignmentsStore
+from app.services.http_clients import close_http_clients
 from app.services.llm_policy import (
     LLMServiceApprovalRequiredError,
     PersonalCredentialRequiredError,
@@ -35,7 +37,9 @@ from app.services.llm_service_access import LLMServiceAccess
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
 from app.services.mcp_gateway import MCPGateway
-from app.services.user_settings_store import UserSettingsStore
+from app.services.rate_limit import InMemoryRateLimiter, classify_rate_limit_scope, request_ip
+from app.services.user_settings_store import UserSettingsStore, resolve_credentials_encryption_secret
+from app.services.auth import decode_jwt_token
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,33 @@ _user_settings_store: UserSettingsStore | None = None
 _llm_service_access: LLMServiceAccess | None = None
 _llm_assignments_store: LLMAssignmentsStore | None = None
 _mcp_gateway: MCPGateway | None = None
+_rate_limiter = InMemoryRateLimiter()
+
+
+def _rate_limit_rule(scope: str) -> tuple[int, int]:
+    settings = get_settings()
+    if scope == "oauth":
+        return int(settings.oauth_rate_limit_requests), int(settings.oauth_rate_limit_window_seconds)
+    if scope == "session":
+        return int(settings.session_rate_limit_requests), int(settings.session_rate_limit_window_seconds)
+    return int(settings.llm_rate_limit_requests), int(settings.llm_rate_limit_window_seconds)
+
+
+def _rate_limit_key(scope: str, request: Request) -> str:
+    ip = request_ip(request)
+    if scope == "oauth":
+        return f"ip:{ip}"
+    session_token = request.cookies.get("session", "")
+    if session_token:
+        try:
+            payload = decode_jwt_token(session_token)
+            provider = str(payload.get("provider", "")).strip().lower()
+            subject = str(payload.get("sub", "")).strip().lower()
+            if subject:
+                return f"user:{provider}:{subject}"
+        except Exception:
+            pass
+    return f"ip:{ip}"
 
 
 def _load_dotenv():
@@ -77,10 +108,8 @@ async def lifespan(application: FastAPI):
     settings = get_settings()
     logging.basicConfig(level=logging.INFO)
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
-    if settings.environment.strip().lower() != "development" and not settings.credentials_encryption_key.strip():
-        raise RuntimeError(
-            "STUDY_CREDENTIALS_ENCRYPTION_KEY must be set when STUDY_ENVIRONMENT is not development"
-        )
+    resolve_auth_secret_key(settings)
+    resolve_credentials_encryption_secret(settings)
 
     # Initialise shared services
     _llm_service_access = LLMServiceAccess()
@@ -110,12 +139,15 @@ async def lifespan(application: FastAPI):
         settings.learning_db_path,
         _mcp_gateway,
     )
+    voice.init(_llm_client)
 
     logger.info("Loaded %d topics from %s", len(parser.list_topics()), settings.docs_path)
 
-    yield  # Application runs
-
-    logger.info("Shutdown complete")
+    try:
+        yield  # Application runs
+    finally:
+        await close_http_clients()
+        logger.info("Shutdown complete")
 
 
 def create_app() -> FastAPI:
@@ -140,18 +172,54 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @application.middleware("http")
+    async def _apply_rate_limits(request: Request, call_next):
+        settings = get_settings()
+        if not settings.enable_rate_limiting:
+            return await call_next(request)
+
+        scope = classify_rate_limit_scope(request.url.path, request.method)
+        if not scope:
+            return await call_next(request)
+
+        limit, window_seconds = _rate_limit_rule(scope)
+        key = _rate_limit_key(scope, request)
+        decision = _rate_limiter.check(
+            scope=scope,
+            key=key,
+            limit=limit,
+            window_seconds=window_seconds,
+        )
+        if decision.allowed:
+            return await call_next(request)
+
+        return JSONResponse(
+            status_code=429,
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+            content={
+                "detail": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Too many requests. Please retry later.",
+                    "scope": scope,
+                    "retry_after_seconds": decision.retry_after_seconds,
+                }
+            },
+        )
+
     # Auth router — no auth dependency (contains login endpoints)
     application.include_router(auth.router)
 
     # Protected routers
     auth_dep = [Depends(require_auth)]
     application.include_router(topics.router)
+    application.include_router(topics.features_router)
     application.include_router(questions.router, dependencies=auth_dep)
     application.include_router(llm_settings.router, dependencies=auth_dep)
     application.include_router(user_settings.router, dependencies=auth_dep)
     application.include_router(chat.router, dependencies=auth_dep)
     application.include_router(learning.router)
     application.include_router(interview_sessions.router, dependencies=auth_dep)
+    application.include_router(voice.router)  # WebSocket handles its own auth
 
     @application.exception_handler(LLMServiceApprovalRequiredError)
     async def _handle_llm_service_access_denied(

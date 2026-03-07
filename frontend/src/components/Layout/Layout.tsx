@@ -1,5 +1,6 @@
 import { Outlet } from "react-router-dom";
 import Header from "./Header";
+import { VoiceButton } from "../voice";
 
 export default function Layout() {
   return (
@@ -14,6 +15,7 @@ export default function Layout() {
           offers
         </p>
       </footer>
+      <VoiceButton />
     </div>
   );
 }

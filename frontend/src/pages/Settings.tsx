@@ -23,6 +23,8 @@ import {
   fetchLLMAssignmentUsers,
   fetchLLMServiceUsers,
   fetchMyLLMAssignment,
+  fetchTopicVideoMetrics,
+  fetchTopicVideosStatus,
   removeLLMServiceUser,
   removeAllowedUser,
   saveLLMAssignmentForUser,
@@ -33,9 +35,12 @@ import type {
   HealthStatus,
   LLMAssignmentUserItem,
   LLMMyAssignmentResponse,
+  TopicVideoMetricsResponse,
+  TopicVideosStatusResponse,
   UserSettingsProvider,
 } from "@/types";
 import { useProgressStore } from "@/store/progressStore";
+import VoiceAdminSettings from "@/components/voice/VoiceAdminSettings";
 
 type AssignmentDraft = {
   provider: UserSettingsProvider;
@@ -53,22 +58,39 @@ function firstModel(
 export default function SettingsPage() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [loadingHealth, setLoadingHealth] = useState(false);
+  const [videoStatus, setVideoStatus] = useState<TopicVideosStatusResponse | null>(
+    null,
+  );
+  const [videoMetrics, setVideoMetrics] = useState<TopicVideoMetricsResponse | null>(
+    null,
+  );
+  const [loadingVideoMetrics, setLoadingVideoMetrics] = useState(false);
 
   const [allowedUsers, setAllowedUsers] = useState<AllowedUsers | null>(null);
   const [newGithubUser, setNewGithubUser] = useState("");
   const [newGoogleEmail, setNewGoogleEmail] = useState("");
   const [loadingAllowed, setLoadingAllowed] = useState(false);
 
-  const [llmServiceUsers, setLlmServiceUsers] = useState<LLMServiceUsers | null>(null);
+  const [llmServiceUsers, setLlmServiceUsers] =
+    useState<LLMServiceUsers | null>(null);
   const [newLlmGithubUser, setNewLlmGithubUser] = useState("");
   const [newLlmGoogleEmail, setNewLlmGoogleEmail] = useState("");
   const [loadingLlmService, setLoadingLlmService] = useState(false);
 
-  const [assignmentUsers, setAssignmentUsers] = useState<LLMAssignmentUserItem[]>([]);
-  const [assignmentProviderModels, setAssignmentProviderModels] = useState<Record<string, string[]>>({});
-  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, AssignmentDraft>>({});
-  const [savingAssignments, setSavingAssignments] = useState<Record<string, boolean>>({});
-  const [myAssignment, setMyAssignment] = useState<LLMMyAssignmentResponse | null>(null);
+  const [assignmentUsers, setAssignmentUsers] = useState<
+    LLMAssignmentUserItem[]
+  >([]);
+  const [assignmentProviderModels, setAssignmentProviderModels] = useState<
+    Record<string, string[]>
+  >({});
+  const [assignmentDrafts, setAssignmentDrafts] = useState<
+    Record<string, AssignmentDraft>
+  >({});
+  const [savingAssignments, setSavingAssignments] = useState<
+    Record<string, boolean>
+  >({});
+  const [myAssignment, setMyAssignment] =
+    useState<LLMMyAssignmentResponse | null>(null);
   const [myDraft, setMyDraft] = useState<AssignmentDraft | null>(null);
   const [savingMyAssignment, setSavingMyAssignment] = useState(false);
 
@@ -134,11 +156,16 @@ export default function SettingsPage() {
       const data = await fetchLLMAssignmentUsers();
       setAssignmentUsers(data.users);
       setAssignmentProviderModels(data.provider_models || {});
-      const providers = Object.keys(data.provider_models || {}) as UserSettingsProvider[];
+      const providers = Object.keys(
+        data.provider_models || {},
+      ) as UserSettingsProvider[];
       const drafts: Record<string, AssignmentDraft> = {};
       for (const user of data.users) {
-        const provider = (user.assignment?.provider || providers[0] || "openai") as UserSettingsProvider;
-        const model = user.assignment?.model || firstModel(data.provider_models, provider);
+        const provider = (user.assignment?.provider ||
+          providers[0] ||
+          "openai") as UserSettingsProvider;
+        const model =
+          user.assignment?.model || firstModel(data.provider_models, provider);
         drafts[user.identity_key] = { provider, model };
       }
       setAssignmentDrafts(drafts);
@@ -153,10 +180,16 @@ export default function SettingsPage() {
     try {
       const data = await fetchMyLLMAssignment();
       setMyAssignment(data);
-      const provider = (data.assignment?.provider || "openai") as UserSettingsProvider;
-      const model = data.assignment?.model || firstModel(data.provider_models || {}, provider);
+      const provider = (data.assignment?.provider ||
+        "openai") as UserSettingsProvider;
+      const model =
+        data.assignment?.model ||
+        firstModel(data.provider_models || {}, provider);
       setMyDraft({ provider, model });
-      if (!Object.keys(assignmentProviderModels).length && data.provider_models) {
+      if (
+        !Object.keys(assignmentProviderModels).length &&
+        data.provider_models
+      ) {
         setAssignmentProviderModels(data.provider_models);
       }
     } catch (e) {
@@ -165,11 +198,29 @@ export default function SettingsPage() {
     }
   };
 
+  const loadTopicVideoMetrics = async () => {
+    setLoadingVideoMetrics(true);
+    try {
+      const [status, metrics] = await Promise.all([
+        fetchTopicVideosStatus(),
+        fetchTopicVideoMetrics(),
+      ]);
+      setVideoStatus(status);
+      setVideoMetrics(metrics);
+    } catch (e) {
+      console.error(e);
+      setError("Failed to load topic video metrics.");
+    } finally {
+      setLoadingVideoMetrics(false);
+    }
+  };
+
   useEffect(() => {
     loadAllowedUsers();
     loadLlmServiceUsers();
     loadAssignmentUsers();
     loadMyAssignment();
+    loadTopicVideoMetrics();
   }, []);
 
   const checkHealth = async () => {
@@ -185,7 +236,8 @@ export default function SettingsPage() {
   };
 
   const handleAddUser = async (provider: "github" | "google") => {
-    const identifier = provider === "github" ? newGithubUser.trim() : newGoogleEmail.trim();
+    const identifier =
+      provider === "github" ? newGithubUser.trim() : newGoogleEmail.trim();
     if (!identifier) return;
 
     setLoadingAllowed(true);
@@ -205,7 +257,10 @@ export default function SettingsPage() {
     }
   };
 
-  const handleRemoveUser = async (provider: "github" | "google", identifier: string) => {
+  const handleRemoveUser = async (
+    provider: "github" | "google",
+    identifier: string,
+  ) => {
     if (!confirm(`Remove ${identifier}?`)) return;
     setLoadingAllowed(true);
     setError("");
@@ -223,7 +278,10 @@ export default function SettingsPage() {
   };
 
   const handleAddLlmServiceUser = async (provider: "github" | "google") => {
-    const identifier = provider === "github" ? newLlmGithubUser.trim() : newLlmGoogleEmail.trim();
+    const identifier =
+      provider === "github"
+        ? newLlmGithubUser.trim()
+        : newLlmGoogleEmail.trim();
     if (!identifier) return;
 
     setLoadingLlmService(true);
@@ -244,7 +302,10 @@ export default function SettingsPage() {
     }
   };
 
-  const handleRemoveLlmServiceUser = async (provider: "github" | "google", identifier: string) => {
+  const handleRemoveLlmServiceUser = async (
+    provider: "github" | "google",
+    identifier: string,
+  ) => {
     if (!confirm(`Remove ${identifier}?`)) return;
 
     setLoadingLlmService(true);
@@ -263,7 +324,10 @@ export default function SettingsPage() {
     }
   };
 
-  const updateDraftProvider = (identityKey: string, provider: UserSettingsProvider) => {
+  const updateDraftProvider = (
+    identityKey: string,
+    provider: UserSettingsProvider,
+  ) => {
     setAssignmentDrafts((prev) => ({
       ...prev,
       [identityKey]: {
@@ -302,7 +366,9 @@ export default function SettingsPage() {
         draft.model,
       );
       setAssignmentUsers((prev) =>
-        prev.map((u) => (u.identity_key === updated.identity_key ? updated : u)),
+        prev.map((u) =>
+          u.identity_key === updated.identity_key ? updated : u,
+        ),
       );
       setMessage(`Saved assignment for ${item.identity_key}.`);
     } catch (e) {
@@ -317,9 +383,14 @@ export default function SettingsPage() {
     setSavingAssignments((prev) => ({ ...prev, [item.identity_key]: true }));
     setError("");
     try {
-      const updated = await deleteLLMAssignmentForUser(item.login_provider, item.identifier);
+      const updated = await deleteLLMAssignmentForUser(
+        item.login_provider,
+        item.identifier,
+      );
       setAssignmentUsers((prev) =>
-        prev.map((u) => (u.identity_key === updated.identity_key ? updated : u)),
+        prev.map((u) =>
+          u.identity_key === updated.identity_key ? updated : u,
+        ),
       );
       setMessage(`Removed assignment for ${item.identity_key}.`);
     } catch (e) {
@@ -335,7 +406,10 @@ export default function SettingsPage() {
     setSavingMyAssignment(true);
     setError("");
     try {
-      const updated = await saveMyLLMAssignment(myDraft.provider, myDraft.model);
+      const updated = await saveMyLLMAssignment(
+        myDraft.provider,
+        myDraft.model,
+      );
       setMyAssignment(updated);
       setMessage("Your Study App LLM assignment was saved.");
     } catch (e) {
@@ -347,14 +421,19 @@ export default function SettingsPage() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1280px] mx-auto px-4 sm:px-6 py-8">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="max-w-[1280px] mx-auto px-4 sm:px-6 py-8"
+    >
       <div className="udemy-card p-6 mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-3">
           <SettingsIcon className="w-6 h-6 text-udemy-purple" />
           Admin Settings
         </h1>
         <p className="text-sm text-udemy-text-muted mt-2">
-          Platform-level controls, access management, and Study App LLM assignment policy.
+          Platform-level controls, access management, and Study App LLM
+          assignment policy.
         </p>
         {message && <p className="text-sm text-green-700 mt-3">{message}</p>}
         {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
@@ -375,7 +454,10 @@ export default function SettingsPage() {
               </h3>
               <div className="space-y-2 mb-3">
                 {allowedUsers?.github_users.map((u) => (
-                  <div key={u} className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm">
+                  <div
+                    key={u}
+                    className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm"
+                  >
                     <span className="font-medium">{u}</span>
                     <button
                       onClick={() => handleRemoveUser("github", u)}
@@ -393,7 +475,9 @@ export default function SettingsPage() {
                   placeholder="github-username"
                   value={newGithubUser}
                   onChange={(e) => setNewGithubUser(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddUser("github")}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && handleAddUser("github")
+                  }
                   className="flex-1 border border-udemy-border rounded px-3 py-2 text-sm"
                 />
                 <button
@@ -414,7 +498,10 @@ export default function SettingsPage() {
               </h3>
               <div className="space-y-2 mb-3">
                 {allowedUsers?.google_emails.map((e) => (
-                  <div key={e} className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm">
+                  <div
+                    key={e}
+                    className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm"
+                  >
                     <span className="font-medium">{e}</span>
                     <button
                       onClick={() => handleRemoveUser("google", e)}
@@ -432,7 +519,9 @@ export default function SettingsPage() {
                   placeholder="user@gmail.com"
                   value={newGoogleEmail}
                   onChange={(e) => setNewGoogleEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddUser("google")}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && handleAddUser("google")
+                  }
                   className="flex-1 border border-udemy-border rounded px-3 py-2 text-sm"
                 />
                 <button
@@ -464,10 +553,15 @@ export default function SettingsPage() {
                 </h3>
                 <div className="space-y-2 mb-3 max-h-44 overflow-auto pr-1">
                   {llmGithubEntries.map((entry) => (
-                    <div key={entry.display} className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm">
+                    <div
+                      key={entry.display}
+                      className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm"
+                    >
                       <span className="font-medium">{entry.display}</span>
                       <button
-                        onClick={() => handleRemoveLlmServiceUser("github", entry.identifier)}
+                        onClick={() =>
+                          handleRemoveLlmServiceUser("github", entry.identifier)
+                        }
                         disabled={loadingLlmService}
                         className="text-red-400 hover:text-red-600 transition-colors p-1"
                       >
@@ -482,7 +576,9 @@ export default function SettingsPage() {
                     placeholder="github-username"
                     value={newLlmGithubUser}
                     onChange={(e) => setNewLlmGithubUser(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAddLlmServiceUser("github")}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleAddLlmServiceUser("github")
+                    }
                     className="flex-1 border border-udemy-border rounded px-3 py-2 text-sm"
                   />
                   <button
@@ -503,10 +599,15 @@ export default function SettingsPage() {
                 </h3>
                 <div className="space-y-2 mb-3 max-h-44 overflow-auto pr-1">
                   {llmGoogleEntries.map((entry) => (
-                    <div key={entry.display} className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm">
+                    <div
+                      key={entry.display}
+                      className="flex items-center justify-between bg-udemy-bg rounded px-3 py-2 text-sm"
+                    >
                       <span className="font-medium">{entry.display}</span>
                       <button
-                        onClick={() => handleRemoveLlmServiceUser("google", entry.identifier)}
+                        onClick={() =>
+                          handleRemoveLlmServiceUser("google", entry.identifier)
+                        }
                         disabled={loadingLlmService}
                         className="text-red-400 hover:text-red-600 transition-colors p-1"
                       >
@@ -521,7 +622,9 @@ export default function SettingsPage() {
                     placeholder="user@gmail.com"
                     value={newLlmGoogleEmail}
                     onChange={(e) => setNewLlmGoogleEmail(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAddLlmServiceUser("google")}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleAddLlmServiceUser("google")
+                    }
                     className="flex-1 border border-udemy-border rounded px-3 py-2 text-sm"
                   />
                   <button
@@ -545,19 +648,114 @@ export default function SettingsPage() {
             disabled={loadingHealth}
             className="btn-secondary w-full flex items-center justify-center gap-2"
           >
-            {loadingHealth ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {loadingHealth ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
             Check Health
           </button>
 
           {health && (
             <div className="mt-4 space-y-3">
-              <StatusRow label="LLM Chain" ok={health.llm_chain} version={health.llm_chain_version} />
-              <StatusRow label="CLI Agent" ok={health.cli_agent} version={health.cli_agent_version} />
+              <StatusRow
+                label="LLM Chain"
+                ok={health.llm_chain}
+                version={health.llm_chain_version}
+              />
+              <StatusRow
+                label="CLI Agent"
+                ok={health.cli_agent}
+                version={health.cli_agent_version}
+              />
             </div>
           )}
 
           <div className="border-t border-udemy-border pt-4 mt-6">
-            <h3 className="text-sm font-bold text-udemy-danger uppercase mb-3">Danger Zone</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold">Topic Videos Quota Gate</h3>
+              <button
+                onClick={loadTopicVideoMetrics}
+                disabled={loadingVideoMetrics}
+                className="text-xs text-udemy-purple hover:underline disabled:opacity-60"
+              >
+                {loadingVideoMetrics ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+            {!videoStatus ? (
+              <p className="text-xs text-udemy-text-muted mt-2">
+                Metrics unavailable.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-udemy-text-muted">Status</span>
+                  <span
+                    className={
+                      videoStatus.enabled
+                        ? "text-green-700 font-semibold"
+                        : "text-amber-700 font-semibold"
+                    }
+                  >
+                    {videoStatus.status}
+                  </span>
+                </div>
+                {!!videoStatus.disabled_until && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-udemy-text-muted">
+                      Disabled Until
+                    </span>
+                    <span className="text-right break-all">
+                      {videoStatus.disabled_until}
+                    </span>
+                  </div>
+                )}
+                {!!videoStatus.reason && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-udemy-text-muted">Reason</span>
+                    <span className="text-right">{videoStatus.reason}</span>
+                  </div>
+                )}
+                {videoMetrics && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-udemy-text-muted">
+                        Hidden days (7d / 30d)
+                      </span>
+                      <span>
+                        {videoMetrics.hidden_days_last_7} /{" "}
+                        {videoMetrics.hidden_days_last_30}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-udemy-text-muted">Views / Clicks (30d)</span>
+                      <span>
+                        {videoMetrics.panel_views_30d} /{" "}
+                        {videoMetrics.video_clicks_30d}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-udemy-text-muted">CTR (30d)</span>
+                      <span>{(videoMetrics.ctr_30d * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-udemy-text-muted">
+                        CTR since re-enable
+                      </span>
+                      <span>
+                        {(videoMetrics.ctr_since_reenable * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-udemy-border pt-4 mt-6">
+            <h3 className="text-sm font-bold text-udemy-danger uppercase mb-3">
+              Danger Zone
+            </h3>
             <button
               onClick={() => {
                 if (confirm("Reset all progress? This cannot be undone.")) {
@@ -576,10 +774,15 @@ export default function SettingsPage() {
         {/* Available Models Reference */}
         {providerOptions.length > 0 && (
           <div className="udemy-card p-6">
-            <h2 className="text-lg font-bold mb-4">Available Models by Provider</h2>
+            <h2 className="text-lg font-bold mb-4">
+              Available Models by Provider
+            </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {providerOptions.map((provider) => (
-                <div key={provider} className="rounded-lg border border-udemy-border p-4">
+                <div
+                  key={provider}
+                  className="rounded-lg border border-udemy-border p-4"
+                >
                   <h3 className="text-sm font-bold capitalize mb-2">
                     {provider === "google" ? "Gemini" : provider}
                   </h3>
@@ -602,7 +805,8 @@ export default function SettingsPage() {
         <div className="udemy-card p-6">
           <h2 className="text-lg font-bold mb-2">Study App LLM Assignments</h2>
           <p className="text-xs text-udemy-text-muted mb-4">
-            Assign fixed provider/model per allowed-login user. This applies when the user selects Study App LLM mode.
+            Assign fixed provider/model per allowed-login user. This applies
+            when the user selects Study App LLM mode.
           </p>
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
@@ -621,22 +825,39 @@ export default function SettingsPage() {
                     provider: "openai" as UserSettingsProvider,
                     model: firstModel(assignmentProviderModels, "openai"),
                   };
-                  const modelOptions = assignmentProviderModels[draft.provider] || [];
+                  const modelOptions =
+                    assignmentProviderModels[draft.provider] || [];
                   const saving = !!savingAssignments[item.identity_key];
                   return (
-                    <tr key={item.identity_key} className="border-b border-udemy-border/60">
+                    <tr
+                      key={item.identity_key}
+                      className="border-b border-udemy-border/60"
+                    >
                       <td className="py-3 pr-4">
                         <div className="font-medium">{item.identity_key}</div>
                       </td>
                       <td className="py-3 pr-4">
-                        <span className={item.is_backend_approved ? "text-green-700" : "text-amber-700"}>
-                          {item.is_backend_approved ? "Approved" : "Not approved"}
+                        <span
+                          className={
+                            item.is_backend_approved
+                              ? "text-green-700"
+                              : "text-amber-700"
+                          }
+                        >
+                          {item.is_backend_approved
+                            ? "Approved"
+                            : "Not approved"}
                         </span>
                       </td>
                       <td className="py-3 pr-4">
                         <select
                           value={draft.provider}
-                          onChange={(e) => updateDraftProvider(item.identity_key, e.target.value as UserSettingsProvider)}
+                          onChange={(e) =>
+                            updateDraftProvider(
+                              item.identity_key,
+                              e.target.value as UserSettingsProvider,
+                            )
+                          }
                           className="border border-udemy-border rounded px-2 py-1 min-w-[140px]"
                         >
                           {providerOptions.map((provider) => (
@@ -649,7 +870,9 @@ export default function SettingsPage() {
                       <td className="py-3 pr-4">
                         <select
                           value={draft.model}
-                          onChange={(e) => updateDraftModel(item.identity_key, e.target.value)}
+                          onChange={(e) =>
+                            updateDraftModel(item.identity_key, e.target.value)
+                          }
                           className="border border-udemy-border rounded px-2 py-1 min-w-[220px]"
                         >
                           {modelOptions.map((model) => (
@@ -666,7 +889,11 @@ export default function SettingsPage() {
                             disabled={saving || !draft.provider || !draft.model}
                             className="btn-secondary text-xs inline-flex items-center gap-1 px-3 py-1.5"
                           >
-                            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                            {saving ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Save className="w-3.5 h-3.5" />
+                            )}
                             Save
                           </button>
                           <button
@@ -684,7 +911,10 @@ export default function SettingsPage() {
                 })}
                 {assignmentUsers.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-6 text-center text-udemy-text-muted">
+                    <td
+                      colSpan={5}
+                      className="py-6 text-center text-udemy-text-muted"
+                    >
                       No allowed-login users found.
                     </td>
                   </tr>
@@ -700,28 +930,48 @@ export default function SettingsPage() {
             My Study App LLM
           </h2>
           <p className="text-xs text-udemy-text-muted mb-4">
-            Set your own fixed Study App assignment for when you select Study App LLM mode.
+            Set your own fixed Study App assignment for when you select Study
+            App LLM mode.
           </p>
           {myAssignment && myDraft && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
               <div>
-                <label className="block text-xs mb-1 text-udemy-text-muted">Identity</label>
-                <div className="text-sm font-medium">{myAssignment.identity_key}</div>
-              </div>
-              <div>
-                <label className="block text-xs mb-1 text-udemy-text-muted">Approved</label>
-                <div className={myAssignment.is_backend_approved ? "text-green-700 text-sm" : "text-amber-700 text-sm"}>
-                  {myAssignment.is_backend_approved ? "Approved" : "Not approved"}
+                <label className="block text-xs mb-1 text-udemy-text-muted">
+                  Identity
+                </label>
+                <div className="text-sm font-medium">
+                  {myAssignment.identity_key}
                 </div>
               </div>
               <div>
-                <label className="block text-xs mb-1 text-udemy-text-muted">Provider</label>
+                <label className="block text-xs mb-1 text-udemy-text-muted">
+                  Approved
+                </label>
+                <div
+                  className={
+                    myAssignment.is_backend_approved
+                      ? "text-green-700 text-sm"
+                      : "text-amber-700 text-sm"
+                  }
+                >
+                  {myAssignment.is_backend_approved
+                    ? "Approved"
+                    : "Not approved"}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs mb-1 text-udemy-text-muted">
+                  Provider
+                </label>
                 <select
                   value={myDraft.provider}
                   onChange={(e) =>
                     setMyDraft({
                       provider: e.target.value as UserSettingsProvider,
-                      model: firstModel(assignmentProviderModels, e.target.value),
+                      model: firstModel(
+                        assignmentProviderModels,
+                        e.target.value,
+                      ),
                     })
                   }
                   className="border border-udemy-border rounded px-2 py-2 w-full"
@@ -734,31 +984,48 @@ export default function SettingsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs mb-1 text-udemy-text-muted">Model</label>
+                <label className="block text-xs mb-1 text-udemy-text-muted">
+                  Model
+                </label>
                 <select
                   value={myDraft.model}
-                  onChange={(e) => setMyDraft((prev) => (prev ? { ...prev, model: e.target.value } : prev))}
+                  onChange={(e) =>
+                    setMyDraft((prev) =>
+                      prev ? { ...prev, model: e.target.value } : prev,
+                    )
+                  }
                   className="border border-udemy-border rounded px-2 py-2 w-full"
                 >
-                  {(assignmentProviderModels[myDraft.provider] || []).map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
+                  {(assignmentProviderModels[myDraft.provider] || []).map(
+                    (model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ),
+                  )}
                 </select>
               </div>
             </div>
           )}
           <button
             onClick={saveAdminAssignment}
-            disabled={savingMyAssignment || !myDraft?.provider || !myDraft?.model}
+            disabled={
+              savingMyAssignment || !myDraft?.provider || !myDraft?.model
+            }
             className="btn-primary mt-4 inline-flex items-center gap-2"
           >
-            {savingMyAssignment ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {savingMyAssignment ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
             Save My Assignment
           </button>
         </div>
       </div>
+
+      {/* Voice Agent Settings */}
+      <VoiceAdminSettings />
     </motion.div>
   );
 }
@@ -775,10 +1042,16 @@ function StatusRow({
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-udemy-bg rounded-lg">
       <div className="flex items-center gap-2">
-        {ok ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-red-500" />}
+        {ok ? (
+          <CheckCircle2 className="w-4 h-4 text-green-600" />
+        ) : (
+          <XCircle className="w-4 h-4 text-red-500" />
+        )}
         <span className="text-sm font-medium">{label}</span>
       </div>
-      <span className="text-xs text-udemy-text-muted">{ok ? version || "healthy" : "offline"}</span>
+      <span className="text-xs text-udemy-text-muted">
+        {ok ? version || "healthy" : "offline"}
+      </span>
     </div>
   );
 }
