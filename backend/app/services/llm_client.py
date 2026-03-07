@@ -173,7 +173,23 @@ class LLMClient:
             timeout=120,
         )
         if runtime_credential is not None:
-            completion_kwargs["api_key"] = runtime_credential
+            if isinstance(runtime_credential, dict):
+                # Google OAuth Bearer token – litellm's gemini/ provider embeds
+                # the api_key in the URL as ?key=, which breaks with dicts/tokens.
+                # Route through Google's OpenAI-compatible endpoint instead so
+                # the token is sent as a standard Authorization header.
+                auth_value = runtime_credential.get("Authorization", "")
+                token = auth_value.removeprefix("Bearer ").strip()
+                completion_kwargs["api_key"] = token
+                completion_kwargs["api_base"] = (
+                    "https://generativelanguage.googleapis.com/v1beta/openai"
+                )
+                # Switch from gemini/ to openai/ so litellm uses the OpenAI path
+                cur_model = completion_kwargs["model"]
+                if cur_model.startswith("gemini/"):
+                    completion_kwargs["model"] = "openai/" + cur_model[len("gemini/"):]
+            else:
+                completion_kwargs["api_key"] = runtime_credential
 
         try:
             response = await litellm.acompletion(**completion_kwargs)
