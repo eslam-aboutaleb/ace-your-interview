@@ -46,6 +46,10 @@ import {
   normalizeEscapedMultilineText,
   normalizeEscapedSingleLineText,
 } from "@/utils/textNormalization";
+import {
+  loadTopicStudyQuestionCache,
+  persistTopicStudyQuestionCache,
+} from "@/utils/topicStudyQuestionCache";
 import type {
   TopicDetail,
   QuestionAnswerV2,
@@ -54,6 +58,11 @@ import type {
   ResponseDetail,
   VideoResource,
 } from "@/types";
+import type {
+  TopicStudyProviderInfo,
+  TopicStudyQuestionCacheEntry,
+  TopicStudyQuestionSignature,
+} from "@/utils/topicStudyQuestionCache";
 
 const TRACK_LABELS: Record<LearningTrack, string> = {
   backend: "Backend",
@@ -62,19 +71,54 @@ const TRACK_LABELS: Record<LearningTrack, string> = {
   ai_stack: "AI Stack",
 };
 
-type ProviderInfo = {
-  provider: string;
-  model: string;
-  retries: number;
-  malformed: number;
-};
-
 type IndexedSection = {
   index: number;
   heading: string;
   content: string;
   searchable: string;
 };
+
+type InFlightQuestionRun = {
+  controller: AbortController;
+  runId: number;
+};
+
+const DEFAULT_PROVIDER_INFO: TopicStudyProviderInfo = {
+  provider: "",
+  model: "",
+  retries: 0,
+  malformed: 0,
+};
+
+function stableHash(input: string): string {
+  let hash = 5381;
+  for (let idx = 0; idx < input.length; idx += 1) {
+    hash = ((hash << 5) + hash) ^ input.charCodeAt(idx);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function makeSectionFingerprint(heading: string, content: string): string {
+  return stableHash(`${heading}::${content}`);
+}
+
+function buildQuestionSignatureKey(signature: TopicStudyQuestionSignature): string {
+  return [
+    encodeURIComponent(signature.topicId),
+    String(signature.sectionIndex),
+    encodeURIComponent(signature.sectionFingerprint),
+    String(signature.questionCount),
+    encodeURIComponent(signature.difficulty || ""),
+    signature.level,
+    signature.responseDetail,
+    encodeURIComponent(signature.preferredLanguage || ""),
+    signature.requiresProgramming ? "1" : "0",
+    encodeURIComponent(signature.llmProvider || ""),
+    encodeURIComponent(signature.llmModel || ""),
+    String(signature.llmTemperature),
+    String(signature.llmMaxTokens),
+  ].join(":");
+}
 
 export default function TopicStudy() {
   const { topicId } = useParams<{ topicId: string }>();
@@ -106,12 +150,9 @@ export default function TopicStudy() {
   const [questionCount, setQuestionCount] = useState(5);
   const [difficulty, setDifficulty] = useState<string>("");
   const [level, setLevel] = useState<InterviewLevel>("mid");
-  const [providerInfo, setProviderInfo] = useState<ProviderInfo>({
-    provider: "",
-    model: "",
-    retries: 0,
-    malformed: 0,
-  });
+  const [providerInfo, setProviderInfo] = useState<TopicStudyProviderInfo>(
+    DEFAULT_PROVIDER_INFO,
+  );
   const [errorMsg, setErrorMsg] = useState("");
   const [responseDetail, setResponseDetail] =
     useState<ResponseDetail>("concise");
@@ -131,8 +172,13 @@ export default function TopicStudy() {
   const [videosLoading, setVideosLoading] = useState(false);
   const [videosError, setVideosError] = useState("");
   const navRef = useRef<HTMLElement | null>(null);
-  const generationAbortRef = useRef<AbortController | null>(null);
   const curriculumAbortRef = useRef<AbortController | null>(null);
+  const entriesByKeyRef = useRef<Record<string, TopicStudyQuestionCacheEntry>>(
+    {},
+  );
+  const inFlightByKeyRef = useRef<Map<string, InFlightQuestionRun>>(new Map());
+  const runCounterRef = useRef(0);
+  const activeQuestionKeyRef = useRef("");
 
   const settings = useSettingsStore();
   const {
@@ -142,6 +188,139 @@ export default function TopicStudy() {
     setMastery,
     addAnswered,
   } = useProgressStore();
+
+  const activeSectionSnapshot = topic?.sections[activeSection] || null;
+  const activeQuestionSignature = useMemo<TopicStudyQuestionSignature | null>(
+    () => {
+      if (!topicId || !topic || !activeSectionSnapshot) return null;
+      return {
+        topicId,
+        sectionIndex: activeSection,
+        sectionFingerprint: makeSectionFingerprint(
+          activeSectionSnapshot.heading,
+          activeSectionSnapshot.content,
+        ),
+        questionCount,
+        difficulty: difficulty || "",
+        level,
+        responseDetail,
+        preferredLanguage: requiresProgramming ? preferredLanguage || "" : "",
+        requiresProgramming,
+        llmProvider: settings.provider,
+        llmModel: settings.model,
+        llmTemperature: settings.temperature,
+        llmMaxTokens: settings.maxTokens,
+      };
+    },
+    [
+      topicId,
+      topic,
+      activeSectionSnapshot,
+      activeSection,
+      questionCount,
+      difficulty,
+      level,
+      responseDetail,
+      preferredLanguage,
+      requiresProgramming,
+      settings.provider,
+      settings.model,
+      settings.temperature,
+      settings.maxTokens,
+    ],
+  );
+  const activeQuestionKey = useMemo(
+    () =>
+      activeQuestionSignature
+        ? buildQuestionSignatureKey(activeQuestionSignature)
+        : "",
+    [activeQuestionSignature],
+  );
+
+  const applyEntryToActiveView = useCallback(
+    (entry: TopicStudyQuestionCacheEntry | null) => {
+      if (!entry) {
+        setQuestions([]);
+        setGenerating(false);
+        setProviderInfo(DEFAULT_PROVIDER_INFO);
+        setErrorMsg("");
+        return;
+      }
+      setQuestions(entry.questions);
+      setGenerating(entry.status === "generating");
+      setProviderInfo(entry.providerInfo);
+      setErrorMsg(entry.errorMsg || "");
+    },
+    [],
+  );
+
+  const persistEntries = useCallback(() => {
+    if (!topicId) return;
+    persistTopicStudyQuestionCache(topicId, entriesByKeyRef.current);
+  }, [topicId]);
+
+  const updateEntryByKey = useCallback(
+    (
+      key: string,
+      updater: (
+        previous: TopicStudyQuestionCacheEntry | undefined,
+      ) => TopicStudyQuestionCacheEntry | undefined,
+    ) => {
+      const next = updater(entriesByKeyRef.current[key]);
+      if (!next) {
+        delete entriesByKeyRef.current[key];
+      } else {
+        entriesByKeyRef.current[key] = next;
+      }
+      persistEntries();
+      if (activeQuestionKeyRef.current === key) {
+        applyEntryToActiveView(next ?? null);
+      }
+    },
+    [applyEntryToActiveView, persistEntries],
+  );
+
+  const isRunCurrent = useCallback((key: string, runId: number) => {
+    const run = inFlightByKeyRef.current.get(key);
+    return !!run && run.runId === runId;
+  }, []);
+
+  const abortAllQuestionRuns = useCallback(() => {
+    for (const run of inFlightByKeyRef.current.values()) {
+      run.controller.abort();
+    }
+    inFlightByKeyRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    abortAllQuestionRuns();
+    entriesByKeyRef.current = topicId ? loadTopicStudyQuestionCache(topicId) : {};
+    activeQuestionKeyRef.current = "";
+    applyEntryToActiveView(null);
+    setExpandedQ(null);
+    setRevealedAnswers(new Set());
+    setSubmittedAttempts(new Set());
+    setAnswerDrafts({});
+    setConfidenceByIdx({});
+    setQuestionStartMs({});
+    setSubmittingIdx(null);
+  }, [topicId, abortAllQuestionRuns, applyEntryToActiveView]);
+
+  useEffect(() => {
+    activeQuestionKeyRef.current = activeQuestionKey;
+    const entry =
+      activeQuestionKey && entriesByKeyRef.current[activeQuestionKey]
+        ? entriesByKeyRef.current[activeQuestionKey]
+        : null;
+    applyEntryToActiveView(entry);
+    setExpandedQ(null);
+    setRevealedAnswers(new Set());
+    setSubmittedAttempts(new Set());
+    setAnswerDrafts({});
+    setConfidenceByIdx({});
+    setQuestionStartMs({});
+    setSubmittingIdx(null);
+  }, [activeQuestionKey, applyEntryToActiveView]);
 
   useEffect(() => {
     if (!topicId) return;
@@ -189,12 +368,11 @@ export default function TopicStudy() {
 
   useEffect(() => {
     return () => {
-      generationAbortRef.current?.abort();
-      generationAbortRef.current = null;
+      abortAllQuestionRuns();
       curriculumAbortRef.current?.abort();
       curriculumAbortRef.current = null;
     };
-  }, []);
+  }, [abortAllQuestionRuns]);
 
   useEffect(() => {
     const handle = window.setTimeout(
@@ -386,7 +564,7 @@ export default function TopicStudy() {
   );
 
   const handleGenerate = useCallback(async () => {
-    if (!topicId || !topic) return;
+    if (!topicId || !topic || !activeQuestionSignature) return;
     if (!useAuthStore.getState().isAuthenticated) {
       navigate("/login");
       return;
@@ -395,23 +573,89 @@ export default function TopicStudy() {
       setErrorMsg("Generate the problem-solving roadmap first.");
       return;
     }
-    generationAbortRef.current?.abort();
+
+    const activeS = topic.sections[activeSection];
+    if (!activeS) {
+      setErrorMsg("Pick a section before generating questions.");
+      return;
+    }
+
+    const cacheKey = buildQuestionSignatureKey(activeQuestionSignature);
+    const priorRun = inFlightByKeyRef.current.get(cacheKey);
+    priorRun?.controller.abort();
+
+    const runId = runCounterRef.current + 1;
+    runCounterRef.current = runId;
     const controller = new AbortController();
-    generationAbortRef.current = controller;
-    setGenerating(true);
-    setErrorMsg("");
-    setQuestions([]);
+    inFlightByKeyRef.current.set(cacheKey, { controller, runId });
+
+    const startedAt = Date.now();
+    updateEntryByKey(cacheKey, () => ({
+      key: cacheKey,
+      signature: activeQuestionSignature,
+      status: "generating",
+      questions: [],
+      providerInfo: DEFAULT_PROVIDER_INFO,
+      errorMsg: "",
+      startedAt,
+      completedAt: 0,
+      updatedAt: startedAt,
+    }));
     setExpandedQ(null);
     setRevealedAnswers(new Set());
     setSubmittedAttempts(new Set());
     setAnswerDrafts({});
     setConfidenceByIdx({});
     setQuestionStartMs({});
+
+    const isCurrentRun = () => isRunCurrent(cacheKey, runId);
+    const updateRunEntry = (
+      producer: (
+        previous: TopicStudyQuestionCacheEntry,
+      ) => TopicStudyQuestionCacheEntry,
+    ) => {
+      if (!isCurrentRun()) return;
+      updateEntryByKey(cacheKey, (previous) => {
+        const base: TopicStudyQuestionCacheEntry =
+          previous ??
+          ({
+            key: cacheKey,
+            signature: activeQuestionSignature,
+            status: "generating",
+            questions: [],
+            providerInfo: DEFAULT_PROVIDER_INFO,
+            errorMsg: "",
+            startedAt,
+            completedAt: 0,
+            updatedAt: Date.now(),
+          } satisfies TopicStudyQuestionCacheEntry);
+        return {
+          ...producer(base),
+          updatedAt: Date.now(),
+        };
+      });
+    };
+    const finalizeRun = (
+      status: "ready" | "error",
+      finalQuestions: QuestionAnswerV2[],
+      finalProviderInfo: TopicStudyProviderInfo,
+      finalErrorMsg: string,
+    ) => {
+      updateRunEntry((previous) => ({
+        ...previous,
+        status,
+        questions: finalQuestions,
+        providerInfo: finalProviderInfo,
+        errorMsg: finalErrorMsg,
+        completedAt: Date.now(),
+      }));
+    };
+
     try {
-      const activeS = topic.sections[activeSection];
+      const targetCount = questionCount;
       const basePayload = {
         topic_id: topicId,
-        requested_total_count: questionCount,
+        requested_total_count: targetCount,
         difficulty: difficulty || undefined,
         level,
         response_detail: responseDetail,
@@ -424,12 +668,8 @@ export default function TopicStudy() {
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
         },
-        ...(activeS
-          ? {
-              section_title: activeS.heading,
-              section_content: activeS.content,
-            }
-          : {}),
+        section_title: activeS.heading,
+        section_content: activeS.content,
       };
       const payloadWithCount = (
         count: number,
@@ -443,20 +683,20 @@ export default function TopicStudy() {
         }
         return { ...basePayload, count, existing_questions: existingQuestions };
       };
-      const questionKey = (q: Pick<QuestionAnswerV2, "question">) =>
+      const normalizeQuestionKey = (q: Pick<QuestionAnswerV2, "question">) =>
         q.question.trim().toLowerCase().replace(/\s+/g, " ");
       const mergeUniqueQuestions = (
         current: QuestionAnswerV2[],
         incoming: QuestionAnswerV2[],
       ) => {
-        const seen = new Set(current.map((q) => questionKey(q)));
+        const seen = new Set(current.map((q) => normalizeQuestionKey(q)));
         const merged = [...current];
         for (const item of incoming) {
-          const key = questionKey(item);
+          const key = normalizeQuestionKey(item);
           if (!key || seen.has(key)) continue;
           seen.add(key);
           merged.push(item);
-          if (merged.length >= questionCount) break;
+          if (merged.length >= targetCount) break;
         }
         return merged;
       };
@@ -471,10 +711,7 @@ export default function TopicStudy() {
           answer: q.answer,
           difficulty: q.difficulty,
           learning_objective: "Understand the concept and apply it in context.",
-          source_section:
-            activeS?.heading ||
-            topic.sections[activeSection]?.heading ||
-            "Topic",
+          source_section: activeS.heading || "Topic",
           source_quote: "Legacy mode response did not include source quote.",
           misconception_trap:
             "Confusing terms without checking documentation context.",
@@ -485,20 +722,20 @@ export default function TopicStudy() {
       const topUpMissingQuestions = async (
         seed: QuestionAnswerV2[],
       ): Promise<QuestionAnswerV2[]> => {
-        let merged = mergeUniqueQuestions([], seed).slice(0, questionCount);
-        const retryModes: Array<"section" | "topic"> = activeS
-          ? ["section", "topic"]
-          : ["topic"];
+        let merged = mergeUniqueQuestions([], seed).slice(0, targetCount);
+        const retryModes: Array<"section" | "topic"> = ["section", "topic"];
 
         for (const mode of retryModes) {
-          if (controller.signal.aborted || merged.length >= questionCount)
+          if (!isCurrentRun() || controller.signal.aborted || merged.length >= targetCount) {
             break;
+          }
           const includeSection = mode === "section";
 
           for (let attempt = 0; attempt < 4; attempt += 1) {
-            if (controller.signal.aborted || merged.length >= questionCount)
+            if (!isCurrentRun() || controller.signal.aborted || merged.length >= targetCount) {
               break;
-            const remaining = questionCount - merged.length;
+            }
+            const remaining = targetCount - merged.length;
             const existingQuestions = merged.map((q) => q.question);
 
             try {
@@ -508,41 +745,44 @@ export default function TopicStudy() {
                   existingQuestions,
                 }),
               );
-              merged = mergeUniqueQuestions(merged, res.questions).slice(
-                0,
-                questionCount,
-              );
-              setProviderInfo({
-                provider: res.provider_used,
-                model: res.model_used,
-                retries: res.retries_used,
-                malformed: res.malformed_items_dropped,
-              });
+              if (!isCurrentRun()) break;
+              merged = mergeUniqueQuestions(merged, res.questions).slice(0, targetCount);
+              updateRunEntry((previous) => ({
+                ...previous,
+                providerInfo: {
+                  provider: res.provider_used,
+                  model: res.model_used,
+                  retries: res.retries_used,
+                  malformed: res.malformed_items_dropped,
+                },
+              }));
             } catch {
               // Best-effort v2 top-up. Legacy fallback below.
             }
 
-            if (controller.signal.aborted || merged.length >= questionCount)
+            if (!isCurrentRun() || controller.signal.aborted || merged.length >= targetCount) {
               break;
+            }
 
             try {
               const legacy = await generateQuestions(
-                payloadWithCount(questionCount - merged.length, {
+                payloadWithCount(targetCount - merged.length, {
                   includeSection,
                   existingQuestions: merged.map((q) => q.question),
                 }),
               );
+              if (!isCurrentRun()) break;
               const upgraded = mapLegacyQuestions(legacy, merged.length);
-              merged = mergeUniqueQuestions(merged, upgraded).slice(
-                0,
-                questionCount,
-              );
-              setProviderInfo({
-                provider: legacy.provider_used,
-                model: legacy.model_used,
-                retries: 0,
-                malformed: 0,
-              });
+              merged = mergeUniqueQuestions(merged, upgraded).slice(0, targetCount);
+              updateRunEntry((previous) => ({
+                ...previous,
+                providerInfo: {
+                  provider: legacy.provider_used,
+                  model: legacy.model_used,
+                  retries: 0,
+                  malformed: 0,
+                },
+              }));
             } catch {
               // Legacy fallback is best effort; caller handles partial results.
             }
@@ -553,87 +793,116 @@ export default function TopicStudy() {
       };
 
       const streamedQuestions: QuestionAnswerV2[] = [];
+      let latestProviderInfo = DEFAULT_PROVIDER_INFO;
       try {
         await generateQuestionsV2Stream(
-          payloadWithCount(questionCount, { existingQuestions: [] }),
+          payloadWithCount(targetCount, { existingQuestions: [] }),
           {
             onQuestion: (event) => {
+              if (!isCurrentRun()) return;
               const merged = mergeUniqueQuestions(streamedQuestions, [
                 event.question,
               ]);
               streamedQuestions.splice(0, streamedQuestions.length, ...merged);
-              setQuestions([...streamedQuestions]);
+              updateRunEntry((previous) => ({
+                ...previous,
+                status: "generating",
+                questions: [...streamedQuestions],
+              }));
             },
             onDone: (event) => {
-              setProviderInfo({
+              if (!isCurrentRun()) return;
+              latestProviderInfo = {
                 provider: event.provider_used,
                 model: event.model_used,
                 retries: event.retries_used,
                 malformed: event.malformed_items_dropped,
-              });
+              };
+              updateRunEntry((previous) => ({
+                ...previous,
+                providerInfo: latestProviderInfo,
+              }));
             },
             onError: (event) => {
-              setErrorMsg(event.message || "Question generation failed.");
+              if (!isCurrentRun()) return;
+              const message = event.message || "Question generation failed.";
+              updateRunEntry((previous) => ({
+                ...previous,
+                status: "error",
+                errorMsg: message,
+              }));
             },
           },
           controller.signal,
         );
 
-        if (controller.signal.aborted) return;
+        if (!isCurrentRun() || controller.signal.aborted) return;
 
         let finalQuestions = [...streamedQuestions];
-        if (finalQuestions.length < questionCount) {
+        if (finalQuestions.length < targetCount) {
           finalQuestions = await topUpMissingQuestions(finalQuestions);
-          if (controller.signal.aborted) return;
-          setQuestions(finalQuestions);
+          if (!isCurrentRun() || controller.signal.aborted) return;
         }
-        if (finalQuestions.length < questionCount) {
-          setErrorMsg(
-            `Generated ${finalQuestions.length} of ${questionCount} questions. Try retrying or selecting another section.`,
+        if (finalQuestions.length < targetCount) {
+          finalizeRun(
+            "error",
+            finalQuestions,
+            latestProviderInfo,
+            `Generated ${finalQuestions.length} of ${targetCount} questions. Try retrying or selecting another section.`,
           );
+          return;
         }
+        finalizeRun("ready", finalQuestions, latestProviderInfo, "");
       } catch (streamErr) {
-        if (controller.signal.aborted) return;
+        if (!isCurrentRun() || controller.signal.aborted) return;
         if (isQuestionsStreamError(streamErr) && streamErr.fallbackEligible) {
           const recovered = await topUpMissingQuestions(streamedQuestions);
-          if (controller.signal.aborted) return;
-          setQuestions(recovered);
-          if (recovered.length < questionCount) {
-            setErrorMsg(
-              `Generated ${recovered.length} of ${questionCount} questions. Try retrying or selecting another section.`,
+          if (!isCurrentRun() || controller.signal.aborted) return;
+          if (recovered.length < targetCount) {
+            finalizeRun(
+              "error",
+              recovered,
+              latestProviderInfo,
+              `Generated ${recovered.length} of ${targetCount} questions. Try retrying or selecting another section.`,
             );
+            return;
           }
+          finalizeRun("ready", recovered, latestProviderInfo, "");
           return;
         }
         throw streamErr;
       }
     } catch (err) {
-      if (controller.signal.aborted) return;
+      if (!isCurrentRun() || controller.signal.aborted) return;
       console.error(err);
-      if (isQuestionsStreamError(err)) {
-        setErrorMsg(err.message || "Question generation failed.");
-        return;
-      }
-      setErrorMsg(
-        "Question generation failed. Check LLM settings/connection and try again.",
-      );
+      const message = isQuestionsStreamError(err)
+        ? err.message || "Question generation failed."
+        : "Question generation failed. Check LLM settings/connection and try again.";
+      finalizeRun("error", [], DEFAULT_PROVIDER_INFO, message);
     } finally {
-      if (generationAbortRef.current === controller) {
-        generationAbortRef.current = null;
-        setGenerating(false);
+      const current = inFlightByKeyRef.current.get(cacheKey);
+      if (current && current.runId === runId) {
+        inFlightByKeyRef.current.delete(cacheKey);
       }
     }
   }, [
     topicId,
     topic,
     activeSection,
+    activeQuestionSignature,
     questionCount,
     difficulty,
     level,
-    settings,
     responseDetail,
     preferredLanguage,
     requiresProgramming,
+    settings.provider,
+    settings.model,
+    settings.temperature,
+    settings.maxTokens,
+    navigate,
+    updateEntryByKey,
+    isRunCurrent,
   ]);
 
   const toggleQuestion = (idx: number) => {
