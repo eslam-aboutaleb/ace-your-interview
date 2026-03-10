@@ -26,6 +26,9 @@ import type {
   GenerateQuizRequest,
   GenerateQuizResponse,
   GenerateQuizV2Response,
+  GenerateQuizStreamDoneEvent,
+  GenerateQuizStreamEvent,
+  GenerateQuizStreamHandlers,
   ChatFollowUpRequest,
   ChatFollowUpResponse,
   LLMProvidersResponse,
@@ -41,6 +44,15 @@ import type {
   CreateInterviewSessionRequest,
   SubmitInterviewAnswerRequest,
   NextInterviewQuestionRequest,
+  InterviewSessionStreamDoneEvent,
+  InterviewSessionStreamEvent,
+  InterviewSessionStreamHandlers,
+  InterviewQuestionStreamDoneEvent,
+  InterviewQuestionStreamEvent,
+  InterviewQuestionStreamHandlers,
+  InterviewTurnStreamDoneEvent,
+  InterviewTurnStreamEvent,
+  InterviewTurnStreamHandlers,
   InterviewSessionResponse,
   InterviewTurnResponse,
   InterviewQuestionResponse,
@@ -180,6 +192,261 @@ export function isTopicContentStreamError(error: unknown): error is TopicContent
   return error instanceof TopicContentStreamError;
 }
 
+export class QuizStreamError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly fallbackEligible: boolean;
+
+  constructor(
+    message: string,
+    opts: { code?: string; status?: number; fallbackEligible?: boolean } = {},
+  ) {
+    super(message);
+    this.name = "QuizStreamError";
+    this.code = opts.code || "";
+    this.status = opts.status || 0;
+    this.fallbackEligible = !!opts.fallbackEligible;
+  }
+}
+
+export function isQuizStreamError(error: unknown): error is QuizStreamError {
+  return error instanceof QuizStreamError;
+}
+
+export class InterviewStreamError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly fallbackEligible: boolean;
+
+  constructor(
+    message: string,
+    opts: { code?: string; status?: number; fallbackEligible?: boolean } = {},
+  ) {
+    super(message);
+    this.name = "InterviewStreamError";
+    this.code = opts.code || "";
+    this.status = opts.status || 0;
+    this.fallbackEligible = !!opts.fallbackEligible;
+  }
+}
+
+export function isInterviewStreamError(error: unknown): error is InterviewStreamError {
+  return error instanceof InterviewStreamError;
+}
+
+type StreamErrorOptions = {
+  code?: string;
+  status?: number;
+  fallbackEligible?: boolean;
+};
+
+type NdjsonStreamOptions<TEvent, TDone, TError extends Error> = {
+  url: string;
+  payload: unknown;
+  signal?: AbortSignal;
+  makeError: (message: string, opts?: StreamErrorOptions) => TError;
+  parseEvent: (line: string) => TEvent;
+  dispatchEvent: (event: TEvent) => void;
+  getDoneEvent: () => TDone | null;
+  unavailableMessage: string;
+  unavailableCode?: string;
+  unavailableFallbackEligible?: (status: number) => boolean;
+  incompleteMessage: string;
+  incompleteCode?: string;
+  incompleteFallbackEligible?: boolean;
+};
+
+async function _streamNdjson<TEvent, TDone, TError extends Error>(
+  options: NdjsonStreamOptions<TEvent, TDone, TError>,
+): Promise<TDone> {
+  const {
+    url,
+    payload,
+    signal,
+    makeError,
+    parseEvent,
+    dispatchEvent,
+    getDoneEvent,
+    unavailableMessage,
+    unavailableCode = "stream_unavailable",
+    unavailableFallbackEligible = () => false,
+    incompleteMessage,
+    incompleteCode = "stream_incomplete",
+    incompleteFallbackEligible = false,
+  } = options;
+  let currentStatus = 200;
+  let buffer = "";
+
+  const processLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    dispatchEvent(parseEvent(trimmed));
+  };
+  const processChunk = (chunk: string) => {
+    if (!chunk) return;
+    buffer += chunk;
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      processLine(line);
+    }
+  };
+  const flushTail = () => {
+    if (buffer.trim()) {
+      processLine(buffer);
+    }
+    buffer = "";
+  };
+  const throwHttpError = (status: number, detail: unknown): never => {
+    const policyCode = _policyCodeFromDetail(detail);
+    if (policyCode) {
+      _redirectToPolicySettings(policyCode);
+      throw makeError("LLM access policy blocked this request.", {
+        code: policyCode,
+        status,
+      });
+    }
+    throw makeError(unavailableMessage, {
+      code: unavailableCode,
+      status,
+      fallbackEligible: unavailableFallbackEligible(status),
+    });
+  };
+  const validateDone = (): TDone => {
+    const doneEvent = getDoneEvent();
+    if (!doneEvent) {
+      throw makeError(incompleteMessage, {
+        code: incompleteCode,
+        fallbackEligible: incompleteFallbackEligible,
+      });
+    }
+    return doneEvent;
+  };
+
+  const streamViaXhr = (): Promise<TDone> =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      let cursor = 0;
+      let settled = false;
+      const onAbort = () => xhr.abort();
+      const finalize = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        fn();
+      };
+      const fail = (error: unknown) => finalize(() => reject(error));
+      const succeed = (doneEvent: TDone) => finalize(() => resolve(doneEvent));
+
+      if (signal?.aborted) {
+        fail(new DOMException("The operation was aborted.", "AbortError"));
+        return;
+      }
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+      xhr.open("POST", url, true);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.setRequestHeader("Accept", "application/x-ndjson");
+
+      xhr.onerror = () => {
+        fail(
+          makeError("Streaming request failed.", {
+            code: unavailableCode,
+            fallbackEligible: unavailableFallbackEligible(0),
+          }),
+        );
+      };
+      xhr.onabort = () => fail(new DOMException("The operation was aborted.", "AbortError"));
+      xhr.onprogress = () => {
+        if (settled) return;
+        if (xhr.status >= 400) return;
+        currentStatus = xhr.status || currentStatus;
+        const chunk = xhr.responseText.slice(cursor);
+        cursor = xhr.responseText.length;
+        try {
+          processChunk(chunk);
+        } catch (error) {
+          fail(error);
+        }
+      };
+      xhr.onload = () => {
+        if (settled) return;
+        currentStatus = xhr.status || currentStatus;
+        try {
+          const tailChunk = xhr.responseText.slice(cursor);
+          cursor = xhr.responseText.length;
+          if (xhr.status >= 400) {
+            let detail: unknown = null;
+            if (tailChunk) {
+              try {
+                const parsed = JSON.parse(tailChunk);
+                detail = (parsed as any)?.detail ?? parsed;
+              } catch {
+                detail = tailChunk;
+              }
+            }
+            throwHttpError(xhr.status, detail);
+            return;
+          }
+          processChunk(tailChunk);
+          flushTail();
+          succeed(validateDone());
+        } catch (error) {
+          fail(error);
+        }
+      };
+
+      xhr.send(JSON.stringify(payload));
+    });
+
+  const supportsFetchStreaming =
+    typeof ReadableStream !== "undefined"
+    && typeof Response !== "undefined"
+    && "body" in Response.prototype;
+  if (!supportsFetchStreaming) {
+    return streamViaXhr();
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/x-ndjson",
+      "Cache-Control": "no-cache",
+    },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  currentStatus = response.status;
+  if (!response.ok) {
+    let detail: unknown = null;
+    try {
+      const parsed = await response.json();
+      detail = (parsed as any)?.detail ?? parsed;
+    } catch {
+      detail = null;
+    }
+    throwHttpError(response.status, detail);
+  }
+  if (!response.body) {
+    return streamViaXhr();
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    processChunk(decoder.decode(value, { stream: true }));
+  }
+  processChunk(decoder.decode());
+  flushTail();
+
+  return validateDone();
+}
+
 // Redirect to /login on 401
 api.interceptors.response.use(
   (response) => response,
@@ -304,45 +571,6 @@ export async function createCustomTopicStream(
   handlers: CustomTopicStreamHandlers,
   signal?: AbortSignal,
 ): Promise<CustomTopicStreamDoneEvent> {
-  const response = await fetch(_resolveApiPath("/topics/custom/stream"), {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-    signal,
-  });
-
-  if (!response.ok) {
-    let detail: unknown = null;
-    try {
-      const payload = await response.json();
-      detail = payload?.detail ?? payload;
-    } catch {
-      detail = null;
-    }
-    const policyCode = _policyCodeFromDetail(detail);
-    if (policyCode) {
-      _redirectToPolicySettings(policyCode);
-      throw new CustomTopicStreamError("LLM access policy blocked this request.", {
-        code: policyCode,
-        status: response.status,
-      });
-    }
-    throw new CustomTopicStreamError("Custom topic streaming endpoint unavailable.", {
-      code: "stream_unavailable",
-      status: response.status,
-    });
-  }
-
-  if (!response.body) {
-    throw new CustomTopicStreamError("Streaming response body is empty.", {
-      code: "stream_unavailable",
-    });
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
   let doneEvent: CustomTopicStreamDoneEvent | null = null;
 
   const dispatchEvent = (event: CustomTopicStreamEvent) => {
@@ -370,42 +598,33 @@ export async function createCustomTopicStream(
     });
   };
 
-  const parseAndDispatch = (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    let parsed: CustomTopicStreamEvent;
-    try {
-      parsed = JSON.parse(trimmed) as CustomTopicStreamEvent;
-    } catch {
-      throw new CustomTopicStreamError("Invalid custom topic streaming event payload.", {
-        code: "invalid_stream_payload",
-      });
-    }
-    dispatchEvent(parsed);
-  };
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      parseAndDispatch(line);
-    }
-  }
-
-  const tail = buffer.trim();
-  if (tail) {
-    parseAndDispatch(tail);
-  }
-  if (!doneEvent) {
-    throw new CustomTopicStreamError(
-      "Custom topic streaming ended before completion event.",
-      { code: "incomplete_stream" },
-    );
-  }
-  return doneEvent;
+  return _streamNdjson({
+    url: _resolveApiPath("/topics/custom/stream"),
+    payload: req,
+    signal,
+    makeError: (message, opts = {}) =>
+      new CustomTopicStreamError(message, {
+        code: opts.code,
+        status: opts.status,
+      }),
+    parseEvent: (line) => {
+      let parsed: CustomTopicStreamEvent;
+      try {
+        parsed = JSON.parse(line) as CustomTopicStreamEvent;
+      } catch {
+        throw new CustomTopicStreamError("Invalid custom topic streaming event payload.", {
+          code: "invalid_stream_payload",
+        });
+      }
+      return parsed;
+    },
+    dispatchEvent,
+    getDoneEvent: () => doneEvent,
+    unavailableMessage: "Custom topic streaming endpoint unavailable.",
+    unavailableCode: "stream_unavailable",
+    incompleteMessage: "Custom topic streaming ended before completion event.",
+    incompleteCode: "incomplete_stream",
+  });
 }
 
 export async function generateTopicContentStream(
@@ -414,48 +633,6 @@ export async function generateTopicContentStream(
   handlers: TopicContentStreamHandlers,
   signal?: AbortSignal,
 ): Promise<TopicContentStreamDoneEvent> {
-  const response = await fetch(
-    _resolveApiPath(`/topics/${encodeURIComponent(topicId)}/content/generate/stream`),
-    {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req),
-      signal,
-    },
-  );
-
-  if (!response.ok) {
-    let detail: unknown = null;
-    try {
-      const payload = await response.json();
-      detail = payload?.detail ?? payload;
-    } catch {
-      detail = null;
-    }
-    const policyCode = _policyCodeFromDetail(detail);
-    if (policyCode) {
-      _redirectToPolicySettings(policyCode);
-      throw new TopicContentStreamError("LLM access policy blocked this request.", {
-        code: policyCode,
-        status: response.status,
-      });
-    }
-    throw new TopicContentStreamError("Topic content streaming endpoint unavailable.", {
-      code: "stream_unavailable",
-      status: response.status,
-    });
-  }
-
-  if (!response.body) {
-    throw new TopicContentStreamError("Streaming response body is empty.", {
-      code: "stream_unavailable",
-    });
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
   let doneEvent: TopicContentStreamDoneEvent | null = null;
 
   const dispatchEvent = (event: TopicContentStreamEvent) => {
@@ -483,42 +660,33 @@ export async function generateTopicContentStream(
     });
   };
 
-  const parseAndDispatch = (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    let parsed: TopicContentStreamEvent;
-    try {
-      parsed = JSON.parse(trimmed) as TopicContentStreamEvent;
-    } catch {
-      throw new TopicContentStreamError("Invalid topic content stream payload.", {
-        code: "invalid_stream_payload",
-      });
-    }
-    dispatchEvent(parsed);
-  };
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      parseAndDispatch(line);
-    }
-  }
-
-  const tail = buffer.trim();
-  if (tail) {
-    parseAndDispatch(tail);
-  }
-  if (!doneEvent) {
-    throw new TopicContentStreamError(
-      "Topic content stream ended before completion event.",
-      { code: "incomplete_stream" },
-    );
-  }
-  return doneEvent;
+  return _streamNdjson({
+    url: _resolveApiPath(`/topics/${encodeURIComponent(topicId)}/content/generate/stream`),
+    payload: req,
+    signal,
+    makeError: (message, opts = {}) =>
+      new TopicContentStreamError(message, {
+        code: opts.code,
+        status: opts.status,
+      }),
+    parseEvent: (line) => {
+      let parsed: TopicContentStreamEvent;
+      try {
+        parsed = JSON.parse(line) as TopicContentStreamEvent;
+      } catch {
+        throw new TopicContentStreamError("Invalid topic content stream payload.", {
+          code: "invalid_stream_payload",
+        });
+      }
+      return parsed;
+    },
+    dispatchEvent,
+    getDoneEvent: () => doneEvent,
+    unavailableMessage: "Topic content streaming endpoint unavailable.",
+    unavailableCode: "stream_unavailable",
+    incompleteMessage: "Topic content stream ended before completion event.",
+    incompleteCode: "incomplete_stream",
+  });
 }
 
 // ── Questions ───────────────────────────────────────────────
@@ -547,9 +715,7 @@ export async function generateQuestionsV2Stream(
   handlers: GenerateQuestionsStreamHandlers,
   signal?: AbortSignal,
 ): Promise<GenerateQuestionsStreamDoneEvent> {
-  const streamUrl = _resolveApiPath("/questions/generate-v2/stream");
   let doneEvent: GenerateQuestionsStreamDoneEvent | null = null;
-  let currentStatus = 200;
 
   const dispatchEvent = (event: GenerateQuestionsStreamEvent) => {
     if (event.type === "start") {
@@ -573,196 +739,111 @@ export async function generateQuestionsV2Stream(
     }
     throw new QuestionsStreamError(event.message || "Question generation failed.", {
       code: event.code || "generation_failed",
-      status: currentStatus,
       fallbackEligible: false,
     });
   };
 
-  const processLine = (line: string) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    let parsed: GenerateQuestionsStreamEvent;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      throw new QuestionsStreamError("Invalid streaming event payload.", {
-        code: "stream_parse_failed",
-        fallbackEligible: true,
-      });
-    }
-    dispatchEvent(parsed);
-  };
-
-  let buffer = "";
-  const processChunk = (chunk: string) => {
-    if (!chunk) return;
-    buffer += chunk;
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    for (const line of lines) {
-      processLine(line);
-    }
-  };
-  const flushTail = () => {
-    if (buffer.trim()) {
-      processLine(buffer);
-    }
-    buffer = "";
-  };
-  const throwHttpError = (status: number, detail: unknown) => {
-    const policyCode = _policyCodeFromDetail(detail);
-    if (policyCode) {
-      _redirectToPolicySettings(policyCode);
-      throw new QuestionsStreamError("LLM access policy blocked this request.", {
-        code: policyCode,
-        status,
-      });
-    }
-    throw new QuestionsStreamError("Streaming endpoint unavailable.", {
-      code: "stream_unavailable",
-      status,
-      fallbackEligible: status === 404 || status === 405,
-    });
-  };
-  const validateDoneEvent = () => {
-    if (!doneEvent) {
-      throw new QuestionsStreamError("Streaming ended before completion event.", {
-        code: "stream_incomplete",
-        fallbackEligible: true,
-      });
-    }
-    return doneEvent;
-  };
-  const streamViaXhr = (): Promise<GenerateQuestionsStreamDoneEvent> =>
-    new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      let cursor = 0;
-      let settled = false;
-      const onAbort = () => xhr.abort();
-      const finalize = (
-        fn: () => void,
-      ) => {
-        if (settled) return;
-        settled = true;
-        signal?.removeEventListener("abort", onAbort);
-        fn();
-      };
-      const fail = (error: unknown) => {
-        finalize(() => reject(error));
-      };
-      const succeed = (event: GenerateQuestionsStreamDoneEvent) => {
-        finalize(() => resolve(event));
-      };
-
-      if (signal?.aborted) {
-        fail(new DOMException("The operation was aborted.", "AbortError"));
-        return;
-      }
-
-      signal?.addEventListener("abort", onAbort, { once: true });
-      xhr.open("POST", streamUrl, true);
-      xhr.withCredentials = true;
-      xhr.setRequestHeader("Content-Type", "application/json");
-      xhr.setRequestHeader("Accept", "application/x-ndjson");
-
-      xhr.onerror = () => {
-        fail(
-          new QuestionsStreamError("Streaming request failed.", {
-            code: "stream_unavailable",
-            fallbackEligible: true,
-          }),
-        );
-      };
-      xhr.onabort = () => {
-        fail(new DOMException("The operation was aborted.", "AbortError"));
-      };
-      xhr.onprogress = () => {
-        if (settled) return;
-        if (xhr.status >= 400) return;
-        currentStatus = xhr.status || currentStatus;
-        const chunk = xhr.responseText.slice(cursor);
-        cursor = xhr.responseText.length;
-        try {
-          processChunk(chunk);
-        } catch (error) {
-          fail(error);
-        }
-      };
-      xhr.onload = () => {
-        if (settled) return;
-        currentStatus = xhr.status || currentStatus;
-        try {
-          const tailChunk = xhr.responseText.slice(cursor);
-          cursor = xhr.responseText.length;
-          if (xhr.status >= 400) {
-            let detail: unknown = null;
-            if (tailChunk) {
-              try {
-                const payload = JSON.parse(tailChunk);
-                detail = payload?.detail ?? payload;
-              } catch {
-                detail = tailChunk;
-              }
-            }
-            throwHttpError(xhr.status, detail);
-            return;
-          }
-          processChunk(tailChunk);
-          flushTail();
-          succeed(validateDoneEvent());
-        } catch (error) {
-          fail(error);
-        }
-      };
-
-      xhr.send(JSON.stringify(req));
-    });
-
-  const supportsFetchStreaming =
-    typeof ReadableStream !== "undefined"
-    && typeof Response !== "undefined"
-    && "body" in Response.prototype;
-  if (!supportsFetchStreaming) {
-    return streamViaXhr();
-  }
-
-  const response = await fetch(streamUrl, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/x-ndjson",
-      "Cache-Control": "no-cache",
-    },
-    body: JSON.stringify(req),
+  return _streamNdjson({
+    url: _resolveApiPath("/questions/generate-v2/stream"),
+    payload: req,
     signal,
+    makeError: (message, opts = {}) =>
+      new QuestionsStreamError(message, {
+        code: opts.code,
+        status: opts.status,
+        fallbackEligible: opts.fallbackEligible,
+      }),
+    parseEvent: (line) => {
+      let parsed: GenerateQuestionsStreamEvent;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw new QuestionsStreamError("Invalid streaming event payload.", {
+          code: "stream_parse_failed",
+          fallbackEligible: true,
+        });
+      }
+      return parsed;
+    },
+    dispatchEvent,
+    getDoneEvent: () => doneEvent,
+    unavailableMessage: "Streaming endpoint unavailable.",
+    unavailableCode: "stream_unavailable",
+    unavailableFallbackEligible: (status) => status === 404 || status === 405,
+    incompleteMessage: "Streaming ended before completion event.",
+    incompleteCode: "stream_incomplete",
+    incompleteFallbackEligible: true,
   });
-  currentStatus = response.status;
-  if (!response.ok) {
-    let detail: unknown = null;
-    try {
-      const payload = await response.json();
-      detail = payload?.detail ?? payload;
-    } catch {
-      detail = null;
+}
+
+export async function generateQuizV2Stream(
+  req: GenerateQuizRequest,
+  handlers: GenerateQuizStreamHandlers,
+  signal?: AbortSignal,
+): Promise<GenerateQuizStreamDoneEvent> {
+  let doneEvent: GenerateQuizStreamDoneEvent | null = null;
+
+  const dispatchEvent = (event: GenerateQuizStreamEvent) => {
+    if (event.type === "start") {
+      handlers.onStart?.(event);
+      return;
     }
-    throwHttpError(response.status, detail);
-  }
-  if (!response.body) {
-    return streamViaXhr();
-  }
+    if (event.type === "progress") {
+      handlers.onProgress?.(event);
+      return;
+    }
+    if (event.type === "question") {
+      handlers.onQuestion?.(event);
+      return;
+    }
+    if (event.type === "done") {
+      doneEvent = event;
+      handlers.onDone?.(event);
+      return;
+    }
+    handlers.onError?.(event);
+    if (event.code === "llm_service_approval_required"
+      || event.code === "study_app_llm_not_assigned"
+      || event.code === "personal_credential_required") {
+      _redirectToPolicySettings(event.code);
+    }
+    throw new QuizStreamError(event.message || "Quiz generation failed.", {
+      code: event.code || "generation_failed",
+      fallbackEligible: false,
+    });
+  };
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    processChunk(decoder.decode(value, { stream: true }));
-  }
-  processChunk(decoder.decode());
-  flushTail();
-
-  return validateDoneEvent();
+  return _streamNdjson({
+    url: _resolveApiPath("/questions/quiz/generate-v2/stream"),
+    payload: req,
+    signal,
+    makeError: (message, opts = {}) =>
+      new QuizStreamError(message, {
+        code: opts.code,
+        status: opts.status,
+        fallbackEligible: opts.fallbackEligible,
+      }),
+    parseEvent: (line) => {
+      let parsed: GenerateQuizStreamEvent;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw new QuizStreamError("Invalid streaming event payload.", {
+          code: "stream_parse_failed",
+          fallbackEligible: true,
+        });
+      }
+      return parsed;
+    },
+    dispatchEvent,
+    getDoneEvent: () => doneEvent,
+    unavailableMessage: "Quiz streaming endpoint unavailable.",
+    unavailableCode: "stream_unavailable",
+    unavailableFallbackEligible: (status) => status === 404 || status === 405,
+    incompleteMessage: "Quiz streaming ended before completion event.",
+    incompleteCode: "stream_incomplete",
+    incompleteFallbackEligible: true,
+  });
 }
 
 // ── Quiz ────────────────────────────────────────────────────
@@ -850,6 +931,72 @@ export async function createInterviewSession(
   return data;
 }
 
+export async function createInterviewSessionStream(
+  req: CreateInterviewSessionRequest,
+  handlers: InterviewSessionStreamHandlers,
+  signal?: AbortSignal,
+): Promise<InterviewSessionStreamDoneEvent> {
+  let doneEvent: InterviewSessionStreamDoneEvent | null = null;
+
+  const dispatchEvent = (event: InterviewSessionStreamEvent) => {
+    if (event.type === "start") {
+      handlers.onStart?.(event);
+      return;
+    }
+    if (event.type === "progress") {
+      handlers.onProgress?.(event);
+      return;
+    }
+    if (event.type === "done") {
+      doneEvent = event;
+      handlers.onDone?.(event);
+      return;
+    }
+    handlers.onError?.(event);
+    if (event.code === "llm_service_approval_required"
+      || event.code === "study_app_llm_not_assigned"
+      || event.code === "personal_credential_required") {
+      _redirectToPolicySettings(event.code);
+    }
+    throw new InterviewStreamError(event.message || "Interview generation failed.", {
+      code: event.code || "generation_failed",
+      fallbackEligible: false,
+    });
+  };
+
+  return _streamNdjson({
+    url: _resolveApiPath("/interview-sessions/stream"),
+    payload: req,
+    signal,
+    makeError: (message, opts = {}) =>
+      new InterviewStreamError(message, {
+        code: opts.code,
+        status: opts.status,
+        fallbackEligible: opts.fallbackEligible,
+      }),
+    parseEvent: (line) => {
+      let parsed: InterviewSessionStreamEvent;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw new InterviewStreamError("Invalid interview stream payload.", {
+          code: "stream_parse_failed",
+          fallbackEligible: true,
+        });
+      }
+      return parsed;
+    },
+    dispatchEvent,
+    getDoneEvent: () => doneEvent,
+    unavailableMessage: "Interview streaming endpoint unavailable.",
+    unavailableCode: "stream_unavailable",
+    unavailableFallbackEligible: (status) => status === 404 || status === 405,
+    incompleteMessage: "Interview stream ended before completion event.",
+    incompleteCode: "stream_incomplete",
+    incompleteFallbackEligible: true,
+  });
+}
+
 export async function fetchInterviewSessions(
   limit = 20,
   offset = 0,
@@ -881,6 +1028,73 @@ export async function submitInterviewAnswer(
   return data;
 }
 
+export async function submitInterviewAnswerStream(
+  sessionId: string,
+  req: SubmitInterviewAnswerRequest,
+  handlers: InterviewTurnStreamHandlers,
+  signal?: AbortSignal,
+): Promise<InterviewTurnStreamDoneEvent> {
+  let doneEvent: InterviewTurnStreamDoneEvent | null = null;
+
+  const dispatchEvent = (event: InterviewTurnStreamEvent) => {
+    if (event.type === "start") {
+      handlers.onStart?.(event);
+      return;
+    }
+    if (event.type === "progress") {
+      handlers.onProgress?.(event);
+      return;
+    }
+    if (event.type === "done") {
+      doneEvent = event;
+      handlers.onDone?.(event);
+      return;
+    }
+    handlers.onError?.(event);
+    if (event.code === "llm_service_approval_required"
+      || event.code === "study_app_llm_not_assigned"
+      || event.code === "personal_credential_required") {
+      _redirectToPolicySettings(event.code);
+    }
+    throw new InterviewStreamError(event.message || "Interview evaluation failed.", {
+      code: event.code || "generation_failed",
+      fallbackEligible: false,
+    });
+  };
+
+  return _streamNdjson({
+    url: _resolveApiPath(`/interview-sessions/${encodeURIComponent(sessionId)}/answer/stream`),
+    payload: req,
+    signal,
+    makeError: (message, opts = {}) =>
+      new InterviewStreamError(message, {
+        code: opts.code,
+        status: opts.status,
+        fallbackEligible: opts.fallbackEligible,
+      }),
+    parseEvent: (line) => {
+      let parsed: InterviewTurnStreamEvent;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw new InterviewStreamError("Invalid interview stream payload.", {
+          code: "stream_parse_failed",
+          fallbackEligible: true,
+        });
+      }
+      return parsed;
+    },
+    dispatchEvent,
+    getDoneEvent: () => doneEvent,
+    unavailableMessage: "Interview streaming endpoint unavailable.",
+    unavailableCode: "stream_unavailable",
+    unavailableFallbackEligible: (status) => status === 404 || status === 405,
+    incompleteMessage: "Interview stream ended before completion event.",
+    incompleteCode: "stream_incomplete",
+    incompleteFallbackEligible: true,
+  });
+}
+
 export async function generateNextInterviewQuestion(
   sessionId: string,
   req: NextInterviewQuestionRequest,
@@ -890,6 +1104,73 @@ export async function generateNextInterviewQuestion(
     req,
   );
   return data;
+}
+
+export async function generateNextInterviewQuestionStream(
+  sessionId: string,
+  req: NextInterviewQuestionRequest,
+  handlers: InterviewQuestionStreamHandlers,
+  signal?: AbortSignal,
+): Promise<InterviewQuestionStreamDoneEvent> {
+  let doneEvent: InterviewQuestionStreamDoneEvent | null = null;
+
+  const dispatchEvent = (event: InterviewQuestionStreamEvent) => {
+    if (event.type === "start") {
+      handlers.onStart?.(event);
+      return;
+    }
+    if (event.type === "progress") {
+      handlers.onProgress?.(event);
+      return;
+    }
+    if (event.type === "done") {
+      doneEvent = event;
+      handlers.onDone?.(event);
+      return;
+    }
+    handlers.onError?.(event);
+    if (event.code === "llm_service_approval_required"
+      || event.code === "study_app_llm_not_assigned"
+      || event.code === "personal_credential_required") {
+      _redirectToPolicySettings(event.code);
+    }
+    throw new InterviewStreamError(event.message || "Interview generation failed.", {
+      code: event.code || "generation_failed",
+      fallbackEligible: false,
+    });
+  };
+
+  return _streamNdjson({
+    url: _resolveApiPath(`/interview-sessions/${encodeURIComponent(sessionId)}/next-question/stream`),
+    payload: req,
+    signal,
+    makeError: (message, opts = {}) =>
+      new InterviewStreamError(message, {
+        code: opts.code,
+        status: opts.status,
+        fallbackEligible: opts.fallbackEligible,
+      }),
+    parseEvent: (line) => {
+      let parsed: InterviewQuestionStreamEvent;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw new InterviewStreamError("Invalid interview stream payload.", {
+          code: "stream_parse_failed",
+          fallbackEligible: true,
+        });
+      }
+      return parsed;
+    },
+    dispatchEvent,
+    getDoneEvent: () => doneEvent,
+    unavailableMessage: "Interview streaming endpoint unavailable.",
+    unavailableCode: "stream_unavailable",
+    unavailableFallbackEligible: (status) => status === 404 || status === 405,
+    incompleteMessage: "Interview stream ended before completion event.",
+    incompleteCode: "stream_incomplete",
+    incompleteFallbackEligible: true,
+  });
 }
 
 export async function fetchInterviewReport(
