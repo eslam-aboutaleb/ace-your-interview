@@ -31,6 +31,52 @@ def _question_payload(question: str) -> list[dict]:
     ]
 
 
+def _problem_solving_payload(question: str) -> list[dict]:
+    return [
+        {
+            "question": question,
+            "answer": """### Problem
+
+Understand the input-output contract before choosing the data structure.
+
+### Solution Walkthrough
+
+Use a hash map so every number can check whether its complement has already appeared in O(1). That keeps the solution single-pass and avoids reusing the same element twice.
+
+### Complexity
+
+The algorithm runs in O(n) time with O(n) extra space for the hash map.
+
+### Code
+
+```python
+def two_sum(nums, target):
+    # Store each seen value so complement lookups stay O(1).
+    seen = {}
+
+    # Scan once and return immediately when the matching pair is found.
+    for index, value in enumerate(nums):
+        complement = target - value
+        if complement in seen:
+            return [seen[complement], index]
+
+        # Save the current value after checking so the same element is not reused.
+        seen[value] = index
+
+    # Return an empty answer when the input does not contain a valid pair.
+    return []
+```""",
+            "difficulty": "medium",
+            "learning_objective": "Turn a complement invariant into a one-pass solution.",
+            "source_section": "Junior: Hash maps and frequency counting",
+            "source_quote": "Use a hash map when the current value needs a previously seen complement.",
+            "misconception_trap": "Keeping nested loops even after a constant-time lookup structure is available.",
+            "reasoning_summary": "Identify the invariant first, then choose the structure that preserves it in one pass.",
+            "target_level": "mid",
+        }
+    ]
+
+
 class FakeLLM:
     def __init__(self):
         self.blocked = False
@@ -47,9 +93,16 @@ class FakeLLM:
             }
 
         self.calls += 1
+        prompt_l = prompt.lower()
+        if "expert algorithm interview coach and problem-solving educator" in prompt_l:
+            payload = _problem_solving_payload(
+                f"Question {self.calls}: solve two sum in python."
+            )
+        else:
+            payload = _question_payload(f"Question {self.calls}: explain JVM tradeoffs.")
         return {
             "success": True,
-            "analysis": json.dumps(_question_payload(f"Question {self.calls}: explain JVM tradeoffs.")),
+            "analysis": json.dumps(payload),
             "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
             "error": "",
             "error_code": "",
@@ -98,6 +151,28 @@ Static topic body.
                 "Understand memory model, GC, and runtime behavior."
             ),
         )
+        self.store.upsert_dynamic_topic_curriculum(
+            user_id="alice",
+            topic_id="00-problem-solving-and-algorithms",
+            preferred_language="python",
+            title="Problem Solving and Algorithms (python)",
+            description="Python roadmap.",
+            track="backend",
+            levels=["junior", "mid", "senior"],
+            sections=[
+                {
+                    "heading": "Junior: Hash maps and frequency counting",
+                    "content": "Use a hash map when the current value needs a previously seen complement.",
+                }
+            ],
+            raw_content=(
+                "# Problem Solving and Algorithms (python)\n\n"
+                "## Junior: Hash maps and frequency counting\n\n"
+                "Use a hash map when the current value needs a previously seen complement."
+            ),
+            target_sections=120,
+            source="llm",
+        )
 
         self.fake_llm = FakeLLM()
         questions.init(self.fake_llm, self.parser, self.store)
@@ -145,6 +220,25 @@ Static topic body.
         self.assertEqual(events[0]["type"], "start")
         self.assertEqual(events[-1]["type"], "error")
         self.assertEqual(events[-1]["code"], "llm_service_approval_required")
+
+    def test_problem_solving_stream_returns_structured_answer_and_code(self):
+        status, events = self._stream_events(
+            {
+                "topic_id": "00-problem-solving-and-algorithms",
+                "count": 1,
+                "level": "mid",
+                "preferred_language": "python",
+            }
+        )
+        self.assertEqual(status, 200)
+        question_event = next(event for event in events if event["type"] == "question")
+        answer = question_event["question"]["answer"]
+        self.assertIn("### Problem", answer)
+        self.assertIn("### Solution Walkthrough", answer)
+        self.assertIn("### Complexity", answer)
+        self.assertIn("### Code", answer)
+        self.assertIn("```python", answer)
+        self.assertEqual(events[-1]["type"], "done")
 
 
 if __name__ == "__main__":

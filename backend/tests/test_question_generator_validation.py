@@ -3,6 +3,7 @@ import json
 import unittest
 
 from app.services.question_generator import (
+    _build_fallback_question_items,
     _build_prompt,
     _build_quiz_prompt,
     _collect_with_retries,
@@ -10,6 +11,41 @@ from app.services.question_generator import (
     _validate_question_item,
     _validate_quiz_item,
 )
+
+
+def _problem_solving_answer(language: str = "python") -> str:
+    return f"""### Problem
+
+Understand the input, output, and the invariant before writing code.
+
+### Solution Walkthrough
+
+Use a hash map so each complement lookup stays O(1) during a single left-to-right pass.
+
+### Complexity
+
+The solution runs in O(n) time with O(n) extra space.
+
+### Code
+
+```{language}
+def two_sum(nums, target):
+    # Store each seen value so complement lookups stay O(1).
+    seen = {{}}
+
+    # Scan once and return as soon as the matching pair is found.
+    for index, value in enumerate(nums):
+        complement = target - value
+        if complement in seen:
+            return [seen[complement], index]
+
+        # Save the current value after checking so the same element is not reused.
+        seen[value] = index
+
+    # Return an empty answer when no pair exists.
+    return []
+```
+"""
 
 
 class QuestionGeneratorValidationTests(unittest.TestCase):
@@ -260,6 +296,111 @@ Answer 2: Pagination controls payload size, improves latency, and avoids memory 
         self.assertIn("fenced Mermaid diagrams", prompt)
         self.assertIn("valid JSON, escape newlines", prompt)
         self.assertIn("Return exactly 3 items", prompt)
+
+    def test_problem_solving_prompt_requires_structured_answer_and_selected_language_code(self):
+        prompt = _build_prompt(
+            topic_id="00-problem-solving-and-algorithms",
+            topic_title="Problem Solving and Algorithms (python)",
+            doc_content="Use two pointers when the invariant moves from both sides.",
+            count=2,
+            level="mid",
+            preferred_language="python",
+            requires_programming=True,
+        )
+        self.assertIn("### Problem", prompt)
+        self.assertIn("### Solution Walkthrough", prompt)
+        self.assertIn("### Complexity", prompt)
+        self.assertIn("### Code", prompt)
+        self.assertIn('exactly one fenced "python"', prompt)
+
+    def test_problem_solving_validation_rejects_missing_required_headings(self):
+        item = {
+            "question": "Solve two sum in python.",
+            "answer": "Use a hash map and then return the answer.",
+            "difficulty": "medium",
+            "reasoning_summary": "Spot the complement invariant first.",
+        }
+        valid, issue = _validate_question_item(
+            item,
+            "00-problem-solving-and-algorithms",
+            "medium",
+            "mid",
+            preferred_language="python",
+            requires_programming=True,
+        )
+        self.assertFalse(valid)
+        self.assertEqual(issue, "invalid_problem_solving_heading_sequence")
+
+    def test_problem_solving_validation_rejects_missing_code_fence(self):
+        item = {
+            "question": "Solve two sum in python.",
+            "answer": """### Problem
+
+Read the prompt carefully.
+
+### Solution Walkthrough
+
+Use a hash map to store seen values.
+
+### Complexity
+
+This takes O(n) time and O(n) space.
+
+### Code
+
+Use a dictionary and a loop.""",
+            "difficulty": "medium",
+            "reasoning_summary": "Spot the complement invariant first.",
+        }
+        valid, issue = _validate_question_item(
+            item,
+            "00-problem-solving-and-algorithms",
+            "medium",
+            "mid",
+            preferred_language="python",
+            requires_programming=True,
+        )
+        self.assertFalse(valid)
+        self.assertEqual(issue, "invalid_problem_solving_code_block_count")
+
+    def test_problem_solving_validation_rejects_wrong_code_language(self):
+        item = {
+            "question": "Solve two sum in python.",
+            "answer": _problem_solving_answer(language="javascript"),
+            "difficulty": "medium",
+            "reasoning_summary": "Spot the complement invariant first.",
+        }
+        valid, issue = _validate_question_item(
+            item,
+            "00-problem-solving-and-algorithms",
+            "medium",
+            "mid",
+            preferred_language="python",
+            requires_programming=True,
+        )
+        self.assertFalse(valid)
+        self.assertEqual(issue, "problem_solving_code_language_mismatch")
+
+    def test_problem_solving_fallback_items_include_structured_answer_and_code(self):
+        items = _build_fallback_question_items(
+            topic_id="00-problem-solving-and-algorithms",
+            topic_title="Problem Solving and Algorithms (python)",
+            doc_content="Use a hash map or two pointers when the constraint suggests a faster lookup.",
+            count=1,
+            difficulty="medium",
+            level="mid",
+            section_title="Junior: Hash maps and frequency counting",
+            section_content="Use a hash map when the current value needs a previously seen complement.",
+            preferred_language="python",
+            requires_programming=True,
+        )
+        self.assertEqual(len(items), 1)
+        self.assertIn("### Problem", items[0]["answer"])
+        self.assertIn("### Solution Walkthrough", items[0]["answer"])
+        self.assertIn("### Complexity", items[0]["answer"])
+        self.assertIn("### Code", items[0]["answer"])
+        self.assertIn("```python", items[0]["answer"])
+        self.assertTrue(items[0]["reasoning_summary"])
 
     def test_quiz_prompt_requires_adaptive_markdown_explanations(self):
         prompt = _build_quiz_prompt(

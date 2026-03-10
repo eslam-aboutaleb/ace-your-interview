@@ -967,6 +967,8 @@ export default function TopicStudy() {
   }, [allSubmitted, topicId, markTopicComplete]);
 
   const progress = topicId ? getTopicProgress(topicId) : 0;
+  const isProblemSolvingTopic =
+    topic?.id === "00-problem-solving-and-algorithms";
   const normalizedTopicTitle = normalizeEscapedSingleLineText(
     topic?.title || "",
   );
@@ -1664,6 +1666,19 @@ export default function TopicStudy() {
                                         <h4 className="text-xs font-bold text-udemy-text-muted uppercase tracking-wide mb-2">
                                           Official Answer
                                         </h4>
+                                        {isProblemSolvingTopic &&
+                                          qa.reasoning_summary && (
+                                            <div className="mb-3 rounded-lg border border-udemy-purple/20 bg-white px-3 py-2">
+                                              <p className="text-[11px] font-bold uppercase tracking-wide text-udemy-purple mb-1">
+                                                How to think about it
+                                              </p>
+                                              <p className="text-sm text-udemy-text whitespace-pre-line">
+                                                {normalizeEscapedMultilineText(
+                                                  qa.reasoning_summary,
+                                                )}
+                                              </p>
+                                            </div>
+                                          )}
                                         <div data-word-chat-target="true">
                                           <MarkdownRenderer
                                             content={qa.answer}

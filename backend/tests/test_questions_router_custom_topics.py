@@ -35,6 +35,50 @@ class FakeLLM:
                     "target_level": "mid",
                 }
             ]
+        elif "expert algorithm interview coach and problem-solving educator" in prompt_l:
+            payload = [
+                {
+                    "question": "Given an integer array and a target, how would you solve two sum in python?",
+                    "answer": """### Problem
+
+Read the prompt as an input-output mapping: return the two indices whose values add up to the target without reusing the same element.
+
+### Solution Walkthrough
+
+The expert move is to reject the O(n^2) brute-force scan once you notice every number only needs a previously seen complement. A hash map stores each seen value with its index, so every step can compute the complement, check for it in O(1), and then store the current value after the check.
+
+### Complexity
+
+The loop visits each element once, so the time complexity is O(n). The hash map stores up to n values, so the extra space complexity is O(n).
+
+### Code
+
+```python
+def two_sum(nums, target):
+    # Store each seen value so complement lookups stay O(1).
+    seen = {}
+
+    # Scan once and return as soon as the matching pair is found.
+    for index, value in enumerate(nums):
+        complement = target - value
+        if complement in seen:
+            return [seen[complement], index]
+
+        # Save the current value after checking so the same element is not reused.
+        seen[value] = index
+
+    # Return an empty answer when the input does not contain a valid pair.
+    return []
+```""",
+                    "difficulty": "medium",
+                    "learning_objective": "Explain how to turn a complement invariant into a one-pass hash map solution.",
+                    "source_section": "Junior: Two pointers",
+                    "source_quote": "Understand constraints and sliding window tradeoffs.",
+                    "misconception_trap": "Writing nested loops before checking whether a faster lookup structure removes repeated work.",
+                    "reasoning_summary": "Identify the invariant first: every value needs a previously seen complement. That immediately points to a one-pass hash map.",
+                    "target_level": "mid",
+                }
+            ]
         else:
             payload = [
                 {
@@ -200,6 +244,51 @@ More context for generation.
         payload = res.json()
         self.assertEqual(payload["topic_id"], "00-problem-solving-and-algorithms")
         self.assertEqual(len(payload["questions"]), 1)
+        answer = payload["questions"][0]["answer"]
+        self.assertIn("### Problem", answer)
+        self.assertIn("### Solution Walkthrough", answer)
+        self.assertIn("### Complexity", answer)
+        self.assertIn("### Code", answer)
+        self.assertIn("```python", answer)
+
+    def test_problem_solving_topic_legacy_generate_preserves_structured_answer(self):
+        self.store.upsert_dynamic_topic_curriculum(
+            user_id="alice",
+            topic_id="00-problem-solving-and-algorithms",
+            preferred_language="python",
+            title="Problem Solving and Algorithms (python)",
+            description="Python roadmap.",
+            track="backend",
+            levels=["junior", "mid", "senior"],
+            sections=[
+                {
+                    "heading": "Junior: Two pointers",
+                    "content": "Understand constraints and sliding window tradeoffs.",
+                }
+            ],
+            raw_content=(
+                "# Problem Solving and Algorithms (python)\n\n## Junior: Two pointers\n\n"
+                "Understand constraints and sliding window tradeoffs."
+            ),
+            target_sections=120,
+            source="llm",
+        )
+        res = self.client.post(
+            "/api/questions/generate",
+            json={
+                "topic_id": "00-problem-solving-and-algorithms",
+                "count": 1,
+                "level": "mid",
+                "preferred_language": "python",
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["topic_id"], "00-problem-solving-and-algorithms")
+        self.assertEqual(len(payload["questions"]), 1)
+        answer = payload["questions"][0]["answer"]
+        self.assertIn("### Problem", answer)
+        self.assertIn("```python", answer)
 
 
 if __name__ == "__main__":

@@ -53,6 +53,17 @@ _MAX_TOTAL_ATTEMPTS = 18
 _MAX_RECOVERY_ATTEMPTS = 24
 _VALID_DIFFICULTIES = {"easy", "medium", "hard"}
 _VALID_LEVELS = {"junior", "mid", "senior"}
+_PROBLEM_SOLVING_SECTION_HEADINGS = (
+    "Problem",
+    "Solution Walkthrough",
+    "Complexity",
+    "Code",
+)
+_PROBLEM_SOLVING_CODE_FENCE_RE = re.compile(
+    r"```(?P<language>[a-zA-Z0-9_#+-]+)\s*\n(?P<code>[\s\S]*?)```",
+    re.MULTILINE,
+)
+_PROBLEM_SOLVING_H3_RE = re.compile(r"^\s*###\s+(.+?)\s*$", re.MULTILINE)
 _QUESTION_STOPWORDS = {
     "a",
     "an",
@@ -165,6 +176,268 @@ def _normalise_existing_questions(existing_questions: list[str] | None) -> list[
     return out
 
 
+def _problem_solving_language(preferred_language: str) -> str:
+    language = (preferred_language or "").strip().lower()
+    return language or PROBLEM_SOLVING_DEFAULT_LANGUAGE
+
+
+def _problem_solving_required_markdown(language: str) -> list[str]:
+    headings = ", ".join([f"`### {heading}`" for heading in _PROBLEM_SOLVING_SECTION_HEADINGS])
+    return [
+        f"Use exactly these markdown headings in this exact order: {headings}.",
+        "Do not add extra `###` headings before, between, or after those sections.",
+        f'Under `### Code`, include exactly one fenced `{language}` block.',
+        "The code block must contain practical code, not pseudocode.",
+        "Add comments that explain each key step or block in the code.",
+        "Keep `reasoning_summary` to 1-2 sentences that explain how an expert chooses the approach.",
+    ]
+
+
+def _problem_solving_question_seed(focus: str, source_scope: str) -> dict[str, str]:
+    trimmed_focus = (focus or source_scope or "problem solving").strip()
+    return {
+        "question": (
+            f"Given an integer array `nums` and a target value `target`, return the two indices whose "
+            f"values add up to the target. Walk through how you would solve this using {trimmed_focus} "
+            "reasoning under interview pressure."
+        ),
+        "problem": (
+            "Start by translating the prompt into inputs, outputs, and constraints. You need one pass "
+            "that can quickly tell you whether the complement of the current value has already appeared."
+        ),
+        "walkthrough": (
+            "The expert move is to reject the O(n^2) brute-force scan once the constraints suggest a "
+            "faster lookup is possible. A hash map stores each seen value with its index, so every "
+            "iteration can compute the needed complement, check for a match in O(1), and then store the "
+            "current value without reusing the same element twice."
+        ),
+        "complexity": (
+            "The loop visits each element once, so the time complexity is O(n). The hash map can store "
+            "up to n seen values, so the extra space complexity is O(n). The tradeoff is extra memory in "
+            "exchange for eliminating the quadratic brute-force scan."
+        ),
+        "reasoning_summary": (
+            "Clarify the invariant first: each number needs a previously seen complement. Once that is "
+            "clear, a single-pass hash map is the fastest reliable approach."
+        ),
+    }
+
+
+def _problem_solving_code_template(language: str) -> str:
+    templates = {
+        "python": """def two_sum(nums, target):
+    # Store each seen value with its index so complement lookups stay O(1).
+    seen = {}
+
+    # Scan the array once and look for the complement before storing the current value.
+    for index, value in enumerate(nums):
+        complement = target - value
+        if complement in seen:
+            # Return the earlier index and the current index as soon as the pair is found.
+            return [seen[complement], index]
+
+        # Save the current value after the check so the same element is never reused.
+        seen[value] = index
+
+    # Return an empty result when the input does not contain a valid pair.
+    return []
+""",
+        "java": """import java.util.HashMap;
+import java.util.Map;
+
+class Solution {
+    public int[] twoSum(int[] nums, int target) {
+        // Store each seen value with its index so complement lookups stay O(1).
+        Map<Integer, Integer> seen = new HashMap<>();
+
+        // Scan the array once and look for the complement before storing the current value.
+        for (int index = 0; index < nums.length; index++) {
+            int value = nums[index];
+            int complement = target - value;
+            if (seen.containsKey(complement)) {
+                // Return the earlier index and the current index as soon as the pair is found.
+                return new int[] {seen.get(complement), index};
+            }
+
+            // Save the current value after the check so the same element is never reused.
+            seen.put(value, index);
+        }
+
+        // Return an empty result when the input does not contain a valid pair.
+        return new int[0];
+    }
+}
+""",
+        "cpp": """#include <unordered_map>
+#include <vector>
+
+using namespace std;
+
+vector<int> twoSum(const vector<int>& nums, int target) {
+    // Store each seen value with its index so complement lookups stay O(1).
+    unordered_map<int, int> seen;
+
+    // Scan the array once and look for the complement before storing the current value.
+    for (int index = 0; index < static_cast<int>(nums.size()); index++) {
+        int value = nums[index];
+        int complement = target - value;
+        auto found = seen.find(complement);
+        if (found != seen.end()) {
+            // Return the earlier index and the current index as soon as the pair is found.
+            return {found->second, index};
+        }
+
+        // Save the current value after the check so the same element is never reused.
+        seen[value] = index;
+    }
+
+    // Return an empty result when the input does not contain a valid pair.
+    return {};
+}
+""",
+        "javascript": """function twoSum(nums, target) {
+  // Store each seen value with its index so complement lookups stay O(1).
+  const seen = new Map();
+
+  // Scan the array once and look for the complement before storing the current value.
+  for (let index = 0; index < nums.length; index += 1) {
+    const value = nums[index];
+    const complement = target - value;
+    if (seen.has(complement)) {
+      // Return the earlier index and the current index as soon as the pair is found.
+      return [seen.get(complement), index];
+    }
+
+    // Save the current value after the check so the same element is never reused.
+    seen.set(value, index);
+  }
+
+  // Return an empty result when the input does not contain a valid pair.
+  return [];
+}
+""",
+        "csharp": """using System.Collections.Generic;
+
+public class Solution
+{
+    public int[] TwoSum(int[] nums, int target)
+    {
+        // Store each seen value with its index so complement lookups stay O(1).
+        var seen = new Dictionary<int, int>();
+
+        // Scan the array once and look for the complement before storing the current value.
+        for (var index = 0; index < nums.Length; index++)
+        {
+            var value = nums[index];
+            var complement = target - value;
+            if (seen.TryGetValue(complement, out var previousIndex))
+            {
+                // Return the earlier index and the current index as soon as the pair is found.
+                return new[] { previousIndex, index };
+            }
+
+            // Save the current value after the check so the same element is never reused.
+            seen[value] = index;
+        }
+
+        // Return an empty result when the input does not contain a valid pair.
+        return new int[0];
+    }
+}
+""",
+        "go": """package main
+
+func twoSum(nums []int, target int) []int {
+    // Store each seen value with its index so complement lookups stay O(1).
+    seen := make(map[int]int)
+
+    // Scan the array once and look for the complement before storing the current value.
+    for index, value := range nums {
+        complement := target - value
+        if previousIndex, ok := seen[complement]; ok {
+            // Return the earlier index and the current index as soon as the pair is found.
+            return []int{previousIndex, index}
+        }
+
+        // Save the current value after the check so the same element is never reused.
+        seen[value] = index
+    }
+
+    // Return an empty result when the input does not contain a valid pair.
+    return []int{}
+}
+""",
+    }
+    return templates.get(language, templates[PROBLEM_SOLVING_DEFAULT_LANGUAGE]).strip()
+
+
+def _build_problem_solving_fallback_answer(*, focus: str, source_scope: str, language: str) -> tuple[str, str]:
+    seed = _problem_solving_question_seed(focus, source_scope)
+    code = _problem_solving_code_template(language)
+    answer = "\n\n".join(
+        [
+            "### Problem",
+            seed["problem"],
+            "### Solution Walkthrough",
+            seed["walkthrough"],
+            "### Complexity",
+            seed["complexity"],
+            "### Code",
+            f"```{language}\n{code}\n```",
+        ]
+    ).strip()
+    return answer, seed["reasoning_summary"]
+
+
+def _validate_problem_solving_answer(answer: str, preferred_language: str) -> tuple[bool, str]:
+    language = _problem_solving_language(preferred_language)
+    answer_text = (answer or "").strip()
+    headings = [
+        match.group(1).strip()
+        for match in _PROBLEM_SOLVING_H3_RE.finditer(
+            _PROBLEM_SOLVING_CODE_FENCE_RE.sub("", answer_text)
+        )
+    ]
+    if headings != list(_PROBLEM_SOLVING_SECTION_HEADINGS):
+        return False, "invalid_problem_solving_heading_sequence"
+
+    code_matches = list(_PROBLEM_SOLVING_CODE_FENCE_RE.finditer(answer_text))
+    if len(code_matches) != 1:
+        return False, "invalid_problem_solving_code_block_count"
+
+    code_match = code_matches[0]
+    if code_match.start() <= answer_text.find("### Code"):
+        return False, "problem_solving_code_block_before_code_heading"
+
+    fence_language = code_match.group("language").strip().lower()
+    if fence_language != language:
+        return False, "problem_solving_code_language_mismatch"
+
+    code = code_match.group("code").strip()
+    if not code:
+        return False, "empty_problem_solving_code_block"
+
+    comment_count = 0
+    for raw_line in code.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if language == "python":
+            if stripped.startswith("#"):
+                comment_count += 1
+        elif (
+            stripped.startswith("//")
+            or stripped.startswith("/*")
+            or stripped.startswith("*")
+            or stripped.endswith("*/")
+        ):
+            comment_count += 1
+    if comment_count < 2:
+        return False, "problem_solving_code_missing_comments"
+
+    return True, ""
+
+
 def _build_prompt(
     topic_id: str,
     topic_title: str,
@@ -202,12 +475,12 @@ def _build_prompt(
         else "Be very detailed with layered explanation depth and concrete examples."
     )
     selected_language = (preferred_language or "").strip().lower()
+    problem_solving_language = _problem_solving_language(selected_language)
     code_clause = ""
     if problem_solving_mode:
-        code_language = selected_language or PROBLEM_SOLVING_DEFAULT_LANGUAGE
         code_clause = (
-            f'When code materially helps, provide one fenced "{code_language}" example with inline comments '
-            "that explain each key step."
+            f'Under `### Code`, include exactly one fenced "{problem_solving_language}" example with comments '
+            "that explain each key step or block."
         )
     elif requires_programming and selected_language:
         code_clause = (
@@ -232,7 +505,8 @@ def _build_prompt(
             "Answers should explain problem understanding and constraints.",
             "Answers should explain solution strategy and why it works.",
             "Answers should explain complexity analysis and tradeoffs.",
-            "Code is optional; if included, keep it practical and commented.",
+            "Every answer must include commented code in the selected language.",
+            *_problem_solving_required_markdown(problem_solving_language),
         ]
         if problem_solving_mode
         else ["Questions must cover conceptual + practical angles."]
@@ -249,7 +523,7 @@ def _build_prompt(
         schema_block=f"""[
   {{
     "question": "Question text",
-    "answer": "3-8 sentence educational answer",
+    "answer": "{'Markdown that starts with ### Problem, then ### Solution Walkthrough, then ### Complexity, then ### Code with one fenced code block' if problem_solving_mode else '3-8 sentence educational answer'}",
     "difficulty": "easy|medium|hard"
   }}
 ]""",
@@ -268,7 +542,11 @@ def _build_prompt(
             "If you use a table, output valid GFM table syntax.",
             "one row per line.",
             "include a separator row (e.g. `| --- | --- |`).",
-            "You may include fenced code blocks when code clarifies an implementation detail.",
+            (
+                "Problem Solving answers must always include the required fenced code block."
+                if problem_solving_mode
+                else "You may include fenced code blocks when code clarifies an implementation detail."
+            ),
             code_clause if code_clause else "Use code examples only when they materially improve clarity.",
             "You may include fenced Mermaid diagrams when architecture or flows are better shown visually.",
             "If you include fences, always use explicit language tags (for example: ```python, ```mermaid).",
@@ -281,6 +559,11 @@ def _build_prompt(
             "mid: implementation details, constraints, and moderate tradeoffs.",
             "senior: architecture, scaling, risk, and deep tradeoff decisions.",
             "Keep markdown compact and practical.",
+            (
+                "Set `reasoning_summary` to a short expert-thinking summary that explains how to choose the approach before coding."
+                if problem_solving_mode
+                else ""
+            ),
         ],
     )
     return f"""{role_clause}
@@ -405,13 +688,26 @@ Documentation:
 {docs_text[:_MAX_DOC_CONTEXT]}{mcp_block}"""
 
 
-def _build_retry_prompt(base_prompt: str, missing_count: int, issues: str, existing_questions: list[str]) -> str:
+def _build_retry_prompt(
+    base_prompt: str,
+    missing_count: int,
+    issues: str,
+    existing_questions: list[str],
+    hard_requirements: Optional[list[str]] = None,
+) -> str:
     existing_blob = "\n".join([f"- {q}" for q in existing_questions[:50]])
+    hard_requirements_block = ""
+    if hard_requirements:
+        hard_requirements_block = "Hard format requirements:\n" + "\n".join(
+            [f"- {item}" for item in hard_requirements]
+        )
     return f"""Your previous output did not satisfy the schema or quality constraints.
 
 Missing items needed: {missing_count}
 Validation issues:
 {issues}
+
+{hard_requirements_block}
 
 Do not repeat any of these existing questions:
 {existing_blob if existing_blob else "- (none)"}
@@ -581,11 +877,14 @@ def _build_fallback_question_items(
     section_title: Optional[str] = None,
     section_content: Optional[str] = None,
     existing_questions: Optional[list[str]] = None,
+    preferred_language: str = "",
+    requires_programming: bool = False,
 ) -> list[dict[str, Any]]:
     remaining = max(0, int(count or 0))
     if remaining <= 0:
         return []
 
+    problem_solving_mode = is_problem_solving_topic(topic_id)
     source_scope = section_title or topic_title or "this topic"
     source_content = section_content if (section_title and section_content) else doc_content
     fragments = _extract_content_fragments(source_content, limit=64)
@@ -598,6 +897,7 @@ def _build_fallback_question_items(
     difficulty_value = (difficulty or "medium").strip().lower()
     if difficulty_value not in _VALID_DIFFICULTIES:
         difficulty_value = "medium"
+    selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else ""
 
     templates = [
         "What are the key design considerations for {focus} in {topic} from a {angle} perspective?",
@@ -627,54 +927,67 @@ def _build_fallback_question_items(
     while len(items) < remaining and idx < max_rounds:
         focus = fragments[idx % len(fragments)]
         angle = angles[(idx // max(1, len(fragments))) % len(angles)]
-        template = templates[idx % len(templates)]
-        question = template.format(
-            focus=focus,
-            topic=topic_title or "this topic",
-            angle=angle,
-        ).strip()
+        if problem_solving_mode:
+            question = _problem_solving_question_seed(focus, source_scope)["question"]
+        else:
+            template = templates[idx % len(templates)]
+            question = template.format(
+                focus=focus,
+                topic=topic_title or "this topic",
+                angle=angle,
+            ).strip()
         q_norm = _normalise_question(question)
         idx += 1
         if not q_norm or q_norm in dedup or _is_near_duplicate_question(question, seen_questions):
             continue
 
-        # Rotate through multiple tutoring-style answer templates so
-        # fallback answers actually educate the student about the concept.
-        _answer_templates = [
-            (
-                f"**{focus}** is a key concept within {source_scope}. "
-                f"At its core, it addresses how systems handle the specific challenge described by {focus}. "
-                f"When working with this in practice, the most important considerations are correctness, "
-                f"edge-case handling, and understanding the failure modes. A common mistake is to overlook "
-                f"boundary conditions — always validate inputs and expected behaviour before scaling up. "
-                f"In interviews, demonstrate that you understand *why* this matters, not just *how* to implement it."
-            ),
-            (
-                f"To understand **{focus}** in the context of {source_scope}, start with the fundamental "
-                f"problem it solves. This concept exists because real systems need a reliable way to handle "
-                f"{focus.lower()}. The recommended approach involves: (1) clarifying requirements and constraints, "
-                f"(2) choosing an appropriate strategy based on the scale and reliability needs, and "
-                f"(3) validating through testing and monitoring. When discussing this in an interview, "
-                f"show awareness of tradeoffs — there is rarely a single 'correct' answer."
-            ),
-            (
-                f"**{focus}** in {source_scope} involves understanding both the theoretical foundations "
-                f"and the practical implementation details. A strong practitioner knows the main patterns, "
-                f"can identify when each is appropriate, and understands the cost/benefit tradeoffs. "
-                f"Common pitfalls include over-engineering simple cases and under-engineering complex ones. "
-                f"Focus on building a mental model of how {focus.lower()} behaves under different conditions — "
-                f"this is what separates surface-level knowledge from true understanding."
-            ),
-            (
-                f"When working with **{focus}** in {source_scope}, the key is to approach it systematically. "
-                f"First, understand what problem it solves and why alternative approaches fall short. "
-                f"Then, learn the standard implementation patterns and their performance characteristics. "
-                f"Finally, practice debugging common issues — knowing how things break is just as "
-                f"important as knowing how they work. For interviews, prepare concrete examples that "
-                f"demonstrate your hands-on experience with {focus.lower()}."
-            ),
-        ]
-        answer = _answer_templates[idx % len(_answer_templates)]
+        if problem_solving_mode:
+            answer, reasoning_summary = _build_problem_solving_fallback_answer(
+                focus=focus,
+                source_scope=source_scope,
+                language=selected_language,
+            )
+        else:
+            # Rotate through multiple tutoring-style answer templates so
+            # fallback answers actually educate the student about the concept.
+            _answer_templates = [
+                (
+                    f"**{focus}** is a key concept within {source_scope}. "
+                    f"At its core, it addresses how systems handle the specific challenge described by {focus}. "
+                    f"When working with this in practice, the most important considerations are correctness, "
+                    f"edge-case handling, and understanding the failure modes. A common mistake is to overlook "
+                    f"boundary conditions - always validate inputs and expected behaviour before scaling up. "
+                    f"In interviews, demonstrate that you understand *why* this matters, not just *how* to implement it."
+                ),
+                (
+                    f"To understand **{focus}** in the context of {source_scope}, start with the fundamental "
+                    f"problem it solves. This concept exists because real systems need a reliable way to handle "
+                    f"{focus.lower()}. The recommended approach involves: (1) clarifying requirements and constraints, "
+                    f"(2) choosing an appropriate strategy based on the scale and reliability needs, and "
+                    f"(3) validating through testing and monitoring. When discussing this in an interview, "
+                    f"show awareness of tradeoffs - there is rarely a single 'correct' answer."
+                ),
+                (
+                    f"**{focus}** in {source_scope} involves understanding both the theoretical foundations "
+                    f"and the practical implementation details. A strong practitioner knows the main patterns, "
+                    f"can identify when each is appropriate, and understands the cost/benefit tradeoffs. "
+                    f"Common pitfalls include over-engineering simple cases and under-engineering complex ones. "
+                    f"Focus on building a mental model of how {focus.lower()} behaves under different conditions - "
+                    f"this is what separates surface-level knowledge from true understanding."
+                ),
+                (
+                    f"When working with **{focus}** in {source_scope}, the key is to approach it systematically. "
+                    f"First, understand what problem it solves and why alternative approaches fall short. "
+                    f"Then, learn the standard implementation patterns and their performance characteristics. "
+                    f"Finally, practice debugging common issues - knowing how things break is just as "
+                    f"important as knowing how they work. For interviews, prepare concrete examples that "
+                    f"demonstrate your hands-on experience with {focus.lower()}."
+                ),
+            ]
+            answer = _answer_templates[idx % len(_answer_templates)]
+            reasoning_summary = (
+                "Clarify requirements first, then compare options and justify a decision."
+            )
         item: dict[str, Any] = {
             "question": question,
             "answer": answer,
@@ -683,11 +996,18 @@ def _build_fallback_question_items(
             "source_section": source_scope,
             "source_quote": focus,
             "misconception_trap": "Choosing an approach without validating constraints and tradeoffs.",
-            "reasoning_summary": "Clarify requirements first, then compare options and justify a decision.",
+            "reasoning_summary": reasoning_summary,
             "target_level": _normalise_level(level),
             "topic_id": topic_id,
         }
-        valid, _issue = _validate_question_item(item, topic_id, difficulty, level)
+        valid, _issue = _validate_question_item(
+            item,
+            topic_id,
+            difficulty,
+            level,
+            preferred_language=selected_language,
+            requires_programming=requires_programming,
+        )
         if not valid:
             continue
         dedup.add(q_norm)
@@ -702,6 +1022,8 @@ def _validate_question_item(
     topic_id: str,
     difficulty: Optional[str],
     level: Optional[str],
+    preferred_language: str = "",
+    requires_programming: bool = False,
 ) -> tuple[bool, str]:
     question = str(item.get("question", "")).strip()
     answer = str(item.get("answer", "")).strip()
@@ -739,6 +1061,13 @@ def _validate_question_item(
     item["target_level"] = target_level
     item["topic_id"] = topic_id
     item["difficulty"] = diff
+    if is_problem_solving_topic(topic_id):
+        valid_answer, issue = _validate_problem_solving_answer(
+            answer,
+            preferred_language,
+        )
+        if not valid_answer:
+            return False, issue
     return True, ""
 
 
@@ -844,6 +1173,7 @@ async def _collect_with_retries(
     target_count: int,
     validator: Callable[[dict[str, Any]], tuple[bool, str]],
     existing_questions: Optional[list[str]] = None,
+    hard_requirements: Optional[list[str]] = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     existing_seed = _normalise_existing_questions(existing_questions)
     dedup: set[str] = {_normalise_question(q) for q in existing_seed}
@@ -872,6 +1202,7 @@ async def _collect_with_retries(
                 missing_count=max(1, target_count - len(valid_items)),
                 issues=f"transport_or_provider_error: {last_error}",
                 existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
+                hard_requirements=hard_requirements,
             )
             continue
 
@@ -884,6 +1215,7 @@ async def _collect_with_retries(
                 missing_count=max(1, target_count - len(valid_items)),
                 issues="json_parse_failed",
                 existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
+                hard_requirements=hard_requirements,
             )
             continue
 
@@ -921,6 +1253,7 @@ async def _collect_with_retries(
             missing_count=target_count - len(valid_items),
             issues=top_issues,
             existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
+            hard_requirements=hard_requirements,
         )
 
     if len(valid_items) < target_count:
@@ -934,6 +1267,7 @@ async def _collect_with_retries(
                 missing_count=1,
                 issues="final_recovery_fill_missing_items",
                 existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
+                hard_requirements=hard_requirements,
             )
             result = await llm.completion(
                 single_prompt,
@@ -1070,6 +1404,13 @@ class QuestionGenerator:
         target_count = max(0, int(count))
         requested_total = max(1, int(requested_total_count or count or 1))
         seed_existing = _normalise_existing_questions(existing_questions)
+        problem_solving_mode = is_problem_solving_topic(topic_id)
+        selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
+            (preferred_language or "").strip().lower()
+        )
+        hard_requirements = (
+            _problem_solving_required_markdown(selected_language) if problem_solving_mode else None
+        )
         mcp_context = await self._mcp_context_for_flow(
             flow="questions",
             query=f"{topic_title} {section_title or ''} interview questions and practical examples",
@@ -1095,8 +1436,8 @@ class QuestionGenerator:
                 section_title=section_title if include_section else None,
                 section_content=section_content if include_section else None,
                 response_detail=response_detail,
-                preferred_language="" if relaxed else preferred_language,
-                requires_programming=False if relaxed else requires_programming,
+                preferred_language=selected_language if (problem_solving_mode or not relaxed) else "",
+                requires_programming=requires_programming if (problem_solving_mode or not relaxed) else False,
                 requested_total_count=requested_total,
                 existing_questions=generated_question_texts,
                 mcp_context=mcp_context,
@@ -1122,6 +1463,7 @@ class QuestionGenerator:
                             missing_count=1,
                             issues=f"transport_or_provider_error: {last_error}",
                             existing_questions=generated_question_texts,
+                            hard_requirements=hard_requirements,
                         )
                         continue
 
@@ -1135,6 +1477,7 @@ class QuestionGenerator:
                             missing_count=1,
                             issues="json_parse_failed",
                             existing_questions=generated_question_texts,
+                            hard_requirements=hard_requirements,
                         )
                         continue
 
@@ -1145,7 +1488,14 @@ class QuestionGenerator:
                             issue_counter["non_dict_item"] += 1
                             continue
 
-                        valid, issue = _validate_question_item(item, topic_id, difficulty, level)
+                        valid, issue = _validate_question_item(
+                            item,
+                            topic_id,
+                            difficulty,
+                            level,
+                            preferred_language=selected_language,
+                            requires_programming=requires_programming,
+                        )
                         if not valid:
                             malformed_dropped += 1
                             issue_counter[issue] += 1
@@ -1187,6 +1537,7 @@ class QuestionGenerator:
                         missing_count=1,
                         issues=top_issues,
                         existing_questions=generated_question_texts,
+                        hard_requirements=hard_requirements,
                     )
 
                 if issue_counter:
@@ -1254,10 +1605,16 @@ class QuestionGenerator:
 
         section_first = bool(section_title and section_content)
         phase_modes: list[tuple[bool, bool]] = (
-            [(True, False), (False, False), (False, True)]
+            [(True, False), (False, False)]
             if section_first
-            else [(False, False), (False, True)]
+            else [(False, False)]
         )
+        if not problem_solving_mode:
+            phase_modes = (
+                [(True, False), (False, False), (False, True)]
+                if section_first
+                else [(False, False), (False, True)]
+            )
         for include_section, relaxed in phase_modes:
             while generated_count < target_count:
                 result = await _generate_one(include_section=include_section, relaxed=relaxed)
@@ -1293,7 +1650,10 @@ class QuestionGenerator:
                 if generated_count >= target_count:
                     break
 
-                result = await _generate_one(include_section=False, relaxed=True)
+                result = await _generate_one(
+                    include_section=False,
+                    relaxed=False if problem_solving_mode else True,
+                )
                 retries_used += int(result.get("retries_used", 0))
                 malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
                 metadata = result.get("metadata", {}) or {}
@@ -1332,6 +1692,8 @@ class QuestionGenerator:
                 section_title=None,
                 section_content=None,
                 existing_questions=generated_question_texts,
+                preferred_language=selected_language,
+                requires_programming=requires_programming,
             )
             for item in fallback_items:
                 q_text = str(item.get("question", "")).strip()
@@ -1378,6 +1740,10 @@ class QuestionGenerator:
         preferred_language: str = "",
         requires_programming: bool = False,
     ) -> GenerateQuestionsResponse:
+        problem_solving_mode = is_problem_solving_topic(topic_id)
+        selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
+            (preferred_language or "").strip().lower()
+        )
         v2 = await self.generate_v2(
             topic_id=topic_id,
             topic_title=topic_title,
@@ -1392,7 +1758,7 @@ class QuestionGenerator:
             section_title=section_title,
             section_content=section_content,
             response_detail=response_detail,
-            preferred_language=preferred_language,
+            preferred_language=selected_language,
             requires_programming=requires_programming,
         )
         target_count = max(1, int(count or 1))
@@ -1414,6 +1780,8 @@ class QuestionGenerator:
                     *(_normalise_existing_questions(existing_questions)),
                     *[q.question for q in questions],
                 ],
+                preferred_language=selected_language,
+                requires_programming=requires_programming,
             )
             for item in fallback_items:
                 questions.append(
@@ -1452,13 +1820,24 @@ class QuestionGenerator:
         requires_programming: bool = False,
     ) -> GenerateQuestionsV2Response:
         target_count = max(1, int(count or 1))
+        problem_solving_mode = is_problem_solving_topic(topic_id)
+        selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
+            (preferred_language or "").strip().lower()
+        )
         mcp_context = await self._mcp_context_for_flow(
             flow="questions",
             query=f"{topic_title} {section_title or ''} interview questions and practical examples",
             topic_id=topic_id,
             topic_title=topic_title,
         )
-        validator = lambda item: _validate_question_item(item, topic_id, difficulty, level)
+        validator = lambda item: _validate_question_item(
+            item,
+            topic_id,
+            difficulty,
+            level,
+            preferred_language=selected_language,
+            requires_programming=requires_programming,
+        )
         provider_used = ""
         model_used = ""
         retries_used = 0
@@ -1473,7 +1852,7 @@ class QuestionGenerator:
                 "section_title": section_title,
                 "section_content": section_content,
                 "difficulty": difficulty,
-                "preferred_language": preferred_language,
+                "preferred_language": selected_language,
                 "requires_programming": requires_programming,
             }
         ]
@@ -1483,19 +1862,20 @@ class QuestionGenerator:
                     "section_title": None,
                     "section_content": None,
                     "difficulty": difficulty,
-                    "preferred_language": preferred_language,
+                    "preferred_language": selected_language,
                     "requires_programming": requires_programming,
                 }
             )
-        pass_modes.append(
-            {
-                "section_title": None,
-                "section_content": None,
-                "difficulty": None,
-                "preferred_language": "",
-                "requires_programming": False,
-            }
-        )
+        if not problem_solving_mode:
+            pass_modes.append(
+                {
+                    "section_title": None,
+                    "section_content": None,
+                    "difficulty": None,
+                    "preferred_language": "",
+                    "requires_programming": False,
+                }
+            )
 
         for mode in pass_modes:
             if len(raw_items) >= target_count:
@@ -1529,6 +1909,11 @@ class QuestionGenerator:
                 target_count=remaining,
                 validator=validator,
                 existing_questions=existing_for_pass,
+                hard_requirements=(
+                    _problem_solving_required_markdown(selected_language)
+                    if problem_solving_mode
+                    else None
+                ),
             )
             retries_used += int(pass_stats.get("retries_used", 0))
             malformed_items_dropped += int(pass_stats.get("malformed_items_dropped", 0))
@@ -1563,6 +1948,8 @@ class QuestionGenerator:
                     *existing_seed,
                     *[str(item.get("question", "")) for item in raw_items],
                 ],
+                preferred_language=selected_language,
+                requires_programming=requires_programming,
             )
             for item in fallback_items:
                 question_text = str(item.get("question", "")).strip()
