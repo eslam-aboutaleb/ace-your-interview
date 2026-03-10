@@ -18,7 +18,7 @@ const DIMENSIONS: Array<{ key: RubricKey; label: string; color: string }> = [
   { key: "reasoning_depth", label: "Reasoning", color: "#2563eb" },
   { key: "communication_clarity", label: "Communication", color: "#d97706" },
   { key: "completeness", label: "Completeness", color: "#dc2626" },
-  { key: "confidence_signal", label: "Confidence", color: "#7c3aed" },
+  { key: "confidence_signal", label: "Confidence", color: "#0ea5e9" },
 ];
 
 export default function InterviewTrendsPage() {
@@ -140,7 +140,7 @@ export default function InterviewTrendsPage() {
                   {
                     key: "overall",
                     label: "Overall",
-                    color: "#a435f0",
+                    color: "#2563eb",
                     values: points.map((p) => p.overall_score),
                   },
                 ]}

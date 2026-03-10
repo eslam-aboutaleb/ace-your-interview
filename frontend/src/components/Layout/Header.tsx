@@ -122,7 +122,7 @@ export default function Header() {
                       cy="18"
                       r="15.5"
                       fill="none"
-                      stroke="#a435f0"
+                      stroke="#2563eb"
                       strokeWidth="2.5"
                       strokeLinecap="round"
                       strokeDasharray="97.39"
