@@ -106,6 +106,17 @@ Static description.
         self.assertIn("progress", event_types)
         self.assertIn("section", event_types)
         self.assertIn("done", event_types)
+        first_section_idx = next(i for i, event in enumerate(events) if event.get("type") == "section")
+        done_idx = next(i for i, event in enumerate(events) if event.get("type") == "done")
+        self.assertLess(first_section_idx, done_idx)
+
+        progress_events = [event for event in events if event.get("type") == "progress"]
+        self.assertTrue(any(event.get("stage") == "batching" for event in progress_events))
+        batching = next(event for event in progress_events if event.get("stage") == "batching")
+        self.assertIn("batch_index", batching)
+        self.assertIn("batch_count", batching)
+        self.assertIn("generated_sections", batching)
+        self.assertIn("target_sections", batching)
 
         done = next(e for e in events if e.get("type") == "done")
         topic_payload = done["topic"]
@@ -124,4 +135,3 @@ Static description.
 
 if __name__ == "__main__":
     unittest.main()
-

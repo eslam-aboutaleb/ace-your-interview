@@ -410,3 +410,78 @@ async def generate_quiz_v2(
         llm_config=body.llm_config,
         user_identity=user,
     )
+
+
+@router.post("/quiz/generate-v2/stream")
+async def generate_quiz_v2_stream(
+    body: GenerateQuizRequest,
+    user: dict = Depends(require_auth),
+):
+    """Generate grounded quiz questions with incremental NDJSON events."""
+    llm_client, _, _ = _ensure_services()
+    if not get_settings().enable_v2_generation:
+        raise HTTPException(status_code=404, detail="v2 generation disabled")
+
+    _, _, store = _ensure_services()
+    topics_content: list[dict] = []
+    for tid in body.topic_ids:
+        resolved = await _resolve_topic_for_user(
+            topic_id=tid,
+            user_id=user["user"],
+            preferred_language_hint=body.preferred_language,
+        )
+        if not resolved:
+            raise HTTPException(status_code=404, detail=f"Topic '{tid}' not found")
+        topic, doc_content = resolved
+        if is_problem_solving_topic(tid) and not topic.content_ready:
+            raise HTTPException(
+                status_code=409,
+                detail="Problem Solving roadmap is not generated yet for this language.",
+            )
+        ai_settings = await _resolve_ai_settings(
+            store=store,
+            user_id=user["user"],
+            topic=topic,
+            response_detail_override=(body.response_detail.value if body.response_detail else None),
+            preferred_language_override=body.preferred_language,
+        )
+        topics_content.append(
+            {
+                "id": tid,
+                "title": topic.title,
+                "content": doc_content,
+                "response_detail": ai_settings.get("response_detail", "concise"),
+                "preferred_language": ai_settings.get("preferred_language", ""),
+                "requires_programming": bool(ai_settings.get("requires_programming")),
+            }
+        )
+
+    if not topics_content:
+        raise HTTPException(status_code=400, detail="At least one topic_id required")
+
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+
+    async def _event_stream():
+        async for event in generator.generate_quiz_v2_stream(
+            topics_content=topics_content,
+            count=body.count,
+            question_types=[qt.value for qt in body.question_types],
+            difficulty=body.difficulty,
+            level=body.level,
+            response_detail=(body.response_detail.value if body.response_detail else None),
+            preferred_language=(body.preferred_language or ""),
+            llm_config=body.llm_config,
+            user_identity=user,
+        ):
+            yield json.dumps(event) + "\n"
+            await asyncio.sleep(0)
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

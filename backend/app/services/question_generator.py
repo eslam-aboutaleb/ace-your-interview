@@ -1164,6 +1164,111 @@ def _validate_quiz_item(
     return True, ""
 
 
+def _build_fallback_quiz_items(
+    *,
+    topics_content: list[dict],
+    count: int,
+    question_types: list[str] | None,
+    difficulty: Optional[str],
+    level: Optional[str],
+    existing_questions: list[str],
+) -> list[dict[str, Any]]:
+    if count <= 0 or not topics_content:
+        return []
+
+    allowed_topics = {str(tc.get("id", "")).strip() for tc in topics_content if str(tc.get("id", "")).strip()}
+    allowed_types = set(question_types or ["mcq", "true_false"])
+    if not allowed_types:
+        allowed_types = {"mcq", "true_false"}
+    target_level = _normalise_level(level)
+    diff = str(difficulty or "medium").strip().lower()
+    if diff not in _VALID_DIFFICULTIES:
+        diff = "medium"
+
+    out: list[dict[str, Any]] = []
+    seen_norm = {_normalise_question(q) for q in _normalise_existing_questions(existing_questions)}
+    guard = 0
+    while len(out) < count and guard < (count * 12):
+        idx = len(out) + guard
+        topic = topics_content[idx % len(topics_content)]
+        topic_id = str(topic.get("id", "")).strip()
+        if not topic_id:
+            guard += 1
+            continue
+        topic_title = str(topic.get("title", topic_id)).strip() or topic_id
+        source_scope = str(topic.get("content", "")).strip()
+        source_quote = re.sub(r"\s+", " ", source_scope)[:180].strip() or (
+            f"{topic_title} interview fundamentals and tradeoffs."
+        )
+        if len(source_quote) < 8:
+            source_quote = f"{topic_title} interview fundamentals and tradeoffs."
+
+        use_mcq = "mcq" in allowed_types and ("true_false" not in allowed_types or idx % 2 == 0)
+        if use_mcq:
+            stems = [
+                "For {topic_title}, which approach best balances correctness, maintainability, and interview communication under constraints?",
+                "In a {topic_title} interview scenario, which response structure shows the strongest engineering judgment?",
+                "When discussing {topic_title}, which strategy most clearly demonstrates tradeoff-driven thinking?",
+                "For {topic_title}, which interviewing approach is most likely to produce a robust and explainable solution?",
+            ]
+            question = stems[idx % len(stems)].format(topic_title=topic_title)
+            choices = [
+                {"label": "A", "text": "Clarify constraints, choose a justified approach, and explain tradeoffs."},
+                {"label": "B", "text": "Start coding immediately and defer reasoning until the end."},
+                {"label": "C", "text": "Optimize micro-details before validating core requirements."},
+                {"label": "D", "text": "Assume defaults and skip edge-case discussion to save time."},
+            ]
+            correct = "A"
+            q_type = "mcq"
+        else:
+            stems = [
+                "True or false for {topic_title}: strong interview answers should explicitly state assumptions and tradeoffs before implementation details.",
+                "For {topic_title}, true or false: candidates should justify constraints first, then explain implementation choices.",
+                "True or false in a {topic_title} interview: skipping assumptions weakens the quality of technical reasoning.",
+                "For {topic_title}, true or false: discussing tradeoffs early usually improves answer clarity and credibility.",
+            ]
+            question = stems[idx % len(stems)].format(topic_title=topic_title)
+            choices = [
+                {"label": "A", "text": "True"},
+                {"label": "B", "text": "False"},
+            ]
+            correct = "A"
+            q_type = "true_false"
+
+        q_norm = _normalise_question(question)
+        if not q_norm or q_norm in seen_norm:
+            guard += 1
+            continue
+        seen_norm.add(q_norm)
+        item = {
+            "question": question,
+            "type": q_type,
+            "choices": choices,
+            "correct_answer": correct,
+            "explanation": (
+                "Strong responses should make reasoning explicit, connect choices to constraints, "
+                "and communicate tradeoffs with clear structure."
+            ),
+            "difficulty": diff,
+            "topic_id": topic_id,
+            "source_quote": source_quote,
+            "reasoning_summary": "Anchor decisions in constraints, then justify tradeoffs clearly.",
+            "target_level": target_level,
+        }
+        valid, _issue = _validate_quiz_item(
+            item,
+            allowed_topics=allowed_topics,
+            allowed_types=allowed_types,
+            difficulty=difficulty,
+            level=level,
+        )
+        if valid:
+            out.append(item)
+        guard += 1
+
+    return out[:count]
+
+
 async def _collect_with_retries(
     *,
     llm: LLMClient,
@@ -1371,6 +1476,24 @@ class QuestionGenerator:
             source_quote=item["source_quote"].strip(),
             misconception_trap=item["misconception_trap"].strip(),
             reasoning_summary=item["reasoning_summary"].strip(),
+        )
+
+    @staticmethod
+    def _to_quiz_question_v2(item: dict[str, Any]) -> QuizQuestionV2:
+        topic_id = str(item.get("topic_id", "")).strip()
+        qid = _question_id(topic_id or "quiz", str(item.get("question", "")))
+        choices = [QuizChoice(label=c["label"], text=c["text"]) for c in item["choices"]]
+        return QuizQuestionV2(
+            question_id=qid,
+            question=str(item.get("question", "")).strip(),
+            type=QuizQuestionType(str(item.get("type", "mcq")).strip().lower()),
+            choices=choices,
+            correct_answer=str(item.get("correct_answer", "")).strip(),
+            explanation=format_markdown_readable(str(item.get("explanation", "")).strip()),
+            difficulty=str(item.get("difficulty", "medium")).strip().lower() or "medium",
+            topic_id=topic_id,
+            source_quote=str(item.get("source_quote", "")).strip(),
+            reasoning_summary=str(item.get("reasoning_summary", "")).strip(),
         )
 
     @staticmethod
@@ -1973,6 +2096,285 @@ class QuestionGenerator:
             retries_used=retries_used,
             malformed_items_dropped=malformed_items_dropped,
         )
+
+    async def generate_quiz_v2_stream(
+        self,
+        topics_content: list[dict],
+        count: int = 10,
+        question_types: list[str] | None = None,
+        difficulty: Optional[str] = None,
+        level: Optional[str] = None,
+        response_detail: str | None = None,
+        preferred_language: str = "",
+        llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        target_count = max(1, int(count or 1))
+        effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
+        mcp_context = await self._mcp_context_for_flow(
+            flow="quiz",
+            query=" ".join(
+                [
+                    " ".join(str(tc.get("title", "")).strip() for tc in topics_content[:4]),
+                    "technical quiz generation",
+                ]
+            ).strip(),
+        )
+        allowed_topics = {str(tc["id"]) for tc in topics_content}
+        allowed_types = set(question_types or ["mcq", "true_false"])
+        if not allowed_types:
+            allowed_types = {"mcq", "true_false"}
+
+        dedup_norm: set[str] = set()
+        generated_question_texts: list[str] = []
+        provider_used = ""
+        model_used = ""
+        retries_used = 0
+        malformed_items_dropped = 0
+        generated_count = 0
+
+        async def _generate_one() -> dict[str, Any]:
+            local_retries = 0
+            local_malformed = 0
+            metadata: dict[str, Any] = {}
+            issue_counter: Counter[str] = Counter()
+            prompt = _build_quiz_prompt(
+                topics_content,
+                1,
+                question_types,
+                difficulty,
+                level,
+                response_detail=effective_detail,
+                preferred_language=(preferred_language or "").strip().lower(),
+                mcp_context=mcp_context,
+            )
+            base_prompt = prompt
+            try:
+                for _ in range(_attempt_budget(1)):
+                    result = await self.llm.completion(
+                        prompt,
+                        llm_config,
+                        user_identity=user_identity,
+                    )
+                    raise_if_policy_blocked_result(result)
+                    metadata = result.get("metadata", {})
+                    if not result.get("success"):
+                        local_retries += 1
+                        issue_counter["transport_or_provider_error"] += 1
+                        prompt = _build_retry_prompt(
+                            base_prompt=base_prompt,
+                            missing_count=1,
+                            issues="transport_or_provider_error",
+                            existing_questions=generated_question_texts,
+                        )
+                        continue
+
+                    parsed = _parse_questions_json(result.get("analysis", ""))
+                    if not parsed:
+                        local_retries += 1
+                        local_malformed += 1
+                        issue_counter["json_parse_failed"] += 1
+                        prompt = _build_retry_prompt(
+                            base_prompt=base_prompt,
+                            missing_count=1,
+                            issues="json_parse_failed",
+                            existing_questions=generated_question_texts,
+                        )
+                        continue
+
+                    selected_item: dict[str, Any] | None = None
+                    for item in parsed:
+                        if not isinstance(item, dict):
+                            local_malformed += 1
+                            issue_counter["non_dict_item"] += 1
+                            continue
+                        is_valid, issue = _validate_quiz_item(
+                            item,
+                            allowed_topics,
+                            allowed_types,
+                            difficulty,
+                            level,
+                        )
+                        if not is_valid:
+                            local_malformed += 1
+                            issue_counter[issue] += 1
+                            continue
+                        question_text = str(item.get("question", "")).strip()
+                        q_norm = _normalise_question(question_text)
+                        if (
+                            not q_norm
+                            or q_norm in dedup_norm
+                            or _is_near_duplicate_question(question_text, generated_question_texts)
+                        ):
+                            local_malformed += 1
+                            issue_counter["duplicate_question"] += 1
+                            continue
+                        dedup_norm.add(q_norm)
+                        generated_question_texts.append(question_text)
+                        selected_item = item
+                        break
+
+                    if selected_item is not None:
+                        question = self._to_quiz_question_v2(selected_item)
+                        return {
+                            "question": question.model_dump(),
+                            "metadata": metadata,
+                            "retries_used": local_retries,
+                            "malformed_items_dropped": local_malformed,
+                        }
+
+                    local_retries += 1
+                    top_issues = (
+                        ", ".join(f"{k}:{v}" for k, v in issue_counter.most_common(5))
+                        or "insufficient_valid_items"
+                    )
+                    prompt = _build_retry_prompt(
+                        base_prompt=base_prompt,
+                        missing_count=1,
+                        issues=top_issues,
+                        existing_questions=generated_question_texts,
+                    )
+
+                return {
+                    "question": None,
+                    "metadata": metadata,
+                    "retries_used": local_retries,
+                    "malformed_items_dropped": local_malformed,
+                }
+            except (
+                LLMServiceApprovalRequiredError,
+                StudyAppLLMNotAssignedError,
+                PersonalCredentialRequiredError,
+            ) as exc:
+                code, message = self._policy_error_payload(exc)
+                return {
+                    "error": {"code": code, "message": message},
+                    "metadata": metadata,
+                    "retries_used": local_retries,
+                    "malformed_items_dropped": local_malformed,
+                }
+            except Exception as exc:
+                logger.exception("Streaming quiz generation failed: %s", exc)
+                return {
+                    "error": {
+                        "code": "generation_failed",
+                        "message": str(exc).strip() or "Quiz generation failed",
+                    },
+                    "metadata": metadata,
+                    "retries_used": local_retries,
+                    "malformed_items_dropped": local_malformed,
+                }
+
+        yield {
+            "type": "start",
+            "target_count": target_count,
+            "topics_used": sorted(allowed_topics),
+            "question_types": sorted(allowed_types),
+        }
+
+        while generated_count < target_count:
+            yield {
+                "type": "progress",
+                "stage": "generating",
+                "message": f"Generating quiz question {generated_count + 1} of {target_count}.",
+                "generated_count": generated_count,
+                "target_count": target_count,
+            }
+            result = await _generate_one()
+            retries_used += int(result.get("retries_used", 0))
+            malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
+            metadata = result.get("metadata", {}) or {}
+            if metadata.get("provider"):
+                provider_used = str(metadata.get("provider"))
+            if metadata.get("model"):
+                model_used = str(metadata.get("model"))
+
+            error = result.get("error")
+            if error:
+                yield {
+                    "type": "error",
+                    "code": str(error.get("code", "generation_failed")),
+                    "message": str(error.get("message", "Quiz generation failed")),
+                }
+                return
+
+            question = result.get("question")
+            if not isinstance(question, dict):
+                break
+            generated_count += 1
+            yield {"type": "question", "question": question}
+
+        if generated_count < target_count:
+            for _ in range(_recovery_budget(target_count - generated_count)):
+                if generated_count >= target_count:
+                    break
+                yield {
+                    "type": "progress",
+                    "stage": "recovering",
+                    "message": (
+                        f"Recovering missing quiz questions: {generated_count}/{target_count} generated."
+                    ),
+                    "generated_count": generated_count,
+                    "target_count": target_count,
+                }
+                result = await _generate_one()
+                retries_used += int(result.get("retries_used", 0))
+                malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
+                metadata = result.get("metadata", {}) or {}
+                if metadata.get("provider"):
+                    provider_used = str(metadata.get("provider"))
+                if metadata.get("model"):
+                    model_used = str(metadata.get("model"))
+                error = result.get("error")
+                if error:
+                    yield {
+                        "type": "error",
+                        "code": str(error.get("code", "generation_failed")),
+                        "message": str(error.get("message", "Quiz generation failed")),
+                    }
+                    return
+                question = result.get("question")
+                if not isinstance(question, dict):
+                    continue
+                generated_count += 1
+                yield {"type": "question", "question": question}
+
+        if generated_count < target_count:
+            fallback_items = _build_fallback_quiz_items(
+                topics_content=topics_content,
+                count=target_count - generated_count,
+                question_types=question_types,
+                difficulty=difficulty,
+                level=level,
+                existing_questions=generated_question_texts,
+            )
+            for item in fallback_items:
+                if generated_count >= target_count:
+                    break
+                question_text = str(item.get("question", "")).strip()
+                q_norm = _normalise_question(question_text)
+                if (
+                    not q_norm
+                    or q_norm in dedup_norm
+                    or _is_near_duplicate_question(question_text, generated_question_texts)
+                ):
+                    continue
+                dedup_norm.add(q_norm)
+                generated_question_texts.append(question_text)
+                question = self._to_quiz_question_v2(item)
+                generated_count += 1
+                yield {"type": "question", "question": question.model_dump()}
+
+        yield {
+            "type": "done",
+            "generated_count": generated_count,
+            "target_count": target_count,
+            "topics_used": sorted(allowed_topics),
+            "provider_used": provider_used,
+            "model_used": model_used,
+            "retries_used": retries_used,
+            "malformed_items_dropped": malformed_items_dropped,
+        }
 
     async def generate_quiz(
         self,

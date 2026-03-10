@@ -10,7 +10,9 @@ import {
 } from "@/utils/animations";
 import {
   createInterviewSession,
+  createInterviewSessionStream,
   fetchInterviewSessions,
+  isInterviewStreamError,
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import type {
@@ -45,6 +47,7 @@ export default function InterviewSetup() {
   const [focusAreasRaw, setFocusAreasRaw] = useState("");
 
   const [starting, setStarting] = useState(false);
+  const [startProgress, setStartProgress] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [recent, setRecent] = useState<InterviewSession[]>([]);
   const [loadingRecent, setLoadingRecent] = useState(true);
@@ -65,31 +68,56 @@ export default function InterviewSetup() {
   const handleStart = async () => {
     setStarting(true);
     setErrorMsg("");
+    setStartProgress("Preparing interview session...");
+    const payload = {
+      track,
+      level,
+      interview_type: interviewType,
+      turn_count: turnCount,
+      target_role: targetRole.trim(),
+      interviewer_style: interviewerStyle,
+      feedback_mode: feedbackMode,
+      job_description_text: jobDescriptionText.trim(),
+      resume_summary_text: resumeSummaryText.trim(),
+      focus_areas: focusAreas,
+      llm_config: {
+        provider: settings.provider,
+        model: settings.model,
+        temperature: settings.temperature,
+        max_tokens: settings.maxTokens,
+      },
+    };
     try {
-      const res = await createInterviewSession({
-        track,
-        level,
-        interview_type: interviewType,
-        turn_count: turnCount,
-        target_role: targetRole.trim(),
-        interviewer_style: interviewerStyle,
-        feedback_mode: feedbackMode,
-        job_description_text: jobDescriptionText.trim(),
-        resume_summary_text: resumeSummaryText.trim(),
-        focus_areas: focusAreas,
-        llm_config: {
-          provider: settings.provider,
-          model: settings.model,
-          temperature: settings.temperature,
-          max_tokens: settings.maxTokens,
+      const done = await createInterviewSessionStream(payload, {
+        onStart: (event) => {
+          setStartProgress(event.message || "Creating interview session...");
+        },
+        onProgress: (event) => {
+          setStartProgress(event.message || "Generating first interview question...");
+        },
+        onDone: () => {
+          setStartProgress("Interview session ready.");
+        },
+        onError: (event) => {
+          setErrorMsg(event.message || "Could not start mock interview.");
         },
       });
-      navigate(`/interview/${res.session.session_id}`);
-    } catch {
-      setErrorMsg(
-        "Could not start mock interview. Check backend feature flag and LLM settings.",
-      );
+      navigate(`/interview/${done.session.session_id}`);
+    } catch (streamErr) {
+      if (isInterviewStreamError(streamErr) && !streamErr.fallbackEligible) {
+        setErrorMsg(streamErr.message || "Could not start mock interview.");
+        return;
+      }
+      try {
+        const fallback = await createInterviewSession(payload);
+        navigate(`/interview/${fallback.session.session_id}`);
+      } catch {
+        setErrorMsg(
+          "Could not start mock interview. Check backend feature flag and LLM settings.",
+        );
+      }
     } finally {
+      setStartProgress("");
       setStarting(false);
     }
   };
@@ -272,6 +300,9 @@ export default function InterviewSetup() {
                 )}
                 {starting ? "Starting..." : "Start Mock Interview"}
               </button>
+              {starting && (
+                <p className="text-xs text-udemy-text-muted">{startProgress}</p>
+              )}
             </div>
           </motion.div>
 
