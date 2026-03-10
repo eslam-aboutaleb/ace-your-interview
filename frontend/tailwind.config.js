@@ -6,9 +6,9 @@ export default {
       colors: {
         // Udemy-inspired palette
         udemy: {
-          purple: "#a435f0",
-          "purple-dark": "#8710d8",
-          "purple-light": "#c77dff",
+          purple: "#2563eb",
+          "purple-dark": "#1d4ed8",
+          "purple-light": "#60a5fa",
           dark: "#1c1d1f",
           "dark-hover": "#2d2f31",
           text: "#2d2f31",
