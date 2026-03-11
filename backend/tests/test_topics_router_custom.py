@@ -138,6 +138,17 @@ Static description.
         self.assertIn("progress", event_types)
         self.assertIn("section", event_types)
         self.assertIn("done", event_types)
+        first_section_idx = next(i for i, event in enumerate(events) if event.get("type") == "section")
+        done_idx = next(i for i, event in enumerate(events) if event.get("type") == "done")
+        self.assertLess(first_section_idx, done_idx)
+
+        progress_events = [event for event in events if event.get("type") == "progress"]
+        self.assertTrue(any(event.get("stage") == "batching" for event in progress_events))
+        batching = next(event for event in progress_events if event.get("stage") == "batching")
+        self.assertIn("batch_index", batching)
+        self.assertIn("batch_count", batching)
+        self.assertIn("generated_sections", batching)
+        self.assertIn("target_sections", batching)
 
         done_event = next(evt for evt in events if evt.get("type") == "done")
         self.assertEqual(done_event["topic"]["id"], "custom-java")

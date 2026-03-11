@@ -15,7 +15,10 @@ import { pageVariants, pageTransition } from "@/utils/animations";
 import {
   fetchInterviewSession,
   generateNextInterviewQuestion,
+  generateNextInterviewQuestionStream,
+  isInterviewStreamError,
   submitInterviewAnswer,
+  submitInterviewAnswerStream,
 } from "@/services/api";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -34,6 +37,7 @@ export default function InterviewSessionPage() {
   const [answerDraft, setAnswerDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [loadingNext, setLoadingNext] = useState(false);
+  const [streamProgress, setStreamProgress] = useState("");
   const [startedAt, setStartedAt] = useState<number>(Date.now());
   const [lastTurn, setLastTurn] = useState<InterviewTurnResponse | null>(null);
 
@@ -81,30 +85,65 @@ export default function InterviewSessionPage() {
 
     setLoadingNext(true);
     setErrorMsg("");
+    setStreamProgress("Generating first interview question...");
+    const payload = {
+      llm_config: {
+        provider: settings.provider,
+        model: settings.model,
+        temperature: settings.temperature,
+        max_tokens: settings.maxTokens,
+      },
+    };
     try {
-      const next = await generateNextInterviewQuestion(sessionId, {
-        llm_config: {
-          provider: settings.provider,
-          model: settings.model,
-          temperature: settings.temperature,
-          max_tokens: settings.maxTokens,
+      await generateNextInterviewQuestionStream(sessionId, payload, {
+        onStart: (event) => {
+          setStreamProgress(event.message || "Generating interview question...");
+        },
+        onProgress: (event) => {
+          setStreamProgress(event.message || "Generating interview question...");
+        },
+        onDone: (event) => {
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  session: {
+                    ...prev.session,
+                    current_question: event.question,
+                  },
+                }
+              : prev,
+          );
+        },
+        onError: (event) => {
+          setErrorMsg(event.message || "Could not generate the next question.");
         },
       });
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              session: {
-                ...prev.session,
-                current_question: next.question,
-              },
-            }
-          : prev,
-      );
       setStartedAt(Date.now());
-    } catch {
-      setErrorMsg("Could not generate the next question.");
+    } catch (streamErr) {
+      if (isInterviewStreamError(streamErr) && !streamErr.fallbackEligible) {
+        setErrorMsg(streamErr.message || "Could not generate the next question.");
+      } else {
+        try {
+          const next = await generateNextInterviewQuestion(sessionId, payload);
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  session: {
+                    ...prev.session,
+                    current_question: next.question,
+                  },
+                }
+              : prev,
+          );
+          setStartedAt(Date.now());
+        } catch {
+          setErrorMsg("Could not generate the next question.");
+        }
+      }
     } finally {
+      setStreamProgress("");
       setLoadingNext(false);
     }
   }, [sessionId, data, settings]);
@@ -117,16 +156,30 @@ export default function InterviewSessionPage() {
     if (!sessionId || !data || !answerDraft.trim()) return;
     setSubmitting(true);
     setErrorMsg("");
+    setStreamProgress("Evaluating your answer...");
+    const payload = {
+      user_answer: answerDraft.trim(),
+      response_time_ms: Math.max(0, Date.now() - startedAt),
+      llm_config: {
+        provider: settings.provider,
+        model: settings.model,
+        temperature: settings.temperature,
+        max_tokens: settings.maxTokens,
+      },
+    };
     try {
-      const responseTimeMs = Math.max(0, Date.now() - startedAt);
-      const res = await submitInterviewAnswer(sessionId, {
-        user_answer: answerDraft.trim(),
-        response_time_ms: responseTimeMs,
-        llm_config: {
-          provider: settings.provider,
-          model: settings.model,
-          temperature: settings.temperature,
-          max_tokens: settings.maxTokens,
+      const res = await submitInterviewAnswerStream(sessionId, payload, {
+        onStart: (event) => {
+          setStreamProgress(event.message || "Evaluating your answer...");
+        },
+        onProgress: (event) => {
+          setStreamProgress(event.message || "Evaluating your answer...");
+        },
+        onDone: () => {
+          setStreamProgress("Answer evaluation completed.");
+        },
+        onError: (event) => {
+          setErrorMsg(event.message || "Failed to submit answer. Please retry.");
         },
       });
       setLastTurn(res);
@@ -143,9 +196,32 @@ export default function InterviewSessionPage() {
       if (res.session.status === "completed") {
         navigate(`/interview/${sessionId}/report`);
       }
-    } catch {
-      setErrorMsg("Failed to submit answer. Please retry.");
+    } catch (streamErr) {
+      if (isInterviewStreamError(streamErr) && !streamErr.fallbackEligible) {
+        setErrorMsg(streamErr.message || "Failed to submit answer. Please retry.");
+      } else {
+        try {
+          const res = await submitInterviewAnswer(sessionId, payload);
+          setLastTurn(res);
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  session: res.session,
+                  turns: [...prev.turns, res.turn],
+                }
+              : prev,
+          );
+          setAnswerDraft("");
+          if (res.session.status === "completed") {
+            navigate(`/interview/${sessionId}/report`);
+          }
+        } catch {
+          setErrorMsg("Failed to submit answer. Please retry.");
+        }
+      }
     } finally {
+      setStreamProgress("");
       setSubmitting(false);
     }
   };
@@ -154,13 +230,28 @@ export default function InterviewSessionPage() {
     if (!sessionId) return;
     setLoadingNext(true);
     setErrorMsg("");
+    setStreamProgress("Generating next interview question...");
+    const payload = {
+      llm_config: {
+        provider: settings.provider,
+        model: settings.model,
+        temperature: settings.temperature,
+        max_tokens: settings.maxTokens,
+      },
+    };
     try {
-      const next = await generateNextInterviewQuestion(sessionId, {
-        llm_config: {
-          provider: settings.provider,
-          model: settings.model,
-          temperature: settings.temperature,
-          max_tokens: settings.maxTokens,
+      const next = await generateNextInterviewQuestionStream(sessionId, payload, {
+        onStart: (event) => {
+          setStreamProgress(event.message || "Generating next interview question...");
+        },
+        onProgress: (event) => {
+          setStreamProgress(event.message || "Generating next interview question...");
+        },
+        onDone: () => {
+          setStreamProgress("Next question ready.");
+        },
+        onError: (event) => {
+          setErrorMsg(event.message || "Could not fetch next question.");
         },
       });
       setData((prev) =>
@@ -176,9 +267,31 @@ export default function InterviewSessionPage() {
       );
       setStartedAt(Date.now());
       setLastTurn(null);
-    } catch {
-      setErrorMsg("Could not fetch next question.");
+    } catch (streamErr) {
+      if (isInterviewStreamError(streamErr) && !streamErr.fallbackEligible) {
+        setErrorMsg(streamErr.message || "Could not fetch next question.");
+      } else {
+        try {
+          const next = await generateNextInterviewQuestion(sessionId, payload);
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  session: {
+                    ...prev.session,
+                    current_question: next.question,
+                  },
+                }
+              : prev,
+          );
+          setStartedAt(Date.now());
+          setLastTurn(null);
+        } catch {
+          setErrorMsg("Could not fetch next question.");
+        }
+      }
     } finally {
+      setStreamProgress("");
       setLoadingNext(false);
     }
   };
@@ -244,6 +357,12 @@ export default function InterviewSessionPage() {
           <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <span>{errorMsg}</span>
+          </div>
+        )}
+        {(submitting || loadingNext) && streamProgress && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>{streamProgress}</span>
           </div>
         )}
 
