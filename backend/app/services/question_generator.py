@@ -193,55 +193,307 @@ def _problem_solving_required_markdown(language: str) -> list[str]:
     ]
 
 
-def _problem_solving_question_seed(focus: str, source_scope: str) -> dict[str, str]:
-    trimmed_focus = (focus or source_scope or "problem solving").strip()
-    return {
+_PROBLEM_SOLVING_DEFAULT_SCENARIO_ID = "two_sum_hash_map"
+_PROBLEM_SOLVING_FALLBACK_SCENARIOS: tuple[dict[str, str], ...] = (
+    {
+        "id": "two_sum_hash_map",
         "question": (
-            f"Given an integer array `nums` and a target value `target`, return the two indices whose "
-            f"values add up to the target. Walk through how you would solve this using {trimmed_focus} "
-            "reasoning under interview pressure."
+            "In {source_scope}, consider an array-based input tied to {focus}. Return the two indices "
+            "whose values satisfy a target-sum constraint. Explain your approach, complexity, and "
+            "edge-case handling as you would in a live interview."
         ),
         "problem": (
-            "Start by translating the prompt into inputs, outputs, and constraints. You need one pass "
-            "that can quickly tell you whether the complement of the current value has already appeared."
+            "Translate the prompt into inputs, outputs, and constraints for {focus}. You need a one-pass "
+            "strategy that quickly checks whether the complement of the current value has already appeared."
         ),
         "walkthrough": (
-            "The expert move is to reject the O(n^2) brute-force scan once the constraints suggest a "
-            "faster lookup is possible. A hash map stores each seen value with its index, so every "
-            "iteration can compute the needed complement, check for a match in O(1), and then store the "
-            "current value without reusing the same element twice."
+            "Reject O(n^2) brute force once the complement relationship is clear. Use a hash map from "
+            "value to index; for each number, look up its complement in O(1), then store the current "
+            "value after the check so the same element is never reused."
         ),
         "complexity": (
-            "The loop visits each element once, so the time complexity is O(n). The hash map can store "
-            "up to n seen values, so the extra space complexity is O(n). The tradeoff is extra memory in "
-            "exchange for eliminating the quadratic brute-force scan."
+            "The array is scanned once, so time is O(n). The hash map can store up to n values, so extra "
+            "space is O(n). The tradeoff is additional memory for linear-time performance."
         ),
         "reasoning_summary": (
-            "Clarify the invariant first: each number needs a previously seen complement. Once that is "
-            "clear, a single-pass hash map is the fastest reliable approach."
+            "Identify the complement invariant first, then choose a hash map for one-pass lookup speed."
         ),
-    }
-
-
-def _problem_solving_code_template(language: str) -> str:
-    templates = {
-        "python": """def two_sum(nums, target):
+    },
+    {
+        "id": "longest_substring_sliding_window",
+        "question": (
+            "In {source_scope}, analyze a string scenario around {focus} and return the length of the "
+            "longest substring without repeating characters. Explain how you reason about pointer movement."
+        ),
+        "problem": (
+            "You need the best window length with all unique characters for {focus}. Rechecking every "
+            "substring is too slow, so you need an incremental way to maintain validity while scanning."
+        ),
+        "walkthrough": (
+            "Use a sliding window with a left pointer and a map of last-seen indices. When a repeated "
+            "character appears inside the active window, move the left pointer past the previous index. "
+            "Update window length on each step and keep the maximum."
+        ),
+        "complexity": (
+            "Each character is processed at most twice (by right/left movement), so time is O(n). The "
+            "last-seen map stores up to unique characters, so space is O(min(n, alphabet_size))."
+        ),
+        "reasoning_summary": (
+            "Maintain a valid window invariant and move pointers only when the invariant is violated."
+        ),
+    },
+    {
+        "id": "merge_intervals_sorting",
+        "question": (
+            "Using the context of {focus} in {source_scope}, merge all overlapping intervals `[start, end]` "
+            "and return the result. Explain your sorting and merge decisions clearly."
+        ),
+        "problem": (
+            "Overlaps can appear in many positions, so local pair checks are unreliable unless intervals "
+            "are ordered. The task is to collapse intersecting ranges into canonical disjoint intervals."
+        ),
+        "walkthrough": (
+            "Sort intervals by start. Iterate once while building an output list: if the current interval "
+            "does not overlap the last merged interval, append it; otherwise extend the previous end with "
+            "the maximum endpoint."
+        ),
+        "complexity": (
+            "Sorting dominates at O(n log n). The merge pass is O(n). Extra output storage is O(n) in the "
+            "worst case when no intervals overlap."
+        ),
+        "reasoning_summary": (
+            "Sort to linearize overlap checks, then maintain a single merged frontier while scanning."
+        ),
+    },
+    {
+        "id": "top_k_frequent_heap",
+        "question": (
+            "Given data from {source_scope} related to {focus}, return the `k` most frequent elements. "
+            "Explain why your data structure choices fit interview constraints."
+        ),
+        "problem": (
+            "You must rank elements by frequency without sorting every element-value pair when only top `k` "
+            "results are needed. The challenge is balancing counting and extraction cost."
+        ),
+        "walkthrough": (
+            "Count frequencies with a hash map, then use a heap to extract the top `k` entries by frequency. "
+            "A max-heap gives direct top retrieval; alternatively, a size-limited min-heap can improve memory "
+            "when `k` is much smaller than the number of unique values."
+        ),
+        "complexity": (
+            "Frequency counting is O(n). Building and popping from a heap is O(m + k log m) for max-heap "
+            "(or O(m log k) with a size-k min-heap), where m is number of unique values."
+        ),
+        "reasoning_summary": (
+            "Separate counting from ranking, then use heap operations to avoid full-frequency sorting."
+        ),
+    },
+    {
+        "id": "search_rotated_binary_search",
+        "question": (
+            "In {source_scope}, you receive a rotated sorted array tied to {focus} and a target value. "
+            "Return the index or -1 if not found, and explain how you adapt binary search under rotation."
+        ),
+        "problem": (
+            "Standard binary search assumes full ordering, but rotation breaks global monotonicity. You "
+            "must still use O(log n) decisions by identifying which half is sorted at each step."
+        ),
+        "walkthrough": (
+            "At each midpoint, detect whether left or right half is sorted. Check whether the target lies "
+            "within the sorted half's bounds; if yes, keep that half, otherwise search the other half. "
+            "Repeat until found or bounds cross."
+        ),
+        "complexity": (
+            "Each step halves the search interval, so time is O(log n). Space is O(1) with iterative bounds."
+        ),
+        "reasoning_summary": (
+            "Recover binary-search pruning by exploiting the sorted half that still exists after rotation."
+        ),
+    },
+    {
+        "id": "number_of_islands_dfs",
+        "question": (
+            "Using {focus} as context in {source_scope}, given a 2D grid of `'1'` (land) and `'0'` (water), "
+            "return the number of islands. Explain traversal strategy and how you avoid double-counting."
+        ),
+        "problem": (
+            "Connected land cells form components. You need to count components once each, while ensuring "
+            "visited land is not counted again from adjacent cells."
+        ),
+        "walkthrough": (
+            "Scan each cell; when unvisited land is found, increment island count and run DFS/BFS to mark "
+            "all connected land cells visited. Continue scanning until all cells are processed."
+        ),
+        "complexity": (
+            "Every cell is visited at most once, so time is O(rows * cols). Visited tracking and recursion/"
+            "queue storage are O(rows * cols) in the worst case."
+        ),
+        "reasoning_summary": (
+            "Model the grid as connected components and mark each component exactly once."
+        ),
+    },
+)
+_PROBLEM_SOLVING_SCENARIOS_BY_ID = {
+    item["id"]: item for item in _PROBLEM_SOLVING_FALLBACK_SCENARIOS
+}
+_PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES: dict[str, str] = {
+    "two_sum_hash_map": """def two_sum(nums, target):
     # Store each seen value with its index so complement lookups stay O(1).
     seen = {}
 
-    # Scan the array once and look for the complement before storing the current value.
+    # Scan once and check complement before storing the current value.
     for index, value in enumerate(nums):
         complement = target - value
         if complement in seen:
-            # Return the earlier index and the current index as soon as the pair is found.
+            # Return indices as soon as a valid pair is found.
             return [seen[complement], index]
-
-        # Save the current value after the check so the same element is never reused.
         seen[value] = index
 
-    # Return an empty result when the input does not contain a valid pair.
+    # Return an empty result when no pair exists.
     return []
 """,
+    "longest_substring_sliding_window": """def length_of_longest_substring(s):
+    # Track the latest index of each character for fast window fixes.
+    last_seen = {}
+    left = 0
+    best = 0
+
+    # Expand the window with `right` and shrink from `left` on duplicates.
+    for right, ch in enumerate(s):
+        if ch in last_seen and last_seen[ch] >= left:
+            left = last_seen[ch] + 1
+        last_seen[ch] = right
+        best = max(best, right - left + 1)
+
+    # The best window length is the answer.
+    return best
+""",
+    "merge_intervals_sorting": """def merge_intervals(intervals):
+    # Sort by interval start so overlap checks become local.
+    intervals.sort(key=lambda pair: pair[0])
+    merged = []
+
+    # Merge into the latest interval when ranges overlap.
+    for start, end in intervals:
+        if not merged or start > merged[-1][1]:
+            merged.append([start, end])
+            continue
+        merged[-1][1] = max(merged[-1][1], end)
+
+    # Return merged disjoint intervals.
+    return merged
+""",
+    "top_k_frequent_heap": """from collections import Counter
+import heapq
+
+
+def top_k_frequent(nums, k):
+    # Count frequency of each value in O(n).
+    freq = Counter(nums)
+
+    # Use a max-heap via negative counts for top-k extraction.
+    heap = [(-count, value) for value, count in freq.items()]
+    heapq.heapify(heap)
+
+    result = []
+    for _ in range(min(k, len(heap))):
+        _, value = heapq.heappop(heap)
+        result.append(value)
+    return result
+""",
+    "search_rotated_binary_search": """def search_rotated(nums, target):
+    # Keep classic binary-search boundaries.
+    left, right = 0, len(nums) - 1
+
+    # One half is always sorted even after rotation.
+    while left <= right:
+        mid = (left + right) // 2
+        if nums[mid] == target:
+            return mid
+        if nums[left] <= nums[mid]:
+            if nums[left] <= target < nums[mid]:
+                right = mid - 1
+            else:
+                left = mid + 1
+        else:
+            if nums[mid] < target <= nums[right]:
+                left = mid + 1
+            else:
+                right = mid - 1
+
+    # Return -1 when target is absent.
+    return -1
+""",
+    "number_of_islands_dfs": """def num_islands(grid):
+    # Guard empty input to avoid index errors.
+    if not grid or not grid[0]:
+        return 0
+
+    rows, cols = len(grid), len(grid[0])
+    visited = set()
+
+    def dfs(r, c):
+        # Stop at water, bounds, or previously visited cells.
+        if r < 0 or r >= rows or c < 0 or c >= cols:
+            return
+        if grid[r][c] != "1" or (r, c) in visited:
+            return
+        visited.add((r, c))
+
+        # Explore all four directions for the current island.
+        for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            dfs(r + dr, c + dc)
+
+    islands = 0
+    for r in range(rows):
+        for c in range(cols):
+            if grid[r][c] == "1" and (r, c) not in visited:
+                islands += 1
+                dfs(r, c)
+    return islands
+""",
+}
+
+
+def _problem_solving_scenario_ids_for_language(language: str) -> list[str]:
+    if language == "python":
+        return [item["id"] for item in _PROBLEM_SOLVING_FALLBACK_SCENARIOS]
+    return [_PROBLEM_SOLVING_DEFAULT_SCENARIO_ID]
+
+
+def _problem_solving_question_seed(
+    focus: str,
+    source_scope: str,
+    *,
+    scenario_id: str = _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID,
+) -> dict[str, str]:
+    scenario = _PROBLEM_SOLVING_SCENARIOS_BY_ID.get(scenario_id) or _PROBLEM_SOLVING_SCENARIOS_BY_ID[
+        _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID
+    ]
+    focus_hint = (focus or source_scope or "the current checkpoint").strip()
+    scope_hint = (source_scope or "this topic").strip() or "this topic"
+    return {
+        "question": scenario["question"].format(focus=focus_hint, source_scope=scope_hint),
+        "problem": scenario["problem"].format(focus=focus_hint, source_scope=scope_hint),
+        "walkthrough": scenario["walkthrough"].format(focus=focus_hint, source_scope=scope_hint),
+        "complexity": scenario["complexity"].format(focus=focus_hint, source_scope=scope_hint),
+        "reasoning_summary": scenario["reasoning_summary"].format(focus=focus_hint, source_scope=scope_hint),
+    }
+
+
+def _problem_solving_code_template(
+    language: str,
+    *,
+    scenario_id: str = _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID,
+) -> str:
+    if language == "python":
+        return _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES.get(
+            scenario_id,
+            _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES[_PROBLEM_SOLVING_DEFAULT_SCENARIO_ID],
+        ).strip()
+
+    templates = {
+        "python": _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES[_PROBLEM_SOLVING_DEFAULT_SCENARIO_ID],
         "java": """import java.util.HashMap;
 import java.util.Map;
 
@@ -258,8 +510,6 @@ class Solution {
                 // Return the earlier index and the current index as soon as the pair is found.
                 return new int[] {seen.get(complement), index};
             }
-
-            // Save the current value after the check so the same element is never reused.
             seen.put(value, index);
         }
 
@@ -286,8 +536,6 @@ vector<int> twoSum(const vector<int>& nums, int target) {
             // Return the earlier index and the current index as soon as the pair is found.
             return {found->second, index};
         }
-
-        // Save the current value after the check so the same element is never reused.
         seen[value] = index;
     }
 
@@ -307,8 +555,6 @@ vector<int> twoSum(const vector<int>& nums, int target) {
       // Return the earlier index and the current index as soon as the pair is found.
       return [seen.get(complement), index];
     }
-
-    // Save the current value after the check so the same element is never reused.
     seen.set(value, index);
   }
 
@@ -335,8 +581,6 @@ public class Solution
                 // Return the earlier index and the current index as soon as the pair is found.
                 return new[] { previousIndex, index };
             }
-
-            // Save the current value after the check so the same element is never reused.
             seen[value] = index;
         }
 
@@ -358,8 +602,6 @@ func twoSum(nums []int, target int) []int {
             // Return the earlier index and the current index as soon as the pair is found.
             return []int{previousIndex, index}
         }
-
-        // Save the current value after the check so the same element is never reused.
         seen[value] = index
     }
 
@@ -371,9 +613,22 @@ func twoSum(nums []int, target int) []int {
     return templates.get(language, templates[PROBLEM_SOLVING_DEFAULT_LANGUAGE]).strip()
 
 
-def _build_problem_solving_fallback_answer(*, focus: str, source_scope: str, language: str) -> tuple[str, str]:
-    seed = _problem_solving_question_seed(focus, source_scope)
-    code = _problem_solving_code_template(language)
+def _build_problem_solving_fallback_answer(
+    *,
+    focus: str,
+    source_scope: str,
+    language: str,
+    scenario_id: str = _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID,
+) -> tuple[str, str]:
+    seed = _problem_solving_question_seed(
+        focus,
+        source_scope,
+        scenario_id=scenario_id,
+    )
+    code = _problem_solving_code_template(
+        language,
+        scenario_id=scenario_id,
+    )
     answer = "\n\n".join(
         [
             "### Problem",
@@ -436,6 +691,81 @@ def _validate_problem_solving_answer(answer: str, preferred_language: str) -> tu
         return False, "problem_solving_code_missing_comments"
 
     return True, ""
+
+
+def _problem_solving_pattern_signature(question: str, answer: str) -> str:
+    text = f"{question}\n{answer}".strip().lower()
+    if not text:
+        return ""
+    if (
+        "two sum" in text
+        or "two_sum" in text
+        or "complement" in text
+        or "def two_sum" in text
+        or "twosum(" in text
+        or ("target" in text and "indices" in text and "hash map" in text)
+    ):
+        return "two_sum_hash_map"
+    if (
+        "substring without repeating" in text
+        or ("substring" in text and "repeating" in text and "window" in text)
+        or "def length_of_longest_substring" in text
+    ):
+        return "longest_substring_sliding_window"
+    if (
+        "merge intervals" in text
+        or ("interval" in text and "overlap" in text and "sort" in text)
+        or "def merge_intervals" in text
+    ):
+        return "merge_intervals_sorting"
+    if (
+        "top k frequent" in text
+        or "most frequent elements" in text
+        or ("heap" in text and "frequency" in text)
+        or "def top_k_frequent" in text
+    ):
+        return "top_k_frequent_heap"
+    if (
+        "rotated sorted array" in text
+        or ("rotated" in text and "binary search" in text)
+        or "def search_rotated" in text
+    ):
+        return "search_rotated_binary_search"
+    if (
+        "number of islands" in text
+        or ("grid" in text and "island" in text and ("dfs" in text or "bfs" in text))
+        or "def num_islands" in text
+    ):
+        return "number_of_islands_dfs"
+    return ""
+
+
+def _problem_solving_unique_pattern_target(target_count: int) -> int:
+    return min(max(0, int(target_count or 0)), len(_PROBLEM_SOLVING_SCENARIOS_BY_ID))
+
+
+def _accept_problem_pattern_signature(
+    *,
+    signature: str,
+    seen_signatures: set[str],
+    unique_target: int,
+) -> bool:
+    if not signature:
+        return True
+    if signature in seen_signatures and len(seen_signatures) < unique_target:
+        return False
+    seen_signatures.add(signature)
+    return True
+
+
+def _problem_solving_fallback_count_with_headroom(missing_count: int, problem_solving_mode: bool) -> int:
+    missing = max(0, int(missing_count or 0))
+    if missing <= 0:
+        return 0
+    if not problem_solving_mode:
+        return missing
+    scenario_count = max(1, len(_PROBLEM_SOLVING_SCENARIOS_BY_ID))
+    return min(24, max(missing, missing * 3, missing + scenario_count))
 
 
 def _build_prompt(
@@ -502,6 +832,10 @@ def _build_prompt(
     problem_scope_rules = (
         [
             "Questions must be true problem-solving prompts (algorithmic/coding style), not generic theory prompts.",
+            "Use a template-driven question structure: concrete input/output, explicit constraints, and interview-style reasoning expectations.",
+            "Do not copy canonical LeetCode wording; adapt each question to the current topic scope and source content.",
+            "Across generated items, vary algorithm families and avoid repeating the same canonical pattern.",
+            "Avoid overusing Two Sum or complement-hash-map variants unless explicitly required by the docs.",
             "Answers should explain problem understanding and constraints.",
             "Answers should explain solution strategy and why it works.",
             "Answers should explain complexity analysis and tradeoffs.",
@@ -898,6 +1232,11 @@ def _build_fallback_question_items(
     if difficulty_value not in _VALID_DIFFICULTIES:
         difficulty_value = "medium"
     selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else ""
+    scenario_ids = (
+        _problem_solving_scenario_ids_for_language(selected_language)
+        if problem_solving_mode
+        else []
+    )
 
     templates = [
         "What are the key design considerations for {focus} in {topic} from a {angle} perspective?",
@@ -927,8 +1266,14 @@ def _build_fallback_question_items(
     while len(items) < remaining and idx < max_rounds:
         focus = fragments[idx % len(fragments)]
         angle = angles[(idx // max(1, len(fragments))) % len(angles)]
+        scenario_id = _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID
         if problem_solving_mode:
-            question = _problem_solving_question_seed(focus, source_scope)["question"]
+            scenario_id = scenario_ids[idx % len(scenario_ids)]
+            question = _problem_solving_question_seed(
+                focus,
+                source_scope,
+                scenario_id=scenario_id,
+            )["question"]
         else:
             template = templates[idx % len(templates)]
             question = template.format(
@@ -946,6 +1291,7 @@ def _build_fallback_question_items(
                 focus=focus,
                 source_scope=source_scope,
                 language=selected_language,
+                scenario_id=scenario_id,
             )
         else:
             # Rotate through multiple tutoring-style answer templates so
@@ -1164,6 +1510,111 @@ def _validate_quiz_item(
     return True, ""
 
 
+def _build_fallback_quiz_items(
+    *,
+    topics_content: list[dict],
+    count: int,
+    question_types: list[str] | None,
+    difficulty: Optional[str],
+    level: Optional[str],
+    existing_questions: list[str],
+) -> list[dict[str, Any]]:
+    if count <= 0 or not topics_content:
+        return []
+
+    allowed_topics = {str(tc.get("id", "")).strip() for tc in topics_content if str(tc.get("id", "")).strip()}
+    allowed_types = set(question_types or ["mcq", "true_false"])
+    if not allowed_types:
+        allowed_types = {"mcq", "true_false"}
+    target_level = _normalise_level(level)
+    diff = str(difficulty or "medium").strip().lower()
+    if diff not in _VALID_DIFFICULTIES:
+        diff = "medium"
+
+    out: list[dict[str, Any]] = []
+    seen_norm = {_normalise_question(q) for q in _normalise_existing_questions(existing_questions)}
+    guard = 0
+    while len(out) < count and guard < (count * 12):
+        idx = len(out) + guard
+        topic = topics_content[idx % len(topics_content)]
+        topic_id = str(topic.get("id", "")).strip()
+        if not topic_id:
+            guard += 1
+            continue
+        topic_title = str(topic.get("title", topic_id)).strip() or topic_id
+        source_scope = str(topic.get("content", "")).strip()
+        source_quote = re.sub(r"\s+", " ", source_scope)[:180].strip() or (
+            f"{topic_title} interview fundamentals and tradeoffs."
+        )
+        if len(source_quote) < 8:
+            source_quote = f"{topic_title} interview fundamentals and tradeoffs."
+
+        use_mcq = "mcq" in allowed_types and ("true_false" not in allowed_types or idx % 2 == 0)
+        if use_mcq:
+            stems = [
+                "For {topic_title}, which approach best balances correctness, maintainability, and interview communication under constraints?",
+                "In a {topic_title} interview scenario, which response structure shows the strongest engineering judgment?",
+                "When discussing {topic_title}, which strategy most clearly demonstrates tradeoff-driven thinking?",
+                "For {topic_title}, which interviewing approach is most likely to produce a robust and explainable solution?",
+            ]
+            question = stems[idx % len(stems)].format(topic_title=topic_title)
+            choices = [
+                {"label": "A", "text": "Clarify constraints, choose a justified approach, and explain tradeoffs."},
+                {"label": "B", "text": "Start coding immediately and defer reasoning until the end."},
+                {"label": "C", "text": "Optimize micro-details before validating core requirements."},
+                {"label": "D", "text": "Assume defaults and skip edge-case discussion to save time."},
+            ]
+            correct = "A"
+            q_type = "mcq"
+        else:
+            stems = [
+                "True or false for {topic_title}: strong interview answers should explicitly state assumptions and tradeoffs before implementation details.",
+                "For {topic_title}, true or false: candidates should justify constraints first, then explain implementation choices.",
+                "True or false in a {topic_title} interview: skipping assumptions weakens the quality of technical reasoning.",
+                "For {topic_title}, true or false: discussing tradeoffs early usually improves answer clarity and credibility.",
+            ]
+            question = stems[idx % len(stems)].format(topic_title=topic_title)
+            choices = [
+                {"label": "A", "text": "True"},
+                {"label": "B", "text": "False"},
+            ]
+            correct = "A"
+            q_type = "true_false"
+
+        q_norm = _normalise_question(question)
+        if not q_norm or q_norm in seen_norm:
+            guard += 1
+            continue
+        seen_norm.add(q_norm)
+        item = {
+            "question": question,
+            "type": q_type,
+            "choices": choices,
+            "correct_answer": correct,
+            "explanation": (
+                "Strong responses should make reasoning explicit, connect choices to constraints, "
+                "and communicate tradeoffs with clear structure."
+            ),
+            "difficulty": diff,
+            "topic_id": topic_id,
+            "source_quote": source_quote,
+            "reasoning_summary": "Anchor decisions in constraints, then justify tradeoffs clearly.",
+            "target_level": target_level,
+        }
+        valid, _issue = _validate_quiz_item(
+            item,
+            allowed_topics=allowed_topics,
+            allowed_types=allowed_types,
+            difficulty=difficulty,
+            level=level,
+        )
+        if valid:
+            out.append(item)
+        guard += 1
+
+    return out[:count]
+
+
 async def _collect_with_retries(
     *,
     llm: LLMClient,
@@ -1374,6 +1825,24 @@ class QuestionGenerator:
         )
 
     @staticmethod
+    def _to_quiz_question_v2(item: dict[str, Any]) -> QuizQuestionV2:
+        topic_id = str(item.get("topic_id", "")).strip()
+        qid = _question_id(topic_id or "quiz", str(item.get("question", "")))
+        choices = [QuizChoice(label=c["label"], text=c["text"]) for c in item["choices"]]
+        return QuizQuestionV2(
+            question_id=qid,
+            question=str(item.get("question", "")).strip(),
+            type=QuizQuestionType(str(item.get("type", "mcq")).strip().lower()),
+            choices=choices,
+            correct_answer=str(item.get("correct_answer", "")).strip(),
+            explanation=format_markdown_readable(str(item.get("explanation", "")).strip()),
+            difficulty=str(item.get("difficulty", "medium")).strip().lower() or "medium",
+            topic_id=topic_id,
+            source_quote=str(item.get("source_quote", "")).strip(),
+            reasoning_summary=str(item.get("reasoning_summary", "")).strip(),
+        )
+
+    @staticmethod
     def _policy_error_payload(exc: Exception) -> tuple[str, str]:
         if isinstance(exc, LLMServiceApprovalRequiredError):
             return APPROVAL_REQUIRED_CODE, APPROVAL_REQUIRED_MESSAGE
@@ -1419,6 +1888,12 @@ class QuestionGenerator:
         )
         dedup_norm: set[str] = {_normalise_question(q) for q in seed_existing}
         generated_question_texts: list[str] = [*seed_existing]
+        problem_pattern_signatures: set[str] = set()
+        max_unique_problem_patterns = (
+            _problem_solving_unique_pattern_target(target_count)
+            if problem_solving_mode
+            else 0
+        )
 
         async def _generate_one(*, include_section: bool, relaxed: bool = False) -> dict[str, Any]:
             retries_used = 0
@@ -1512,6 +1987,20 @@ class QuestionGenerator:
                             malformed_dropped += 1
                             issue_counter["duplicate_question"] += 1
                             continue
+
+                        if problem_solving_mode:
+                            signature = _problem_solving_pattern_signature(
+                                q_text,
+                                str(item.get("answer", "")),
+                            )
+                            if not _accept_problem_pattern_signature(
+                                signature=signature,
+                                seen_signatures=problem_pattern_signatures,
+                                unique_target=max_unique_problem_patterns,
+                            ):
+                                malformed_dropped += 1
+                                issue_counter["duplicate_problem_pattern"] += 1
+                                continue
 
                         dedup_norm.add(q_norm)
                         generated_question_texts.append(q_text)
@@ -1682,11 +2171,15 @@ class QuestionGenerator:
                 }
 
         if generated_count < target_count:
+            missing_count = target_count - generated_count
             fallback_items = _build_fallback_question_items(
                 topic_id=topic_id,
                 topic_title=topic_title,
                 doc_content=doc_content,
-                count=target_count - generated_count,
+                count=_problem_solving_fallback_count_with_headroom(
+                    missing_count,
+                    problem_solving_mode,
+                ),
                 difficulty=difficulty,
                 level=level,
                 section_title=None,
@@ -1700,6 +2193,17 @@ class QuestionGenerator:
                 q_norm = _normalise_question(q_text)
                 if not q_norm or q_norm in dedup_norm or _is_near_duplicate_question(q_text, generated_question_texts):
                     continue
+                if problem_solving_mode:
+                    signature = _problem_solving_pattern_signature(
+                        q_text,
+                        str(item.get("answer", "")),
+                    )
+                    if not _accept_problem_pattern_signature(
+                        signature=signature,
+                        seen_signatures=problem_pattern_signatures,
+                        unique_target=max_unique_problem_patterns,
+                    ):
+                        continue
                 dedup_norm.add(q_norm)
                 generated_question_texts.append(q_text)
                 qa = self._to_question_answer_v2(topic_id, item)
@@ -1766,12 +2270,27 @@ class QuestionGenerator:
             QuestionAnswer(question=q.question, answer=q.answer, difficulty=q.difficulty)
             for q in v2.questions
         ]
+        problem_pattern_signatures: set[str] = set()
+        max_unique_problem_patterns = (
+            _problem_solving_unique_pattern_target(target_count)
+            if problem_solving_mode
+            else 0
+        )
+        if problem_solving_mode:
+            for q in questions:
+                signature = _problem_solving_pattern_signature(q.question, q.answer)
+                if signature:
+                    problem_pattern_signatures.add(signature)
         if len(questions) < target_count:
+            missing_count = target_count - len(questions)
             fallback_items = _build_fallback_question_items(
                 topic_id=topic_id,
                 topic_title=topic_title,
                 doc_content=doc_content,
-                count=target_count - len(questions),
+                count=_problem_solving_fallback_count_with_headroom(
+                    missing_count,
+                    problem_solving_mode,
+                ),
                 difficulty=difficulty,
                 level=level,
                 section_title=section_title,
@@ -1784,6 +2303,17 @@ class QuestionGenerator:
                 requires_programming=requires_programming,
             )
             for item in fallback_items:
+                if problem_solving_mode:
+                    signature = _problem_solving_pattern_signature(
+                        str(item.get("question", "")).strip(),
+                        str(item.get("answer", "")),
+                    )
+                    if not _accept_problem_pattern_signature(
+                        signature=signature,
+                        seen_signatures=problem_pattern_signatures,
+                        unique_target=max_unique_problem_patterns,
+                    ):
+                        continue
                 questions.append(
                     QuestionAnswer(
                         question=str(item.get("question", "")).strip(),
@@ -1846,6 +2376,12 @@ class QuestionGenerator:
         existing_seed = _normalise_existing_questions(existing_questions)
         dedup_norm: set[str] = {_normalise_question(q) for q in existing_seed}
         seen_questions: list[str] = [*existing_seed]
+        problem_pattern_signatures: set[str] = set()
+        max_unique_problem_patterns = (
+            _problem_solving_unique_pattern_target(target_count)
+            if problem_solving_mode
+            else 0
+        )
 
         pass_modes: list[dict[str, Any]] = [
             {
@@ -1928,6 +2464,17 @@ class QuestionGenerator:
                 q_norm = _normalise_question(question_text)
                 if not q_norm or q_norm in dedup_norm or _is_near_duplicate_question(question_text, seen_questions):
                     continue
+                if problem_solving_mode:
+                    signature = _problem_solving_pattern_signature(
+                        question_text,
+                        str(item.get("answer", "")),
+                    )
+                    if not _accept_problem_pattern_signature(
+                        signature=signature,
+                        seen_signatures=problem_pattern_signatures,
+                        unique_target=max_unique_problem_patterns,
+                    ):
+                        continue
                 dedup_norm.add(q_norm)
                 seen_questions.append(question_text)
                 raw_items.append(item)
@@ -1935,11 +2482,15 @@ class QuestionGenerator:
                     break
 
         if len(raw_items) < target_count:
+            missing_count = target_count - len(raw_items)
             fallback_items = _build_fallback_question_items(
                 topic_id=topic_id,
                 topic_title=topic_title,
                 doc_content=doc_content,
-                count=target_count - len(raw_items),
+                count=_problem_solving_fallback_count_with_headroom(
+                    missing_count,
+                    problem_solving_mode,
+                ),
                 difficulty=difficulty,
                 level=level,
                 section_title=None,
@@ -1956,6 +2507,17 @@ class QuestionGenerator:
                 q_norm = _normalise_question(question_text)
                 if not q_norm or q_norm in dedup_norm or _is_near_duplicate_question(question_text, seen_questions):
                     continue
+                if problem_solving_mode:
+                    signature = _problem_solving_pattern_signature(
+                        question_text,
+                        str(item.get("answer", "")),
+                    )
+                    if not _accept_problem_pattern_signature(
+                        signature=signature,
+                        seen_signatures=problem_pattern_signatures,
+                        unique_target=max_unique_problem_patterns,
+                    ):
+                        continue
                 dedup_norm.add(q_norm)
                 seen_questions.append(question_text)
                 raw_items.append(item)
@@ -1973,6 +2535,285 @@ class QuestionGenerator:
             retries_used=retries_used,
             malformed_items_dropped=malformed_items_dropped,
         )
+
+    async def generate_quiz_v2_stream(
+        self,
+        topics_content: list[dict],
+        count: int = 10,
+        question_types: list[str] | None = None,
+        difficulty: Optional[str] = None,
+        level: Optional[str] = None,
+        response_detail: str | None = None,
+        preferred_language: str = "",
+        llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        target_count = max(1, int(count or 1))
+        effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
+        mcp_context = await self._mcp_context_for_flow(
+            flow="quiz",
+            query=" ".join(
+                [
+                    " ".join(str(tc.get("title", "")).strip() for tc in topics_content[:4]),
+                    "technical quiz generation",
+                ]
+            ).strip(),
+        )
+        allowed_topics = {str(tc["id"]) for tc in topics_content}
+        allowed_types = set(question_types or ["mcq", "true_false"])
+        if not allowed_types:
+            allowed_types = {"mcq", "true_false"}
+
+        dedup_norm: set[str] = set()
+        generated_question_texts: list[str] = []
+        provider_used = ""
+        model_used = ""
+        retries_used = 0
+        malformed_items_dropped = 0
+        generated_count = 0
+
+        async def _generate_one() -> dict[str, Any]:
+            local_retries = 0
+            local_malformed = 0
+            metadata: dict[str, Any] = {}
+            issue_counter: Counter[str] = Counter()
+            prompt = _build_quiz_prompt(
+                topics_content,
+                1,
+                question_types,
+                difficulty,
+                level,
+                response_detail=effective_detail,
+                preferred_language=(preferred_language or "").strip().lower(),
+                mcp_context=mcp_context,
+            )
+            base_prompt = prompt
+            try:
+                for _ in range(_attempt_budget(1)):
+                    result = await self.llm.completion(
+                        prompt,
+                        llm_config,
+                        user_identity=user_identity,
+                    )
+                    raise_if_policy_blocked_result(result)
+                    metadata = result.get("metadata", {})
+                    if not result.get("success"):
+                        local_retries += 1
+                        issue_counter["transport_or_provider_error"] += 1
+                        prompt = _build_retry_prompt(
+                            base_prompt=base_prompt,
+                            missing_count=1,
+                            issues="transport_or_provider_error",
+                            existing_questions=generated_question_texts,
+                        )
+                        continue
+
+                    parsed = _parse_questions_json(result.get("analysis", ""))
+                    if not parsed:
+                        local_retries += 1
+                        local_malformed += 1
+                        issue_counter["json_parse_failed"] += 1
+                        prompt = _build_retry_prompt(
+                            base_prompt=base_prompt,
+                            missing_count=1,
+                            issues="json_parse_failed",
+                            existing_questions=generated_question_texts,
+                        )
+                        continue
+
+                    selected_item: dict[str, Any] | None = None
+                    for item in parsed:
+                        if not isinstance(item, dict):
+                            local_malformed += 1
+                            issue_counter["non_dict_item"] += 1
+                            continue
+                        is_valid, issue = _validate_quiz_item(
+                            item,
+                            allowed_topics,
+                            allowed_types,
+                            difficulty,
+                            level,
+                        )
+                        if not is_valid:
+                            local_malformed += 1
+                            issue_counter[issue] += 1
+                            continue
+                        question_text = str(item.get("question", "")).strip()
+                        q_norm = _normalise_question(question_text)
+                        if (
+                            not q_norm
+                            or q_norm in dedup_norm
+                            or _is_near_duplicate_question(question_text, generated_question_texts)
+                        ):
+                            local_malformed += 1
+                            issue_counter["duplicate_question"] += 1
+                            continue
+                        dedup_norm.add(q_norm)
+                        generated_question_texts.append(question_text)
+                        selected_item = item
+                        break
+
+                    if selected_item is not None:
+                        question = self._to_quiz_question_v2(selected_item)
+                        return {
+                            "question": question.model_dump(),
+                            "metadata": metadata,
+                            "retries_used": local_retries,
+                            "malformed_items_dropped": local_malformed,
+                        }
+
+                    local_retries += 1
+                    top_issues = (
+                        ", ".join(f"{k}:{v}" for k, v in issue_counter.most_common(5))
+                        or "insufficient_valid_items"
+                    )
+                    prompt = _build_retry_prompt(
+                        base_prompt=base_prompt,
+                        missing_count=1,
+                        issues=top_issues,
+                        existing_questions=generated_question_texts,
+                    )
+
+                return {
+                    "question": None,
+                    "metadata": metadata,
+                    "retries_used": local_retries,
+                    "malformed_items_dropped": local_malformed,
+                }
+            except (
+                LLMServiceApprovalRequiredError,
+                StudyAppLLMNotAssignedError,
+                PersonalCredentialRequiredError,
+            ) as exc:
+                code, message = self._policy_error_payload(exc)
+                return {
+                    "error": {"code": code, "message": message},
+                    "metadata": metadata,
+                    "retries_used": local_retries,
+                    "malformed_items_dropped": local_malformed,
+                }
+            except Exception as exc:
+                logger.exception("Streaming quiz generation failed: %s", exc)
+                return {
+                    "error": {
+                        "code": "generation_failed",
+                        "message": str(exc).strip() or "Quiz generation failed",
+                    },
+                    "metadata": metadata,
+                    "retries_used": local_retries,
+                    "malformed_items_dropped": local_malformed,
+                }
+
+        yield {
+            "type": "start",
+            "target_count": target_count,
+            "topics_used": sorted(allowed_topics),
+            "question_types": sorted(allowed_types),
+        }
+
+        while generated_count < target_count:
+            yield {
+                "type": "progress",
+                "stage": "generating",
+                "message": f"Generating quiz question {generated_count + 1} of {target_count}.",
+                "generated_count": generated_count,
+                "target_count": target_count,
+            }
+            result = await _generate_one()
+            retries_used += int(result.get("retries_used", 0))
+            malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
+            metadata = result.get("metadata", {}) or {}
+            if metadata.get("provider"):
+                provider_used = str(metadata.get("provider"))
+            if metadata.get("model"):
+                model_used = str(metadata.get("model"))
+
+            error = result.get("error")
+            if error:
+                yield {
+                    "type": "error",
+                    "code": str(error.get("code", "generation_failed")),
+                    "message": str(error.get("message", "Quiz generation failed")),
+                }
+                return
+
+            question = result.get("question")
+            if not isinstance(question, dict):
+                break
+            generated_count += 1
+            yield {"type": "question", "question": question}
+
+        if generated_count < target_count:
+            for _ in range(_recovery_budget(target_count - generated_count)):
+                if generated_count >= target_count:
+                    break
+                yield {
+                    "type": "progress",
+                    "stage": "recovering",
+                    "message": (
+                        f"Recovering missing quiz questions: {generated_count}/{target_count} generated."
+                    ),
+                    "generated_count": generated_count,
+                    "target_count": target_count,
+                }
+                result = await _generate_one()
+                retries_used += int(result.get("retries_used", 0))
+                malformed_items_dropped += int(result.get("malformed_items_dropped", 0))
+                metadata = result.get("metadata", {}) or {}
+                if metadata.get("provider"):
+                    provider_used = str(metadata.get("provider"))
+                if metadata.get("model"):
+                    model_used = str(metadata.get("model"))
+                error = result.get("error")
+                if error:
+                    yield {
+                        "type": "error",
+                        "code": str(error.get("code", "generation_failed")),
+                        "message": str(error.get("message", "Quiz generation failed")),
+                    }
+                    return
+                question = result.get("question")
+                if not isinstance(question, dict):
+                    continue
+                generated_count += 1
+                yield {"type": "question", "question": question}
+
+        if generated_count < target_count:
+            fallback_items = _build_fallback_quiz_items(
+                topics_content=topics_content,
+                count=target_count - generated_count,
+                question_types=question_types,
+                difficulty=difficulty,
+                level=level,
+                existing_questions=generated_question_texts,
+            )
+            for item in fallback_items:
+                if generated_count >= target_count:
+                    break
+                question_text = str(item.get("question", "")).strip()
+                q_norm = _normalise_question(question_text)
+                if (
+                    not q_norm
+                    or q_norm in dedup_norm
+                    or _is_near_duplicate_question(question_text, generated_question_texts)
+                ):
+                    continue
+                dedup_norm.add(q_norm)
+                generated_question_texts.append(question_text)
+                question = self._to_quiz_question_v2(item)
+                generated_count += 1
+                yield {"type": "question", "question": question.model_dump()}
+
+        yield {
+            "type": "done",
+            "generated_count": generated_count,
+            "target_count": target_count,
+            "topics_used": sorted(allowed_topics),
+            "provider_used": provider_used,
+            "model_used": model_used,
+            "retries_used": retries_used,
+            "malformed_items_dropped": malformed_items_dropped,
+        }
 
     async def generate_quiz(
         self,
