@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from typing import Any, AsyncIterator
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.dependencies import require_auth
@@ -25,6 +30,12 @@ from app.services.interview_generator import InterviewGenerator
 from app.services.interview_store import InterviewStore
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
+from app.services.llm_policy import (
+    LLMServiceApprovalRequiredError,
+    PersonalCredentialRequiredError,
+    StudyAppLLMNotAssignedError,
+    policy_error_detail,
+)
 from app.services.mcp_gateway import MCPGateway
 
 router = APIRouter(prefix="/api/interview-sessions", tags=["interview-sessions"])
@@ -77,6 +88,27 @@ def _track_topic_id(track: str) -> str:
     return topics[0].id if topics else ""
 
 
+async def _progress_events(
+    task: "asyncio.Task[Any]",
+    *,
+    stage: str,
+    message: str,
+    interval_seconds: float = 0.8,
+) -> AsyncIterator[dict[str, Any]]:
+    elapsed = 0.0
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=interval_seconds)
+        if task in done:
+            break
+        elapsed += interval_seconds
+        yield {
+            "type": "progress",
+            "stage": stage,
+            "message": message,
+            "elapsed_seconds": round(elapsed, 1),
+        }
+
+
 @router.post("", response_model=InterviewSessionResponse)
 async def create_session(
     body: CreateInterviewSessionRequest,
@@ -117,6 +149,100 @@ async def create_session(
     )
 
     return _to_session_response(user["user"], session["session_id"])
+
+
+@router.post("/stream")
+async def create_session_stream(
+    body: CreateInterviewSessionRequest,
+    user: dict = Depends(require_auth),
+):
+    _ensure_enabled()
+    _ensure_ready()
+    assert _store is not None and _generator is not None
+
+    async def _event_stream():
+        yield json.dumps(
+            {
+                "type": "start",
+                "stage": "creating_session",
+                "message": "Creating interview session.",
+            }
+        ) + "\n"
+        try:
+            session = _store.create_session(
+                user_id=user["user"],
+                track=body.track.value,
+                level=body.level.value,
+                interview_type=body.interview_type.value,
+                turn_count=body.turn_count,
+                target_role=body.target_role.strip(),
+                interviewer_style=body.interviewer_style.value,
+                feedback_mode=body.feedback_mode.value,
+                job_description_text=body.job_description_text.strip(),
+                resume_summary_text=body.resume_summary_text.strip(),
+                focus_areas=[x.strip() for x in body.focus_areas if x.strip()],
+            )
+            context = _store.get_session_context(
+                user_id=user["user"],
+                session_id=session["session_id"],
+            )
+            if not context:
+                raise RuntimeError("Failed to create session context")
+
+            first_q_task = asyncio.create_task(
+                _generator.generate_question(
+                    session=context,
+                    turns=[],
+                    llm_config=body.llm_config,
+                    user_identity=user,
+                )
+            )
+            async for progress in _progress_events(
+                first_q_task,
+                stage="generating_question",
+                message="Generating first interview question.",
+            ):
+                yield json.dumps(progress) + "\n"
+            first_q = await first_q_task
+            _store.set_current_question(
+                user_id=user["user"],
+                session_id=session["session_id"],
+                question=first_q["question"],
+            )
+
+            payload = _to_session_response(user["user"], session["session_id"]).model_dump(mode="json")
+            yield json.dumps({"type": "done", **payload}) + "\n"
+        except (
+            LLMServiceApprovalRequiredError,
+            StudyAppLLMNotAssignedError,
+            PersonalCredentialRequiredError,
+        ) as exc:
+            detail = policy_error_detail(exc)
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "code": detail["code"] or "generation_failed",
+                    "message": detail["message"] or "Interview generation blocked by policy.",
+                }
+            ) + "\n"
+        except Exception as exc:
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "code": "generation_failed",
+                    "message": str(exc).strip() or "Interview generation failed.",
+                }
+            ) + "\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("", response_model=InterviewSessionsListResponse)
@@ -260,6 +386,157 @@ async def submit_answer(
     )
 
 
+@router.post("/{session_id}/answer/stream")
+async def submit_answer_stream(
+    session_id: str,
+    body: SubmitInterviewAnswerRequest,
+    user: dict = Depends(require_auth),
+):
+    _ensure_enabled()
+    _ensure_ready()
+    assert _store is not None and _generator is not None
+
+    session = _store.get_session_context(user_id=user["user"], session_id=session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found")
+    if session["status"] != "active":
+        raise HTTPException(status_code=400, detail="Interview session already completed")
+    question = (session.get("current_question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="No active question. Generate next question first.")
+
+    async def _event_stream():
+        yield json.dumps(
+            {
+                "type": "start",
+                "stage": "evaluating_answer",
+                "session_id": session_id,
+                "message": "Evaluating interview answer.",
+            }
+        ) + "\n"
+        try:
+            turn_index = int(session["turns_completed"]) + 1
+            eval_task = asyncio.create_task(
+                _generator.evaluate_answer(
+                    session=session,
+                    question=question,
+                    user_answer=body.user_answer,
+                    turn_index=turn_index,
+                    llm_config=body.llm_config,
+                    user_identity=user,
+                )
+            )
+            async for progress in _progress_events(
+                eval_task,
+                stage="evaluating_answer",
+                message="Evaluating answer and preparing coaching feedback.",
+            ):
+                yield json.dumps(progress) + "\n"
+            eval_payload = await eval_task
+
+            turn_dict, updated_session = _store.record_turn(
+                user_id=user["user"],
+                session_id=session_id,
+                turn_index=turn_index,
+                question=question,
+                user_answer=body.user_answer,
+                rubric=eval_payload["rubric"],
+                strengths=eval_payload["strengths"],
+                improvements=eval_payload["improvements"],
+                follow_up_note=eval_payload["follow_up_note"],
+                response_time_ms=body.response_time_ms,
+            )
+            prior_memory = str(session.get("memory_summary", "")).strip()
+            memory_update = (
+                f"{prior_memory}\n"
+                f"Turn {turn_index} question: {question[:220]}\n"
+                f"Candidate answer summary: {body.user_answer[:320]}\n"
+                f"Strengths: {'; '.join(eval_payload['strengths'][:2])}\n"
+                f"Improvements: {'; '.join(eval_payload['improvements'][:2])}"
+            ).strip()
+            _store.set_memory_summary(
+                user_id=user["user"],
+                session_id=session_id,
+                summary=memory_update[:2400],
+            )
+
+            if get_settings().enable_adaptive_learning and _learning_store is not None:
+                topic_id = _track_topic_id(session["track"])
+                if topic_id:
+                    rubric = eval_payload["rubric"]
+                    overall = int(rubric.get("overall", 60))
+                    confidence_signal = max(1, min(5, int(rubric.get("confidence_signal", 3))))
+                    await _learning_store.run_async(
+                        _learning_store.record_attempt,
+                        user_id=user["user"],
+                        question_id=f"interview:{session_id}:{turn_index}",
+                        topic_id=topic_id,
+                        user_answer=body.user_answer,
+                        is_correct=overall >= 70,
+                        confidence=confidence_signal,
+                        response_time_ms=body.response_time_ms,
+                        mode="study",
+                    )
+
+            if updated_session and updated_session["status"] == "completed":
+                turns = _store.get_turns(user_id=user["user"], session_id=session_id)
+                report = _generator.build_report(session=updated_session, turns=turns)
+                _store.save_report(user_id=user["user"], session_id=session_id, report=report)
+
+            session_out = _store.get_session(user_id=user["user"], session_id=session_id)
+            if not session_out:
+                raise RuntimeError("Session update failed")
+
+            payload = InterviewTurnResponse(
+                session=session_out,
+                turn=InterviewTurn(
+                    session_id=session_id,
+                    turn_index=turn_index,
+                    question=question,
+                    user_answer=body.user_answer,
+                    rubric=RubricScore(**eval_payload["rubric"]),
+                    strengths=eval_payload["strengths"],
+                    improvements=eval_payload["improvements"],
+                    follow_up_note=eval_payload["follow_up_note"],
+                    response_time_ms=max(0, body.response_time_ms),
+                    created_at=turn_dict["created_at"],
+                ),
+                report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
+            ).model_dump(mode="json")
+            yield json.dumps({"type": "done", **payload}) + "\n"
+        except (
+            LLMServiceApprovalRequiredError,
+            StudyAppLLMNotAssignedError,
+            PersonalCredentialRequiredError,
+        ) as exc:
+            detail = policy_error_detail(exc)
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "code": detail["code"] or "generation_failed",
+                    "message": detail["message"] or "Interview evaluation blocked by policy.",
+                }
+            ) + "\n"
+        except Exception as exc:
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "code": "generation_failed",
+                    "message": str(exc).strip() or "Interview evaluation failed.",
+                }
+            ) + "\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/{session_id}/next-question", response_model=InterviewQuestionResponse)
 async def next_question(
     session_id: str,
@@ -298,6 +575,100 @@ async def next_question(
         question=generated["question"],
         competency_focus=generated.get("competency_focus", ""),
         expected_signals=generated.get("expected_signals", []),
+    )
+
+
+@router.post("/{session_id}/next-question/stream")
+async def next_question_stream(
+    session_id: str,
+    body: NextInterviewQuestionRequest,
+    user: dict = Depends(require_auth),
+):
+    _ensure_enabled()
+    _ensure_ready()
+    assert _store is not None and _generator is not None
+
+    llm_config = body.llm_config
+    session = _store.get_session_context(user_id=user["user"], session_id=session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found")
+    if session["status"] != "active":
+        raise HTTPException(status_code=400, detail="Interview session already completed")
+
+    turns = _store.get_turns(user_id=user["user"], session_id=session_id)
+
+    async def _event_stream():
+        yield json.dumps(
+            {
+                "type": "start",
+                "stage": "generating_question",
+                "session_id": session_id,
+                "message": "Generating next interview question.",
+            }
+        ) + "\n"
+        try:
+            question_task = asyncio.create_task(
+                _generator.generate_question(
+                    session=session,
+                    turns=turns,
+                    llm_config=llm_config,
+                    user_identity=user,
+                )
+            )
+            async for progress in _progress_events(
+                question_task,
+                stage="generating_question",
+                message="Generating next interview question.",
+            ):
+                yield json.dumps(progress) + "\n"
+            generated = await question_task
+
+            updated = _store.set_current_question(
+                user_id=user["user"],
+                session_id=session_id,
+                question=generated["question"],
+            )
+            if not updated:
+                raise RuntimeError("Could not persist next question")
+
+            payload = InterviewQuestionResponse(
+                session_id=session_id,
+                turn_index=int(updated["turns_completed"]) + 1,
+                question=generated["question"],
+                competency_focus=generated.get("competency_focus", ""),
+                expected_signals=generated.get("expected_signals", []),
+            ).model_dump(mode="json")
+            yield json.dumps({"type": "done", **payload}) + "\n"
+        except (
+            LLMServiceApprovalRequiredError,
+            StudyAppLLMNotAssignedError,
+            PersonalCredentialRequiredError,
+        ) as exc:
+            detail = policy_error_detail(exc)
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "code": detail["code"] or "generation_failed",
+                    "message": detail["message"] or "Interview generation blocked by policy.",
+                }
+            ) + "\n"
+        except Exception as exc:
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "code": "generation_failed",
+                    "message": str(exc).strip() or "Interview question generation failed.",
+                }
+            ) + "\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -595,29 +594,49 @@ async def generate_topic_content_stream(
                     preferred_language=language,
                 )
 
-            generation_task = asyncio.create_task(
-                generator.generate_topic(
-                    preferred_language=language,
-                    target_sections=target_sections,
-                    llm_config=body.llm_config,
-                    user_identity=user,
-                )
-            )
+            generated: TopicDetail | None = None
+            async for event in generator.generate_topic_stream(
+                preferred_language=language,
+                target_sections=target_sections,
+                llm_config=body.llm_config,
+                user_identity=user,
+            ):
+                event_type = str(event.get("type", ""))
+                if event_type == "progress":
+                    yield json.dumps(
+                        {
+                            "type": "progress",
+                            "stage": "batching",
+                            "message": event.get("message")
+                            or "Generating language-specific problem solving roadmap...",
+                            "batch_index": int(event.get("batch_index", 0)),
+                            "batch_count": int(event.get("batch_count", 0)),
+                            "generated_sections": int(event.get("generated_sections", 0)),
+                            "target_sections": int(event.get("target_sections", target_sections)),
+                        }
+                    ) + "\n"
+                    continue
+                if event_type == "section":
+                    yield json.dumps(
+                        {
+                            "type": "section",
+                            "index": int(event.get("index", 0)),
+                            "total_sections": int(event.get("total_sections", target_sections)),
+                            "heading": str(event.get("heading", "")),
+                            "content": str(event.get("content", "")),
+                        }
+                    ) + "\n"
+                    continue
+                if event_type == "done":
+                    topic_payload = event.get("topic")
+                    if isinstance(topic_payload, TopicDetail):
+                        generated = topic_payload
+                    elif isinstance(topic_payload, dict):
+                        generated = TopicDetail(**topic_payload)
 
-            elapsed = 0
-            while not generation_task.done():
-                yield json.dumps(
-                    {
-                        "type": "progress",
-                        "stage": "analyzing",
-                        "message": "Generating language-specific problem solving roadmap...",
-                        "elapsed_seconds": elapsed,
-                    }
-                ) + "\n"
-                elapsed += 1
-                await asyncio.sleep(1)
+            if generated is None:
+                raise RuntimeError("problem_solving_stream_missing_done")
 
-            generated = await generation_task
             await store.run_async(
                 store.upsert_dynamic_topic_curriculum,
                 user_id=user["user"],
@@ -632,19 +651,6 @@ async def generate_topic_content_stream(
                 target_sections=target_sections,
                 source="llm",
             )
-
-            for idx, sec in enumerate(generated.sections, start=1):
-                yield json.dumps(
-                    {
-                        "type": "section",
-                        "index": idx,
-                        "total_sections": len(generated.sections),
-                        "heading": sec.get("heading", ""),
-                        "content": sec.get("content", ""),
-                    }
-                ) + "\n"
-                if idx % 8 == 0:
-                    await asyncio.sleep(0)
 
             detail = await store.run_async(
                 store.resolve_problem_solving_topic_detail,
@@ -745,29 +751,49 @@ async def create_custom_topic_stream(
         ) + "\n"
 
         try:
-            generation_task = asyncio.create_task(
-                generator.generate_topic(
-                    topic=topic_name,
-                    target_sections=target,
-                    llm_config=body.llm_config,
-                    user_identity=user,
-                )
-            )
+            generated: TopicDetail | None = None
+            async for event in generator.generate_topic_stream(
+                topic=topic_name,
+                target_sections=target,
+                llm_config=body.llm_config,
+                user_identity=user,
+            ):
+                event_type = str(event.get("type", ""))
+                if event_type == "progress":
+                    yield json.dumps(
+                        {
+                            "type": "progress",
+                            "stage": "batching",
+                            "message": event.get("message")
+                            or "Analyzing custom topic and building roadmap...",
+                            "batch_index": int(event.get("batch_index", 0)),
+                            "batch_count": int(event.get("batch_count", 0)),
+                            "generated_sections": int(event.get("generated_sections", 0)),
+                            "target_sections": int(event.get("target_sections", target or 0)),
+                        }
+                    ) + "\n"
+                    continue
+                if event_type == "section":
+                    yield json.dumps(
+                        {
+                            "type": "section",
+                            "index": int(event.get("index", 0)),
+                            "total_sections": int(event.get("total_sections", target or 0)),
+                            "heading": str(event.get("heading", "")),
+                            "content": str(event.get("content", "")),
+                        }
+                    ) + "\n"
+                    continue
+                if event_type == "done":
+                    topic_payload = event.get("topic")
+                    if isinstance(topic_payload, TopicDetail):
+                        generated = topic_payload
+                    elif isinstance(topic_payload, dict):
+                        generated = TopicDetail(**topic_payload)
 
-            elapsed = 0
-            while not generation_task.done():
-                yield json.dumps(
-                    {
-                        "type": "progress",
-                        "stage": "analyzing",
-                        "message": "Analyzing custom topic and building roadmap...",
-                        "elapsed_seconds": elapsed,
-                    }
-                ) + "\n"
-                elapsed += 1
-                await asyncio.sleep(1)
+            if generated is None:
+                raise RuntimeError("custom_topic_stream_missing_done")
 
-            generated = await generation_task
             await store.run_async(
                 store.upsert_custom_topic,
                 user_id=user["user"],
@@ -780,20 +806,6 @@ async def create_custom_topic_stream(
                 sections=generated.sections,
                 raw_content=generated.raw_content,
             )
-
-            total = len(generated.sections)
-            for idx, sec in enumerate(generated.sections, start=1):
-                yield json.dumps(
-                    {
-                        "type": "section",
-                        "index": idx,
-                        "total_sections": total,
-                        "heading": sec.get("heading", ""),
-                        "content": sec.get("content", ""),
-                    }
-                ) + "\n"
-                if idx % 8 == 0:
-                    await asyncio.sleep(0)
 
             yield json.dumps(
                 {

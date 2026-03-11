@@ -28,6 +28,8 @@ import {
   fetchTopic,
   generateQuiz,
   generateQuizV2,
+  generateQuizV2Stream,
+  isQuizStreamError,
   recordLearningAttempt,
   fetchWeakAreas,
 } from "@/services/api";
@@ -76,6 +78,8 @@ export default function QuizMode() {
   const [difficulty, setDifficulty] = useState("");
   const [level, setLevel] = useState<InterviewLevel>("mid");
   const [generating, setGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState("");
+  const [generatedPreviewCount, setGeneratedPreviewCount] = useState(0);
   const [loadingTopics, setLoadingTopics] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -195,6 +199,9 @@ export default function QuizMode() {
     if (selectedTopics.size === 0) return;
     setGenerating(true);
     setErrorMsg("");
+    setGenerationProgress("Preparing quiz generation...");
+    setGeneratedPreviewCount(0);
+    setQuestions([]);
     try {
       const selectedTopicIds = Array.from(selectedTopics);
       const topicDetails = await Promise.all(
@@ -215,6 +222,40 @@ export default function QuizMode() {
           requiresProgramming: boolean;
         }
       > = {};
+      const mergeUniqueQuestions = (
+        currentList: QuizQuestionV2[],
+        incoming: QuizQuestionV2[],
+      ): QuizQuestionV2[] => {
+        const seenIds = new Set<string>();
+        const seenText = new Set<string>();
+        const merged: QuizQuestionV2[] = [];
+        for (const item of [...currentList, ...incoming]) {
+          const id = (item.question_id || "").trim();
+          const key = (item.question || "").trim().toLowerCase();
+          if (id && seenIds.has(id)) continue;
+          if (!id && key && seenText.has(key)) continue;
+          if (id) seenIds.add(id);
+          if (key) seenText.add(key);
+          merged.push(item);
+        }
+        return merged;
+      };
+      const mapLegacyQuestions = (
+        list: Awaited<ReturnType<typeof generateQuiz>>["questions"],
+        startAt: number,
+      ): QuizQuestionV2[] =>
+        list.map((q, idx) => ({
+          question_id: `quiz-legacy-${startAt + idx}`,
+          question: q.question,
+          type: q.type,
+          choices: q.choices,
+          correct_answer: q.correct_answer,
+          explanation: q.explanation,
+          difficulty: q.difficulty,
+          topic_id: q.topic_id || selectedTopicIds[0] || "",
+          source_quote: "Legacy mode did not return source quote.",
+          reasoning_summary: "Review the explanation to reinforce reasoning.",
+        }));
       for (const entry of topicDetails) {
         if (!entry) continue;
         const [id, detail] = entry;
@@ -247,46 +288,100 @@ export default function QuizMode() {
         },
       };
 
-      try {
-        const res = await generateQuizV2(req);
-        if (res.questions.length === 0) {
-          setErrorMsg("No valid quiz questions generated. Try again.");
-          return;
+      let latestProviderInfo = {
+        provider: "",
+        model: "",
+        retries: 0,
+        malformed: 0,
+      };
+      const topUpMissingQuestions = async (
+        seed: QuizQuestionV2[],
+      ): Promise<QuizQuestionV2[]> => {
+        let merged = mergeUniqueQuestions([], seed).slice(0, questionCount);
+        if (merged.length >= questionCount) return merged;
+
+        try {
+          const v2 = await generateQuizV2({
+            ...req,
+            count: questionCount - merged.length,
+          });
+          merged = mergeUniqueQuestions(merged, v2.questions).slice(0, questionCount);
+          latestProviderInfo = {
+            provider: v2.provider_used,
+            model: v2.model_used,
+            retries: v2.retries_used,
+            malformed: v2.malformed_items_dropped,
+          };
+        } catch {
+          // Continue with legacy fallback.
         }
-        setQuestions(res.questions);
-        setProviderInfo({
-          provider: res.provider_used,
-          model: res.model_used,
-          retries: res.retries_used,
-          malformed: res.malformed_items_dropped,
+        if (merged.length >= questionCount) return merged;
+
+        const legacy = await generateQuiz({
+          ...req,
+          count: questionCount - merged.length,
         });
-      } catch {
-        const legacy = await generateQuiz(req);
-        const upgraded: QuizQuestionV2[] = legacy.questions.map((q, idx) => ({
-          question_id: `quiz-legacy-${idx}`,
-          question: q.question,
-          type: q.type,
-          choices: q.choices,
-          correct_answer: q.correct_answer,
-          explanation: q.explanation,
-          difficulty: q.difficulty,
-          topic_id: q.topic_id || req.topic_ids[0] || "",
-          source_quote: "Legacy mode did not return source quote.",
-          reasoning_summary: "Review the explanation to reinforce reasoning.",
-        }));
-        if (upgraded.length === 0) {
-          setErrorMsg("No quiz questions generated. Try again.");
-          return;
-        }
-        setQuestions(upgraded);
-        setProviderInfo({
+        merged = mergeUniqueQuestions(
+          merged,
+          mapLegacyQuestions(legacy.questions, merged.length),
+        ).slice(0, questionCount);
+        latestProviderInfo = {
           provider: legacy.provider_used,
           model: legacy.model_used,
           retries: 0,
           malformed: 0,
+        };
+        return merged;
+      };
+
+      const streamedQuestions: QuizQuestionV2[] = [];
+      try {
+        await generateQuizV2Stream(req, {
+          onStart: (event) => {
+            setGenerationProgress(
+              `Starting quiz generation (${event.target_count} questions).`,
+            );
+          },
+          onProgress: (event) => {
+            setGenerationProgress(event.message || "Generating quiz questions...");
+          },
+          onQuestion: (event) => {
+            const merged = mergeUniqueQuestions(streamedQuestions, [event.question]);
+            streamedQuestions.splice(0, streamedQuestions.length, ...merged);
+            setQuestions([...streamedQuestions]);
+            setGeneratedPreviewCount(streamedQuestions.length);
+          },
+          onDone: (event) => {
+            latestProviderInfo = {
+              provider: event.provider_used,
+              model: event.model_used,
+              retries: event.retries_used,
+              malformed: event.malformed_items_dropped,
+            };
+            setProviderInfo(latestProviderInfo);
+            setGenerationProgress("Quiz generation completed.");
+          },
+          onError: (event) => {
+            setGenerationProgress(event.message || "Quiz generation failed.");
+          },
         });
+      } catch (streamErr) {
+        if (!(isQuizStreamError(streamErr) && streamErr.fallbackEligible)) {
+          throw streamErr;
+        }
+        setGenerationProgress("Streaming unavailable, retrying with compatibility mode...");
       }
 
+      let finalQuestions = [...streamedQuestions];
+      if (finalQuestions.length < questionCount) {
+        finalQuestions = await topUpMissingQuestions(finalQuestions);
+      }
+      if (finalQuestions.length === 0) {
+        setErrorMsg("No quiz questions generated. Try again.");
+        return;
+      }
+      setQuestions(finalQuestions);
+      setProviderInfo(latestProviderInfo);
       setCurrentIdx(0);
       setAnswers({});
       setSelectedAnswer(null);
@@ -298,6 +393,8 @@ export default function QuizMode() {
       console.error(err);
       setErrorMsg("Quiz generation failed. Check settings and retry.");
     } finally {
+      setGenerationProgress("");
+      setGeneratedPreviewCount(0);
       setGenerating(false);
     }
   }, [selectedTopics, questionCount, questionTypes, difficulty, level, settings]);
@@ -367,6 +464,8 @@ export default function QuizMode() {
     setExpandedReview(null);
     setWeakAreas([]);
     setErrorMsg("");
+    setGenerationProgress("");
+    setGeneratedPreviewCount(0);
   };
 
   const percentage = total > 0 ? Math.round((correctCount / total) * 100) : 0;
@@ -558,6 +657,14 @@ export default function QuizMode() {
                       ? "Generating Quiz..."
                       : `Start Quiz (${selectedTopics.size} topic${selectedTopics.size !== 1 ? "s" : ""})`}
                   </button>
+                  {generating && (
+                    <p className="mt-2 text-xs text-udemy-text-muted">
+                      {generationProgress || "Generating quiz questions..."}{" "}
+                      {generatedPreviewCount > 0
+                        ? `(${generatedPreviewCount}/${questionCount})`
+                        : ""}
+                    </p>
+                  )}
 
                   <p className="text-xs text-center text-udemy-text-muted">
                     Powered by {providerInfo.provider || settings.provider}

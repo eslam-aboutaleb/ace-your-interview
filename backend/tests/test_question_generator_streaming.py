@@ -2,7 +2,10 @@ import asyncio
 import json
 import unittest
 
-from app.services.question_generator import QuestionGenerator
+from app.services.question_generator import (
+    QuestionGenerator,
+    _problem_solving_pattern_signature,
+)
 
 
 def _question_payload(question: str) -> dict:
@@ -20,6 +23,54 @@ def _question_payload(question: str) -> dict:
         "reasoning_summary": "Start from requirements, then evaluate tradeoffs.",
         "target_level": "mid",
     }
+
+
+def _problem_solving_payload(question: str, code: str) -> dict:
+    return {
+        "question": question,
+        "answer": (
+            "### Problem\n"
+            "Clarify inputs, outputs, and constraints.\n\n"
+            "### Solution Walkthrough\n"
+            "Explain the core invariant and why each step maintains it.\n\n"
+            "### Complexity\n"
+            "Time complexity is derived from the primary loop/operations, and space reflects aux structures.\n\n"
+            f"### Code\n```python\n{code}\n```"
+        ),
+        "difficulty": "medium",
+        "learning_objective": "Practice interview-grade problem decomposition and implementation.",
+        "source_section": "Problem Solving",
+        "source_quote": "Use constraints and invariants to choose an efficient strategy.",
+        "misconception_trap": "Jumping to code before validating constraints and edge cases.",
+        "reasoning_summary": "State invariant first, then map it to efficient data structures.",
+        "target_level": "mid",
+    }
+
+
+_TWO_SUM_CODE = """def two_sum(nums, target):
+    # Store seen values to check complements in O(1).
+    seen = {}
+    # Scan once and return as soon as a valid pair is found.
+    for index, value in enumerate(nums):
+        complement = target - value
+        if complement in seen:
+            return [seen[complement], index]
+        seen[value] = index
+    return []
+"""
+
+_MERGE_INTERVALS_CODE = """def merge_intervals(intervals):
+    # Sort by start so potential overlaps are adjacent.
+    intervals.sort(key=lambda pair: pair[0])
+    merged = []
+    # Extend the latest merged interval when overlap exists.
+    for start, end in intervals:
+        if not merged or start > merged[-1][1]:
+            merged.append([start, end])
+            continue
+        merged[-1][1] = max(merged[-1][1], end)
+    return merged
+"""
 
 
 class FakeLLM:
@@ -143,6 +194,154 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
         self.assertEqual(done_event["type"], "done")
         self.assertEqual(done_event["generated_count"], 3)
         self.assertEqual(len(question_events), 3)
+
+    def test_problem_solving_fallback_question_is_natural(self):
+        llm = FakeLLM(["unstructured output that is not json"])
+        generator = QuestionGenerator(llm)
+
+        events = asyncio.run(
+            _collect_events(
+                generator.generate_v2_stream(
+                    topic_id="00-problem-solving-and-algorithms",
+                    topic_title="Problem Solving and Algorithms (python)",
+                    doc_content="Two pointers, hash maps, and complexity analysis.",
+                    count=1,
+                    level="mid",
+                    preferred_language="python",
+                    requires_programming=True,
+                )
+            )
+        )
+
+        question_event = next(e for e in events if e.get("type") == "question")
+        question = str(question_event["question"]["question"]).lower()
+        self.assertNotIn("walk through how you would solve this using", question)
+        self.assertNotIn("reasoning under interview pressure", question)
+
+    def test_problem_solving_fallback_rotates_problem_patterns(self):
+        llm = FakeLLM(["unstructured output that is not json"])
+        generator = QuestionGenerator(llm)
+
+        result = asyncio.run(
+            generator.generate_v2(
+                topic_id="00-problem-solving-and-algorithms",
+                topic_title="Problem Solving and Algorithms (python)",
+                doc_content="Sliding windows, intervals, heaps, graphs, and binary search.",
+                count=5,
+                difficulty="medium",
+                level="mid",
+                preferred_language="python",
+                requires_programming=True,
+            )
+        )
+
+        questions = [q.question.lower() for q in result.questions]
+        unique_questions = set(questions)
+        self.assertGreaterEqual(len(unique_questions), 4)
+        self.assertTrue(any("substring" in q for q in questions))
+        self.assertTrue(any("interval" in q for q in questions))
+        self.assertTrue(any("rotated" in q or "island" in q or "frequent" in q for q in questions))
+
+    def test_problem_solving_stream_rejects_repeated_two_sum_pattern(self):
+        llm = FakeLLM(
+            [
+                json.dumps(
+                    [
+                        _problem_solving_payload(
+                            "Given nums and target, return indices for the pair that sums to target.",
+                            _TWO_SUM_CODE,
+                        )
+                    ]
+                ),
+                json.dumps(
+                    [
+                        _problem_solving_payload(
+                            "Find two indices whose values add to target using a complement hash map.",
+                            _TWO_SUM_CODE,
+                        )
+                    ]
+                ),
+                json.dumps(
+                    [
+                        _problem_solving_payload(
+                            "Given intervals [start, end], merge overlapping intervals and return the result.",
+                            _MERGE_INTERVALS_CODE,
+                        )
+                    ]
+                ),
+            ]
+        )
+        generator = QuestionGenerator(llm)
+
+        events = asyncio.run(
+            _collect_events(
+                generator.generate_v2_stream(
+                    topic_id="00-problem-solving-and-algorithms",
+                    topic_title="Problem Solving and Algorithms (python)",
+                    doc_content="Hash maps, sorting, and intervals.",
+                    count=2,
+                    level="mid",
+                    preferred_language="python",
+                    requires_programming=True,
+                )
+            )
+        )
+
+        question_events = [e for e in events if e.get("type") == "question"]
+        self.assertEqual(len(question_events), 2)
+        signatures = [
+            _problem_solving_pattern_signature(
+                str(event["question"]["question"]),
+                str(event["question"]["answer"]),
+            )
+            for event in question_events
+        ]
+        self.assertEqual(len(set(signatures)), 2)
+        self.assertEqual(events[-1]["type"], "done")
+        self.assertGreater(events[-1]["retries_used"], 0)
+
+    def test_problem_solving_generate_v2_filters_repeated_two_sum_pattern(self):
+        llm = FakeLLM(
+            [
+                json.dumps(
+                    [
+                        _problem_solving_payload(
+                            "Given nums and target, return indices for the pair that sums to target.",
+                            _TWO_SUM_CODE,
+                        ),
+                        _problem_solving_payload(
+                            "Find the two numbers that add to target and return their indices.",
+                            _TWO_SUM_CODE,
+                        ),
+                        _problem_solving_payload(
+                            "Return the index pair for nums that equals target using hash lookup.",
+                            _TWO_SUM_CODE,
+                        ),
+                    ]
+                )
+            ]
+        )
+        generator = QuestionGenerator(llm)
+
+        result = asyncio.run(
+            generator.generate_v2(
+                topic_id="00-problem-solving-and-algorithms",
+                topic_title="Problem Solving and Algorithms (python)",
+                doc_content="Hash maps, sliding windows, intervals, heaps, and graph traversal.",
+                count=3,
+                difficulty="medium",
+                level="mid",
+                preferred_language="python",
+                requires_programming=True,
+            )
+        )
+
+        signatures = [
+            _problem_solving_pattern_signature(question.question, question.answer)
+            for question in result.questions
+        ]
+        self.assertEqual(len(result.questions), 3)
+        self.assertEqual(len(set(signatures)), 3)
 
 
 if __name__ == "__main__":

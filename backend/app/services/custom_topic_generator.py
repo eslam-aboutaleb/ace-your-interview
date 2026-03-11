@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 from app.schemas.models import LLMConfigRequest, TopicDetail
 from app.services.llm_client import LLMClient
@@ -22,6 +23,7 @@ _MIN_SECTIONS = 50
 _MAX_SECTIONS = 300
 _DEFAULT_SECTIONS = 120
 _MAX_ATTEMPTS = 4
+_MAX_STREAM_HEADINGS_CONTEXT = 200
 _GENERIC_HEADING_PATTERNS = [
     re.compile(r"^(module|part|chapter|section|topic)\s*[\w\-\.]*$", re.IGNORECASE),
     re.compile(r"^(introduction|overview|basics?|advanced|intermediate|conclusion)$", re.IGNORECASE),
@@ -702,6 +704,149 @@ Create a deep learning roadmap for the custom topic: "{topic}".
 """
 
 
+def _stream_batch_size(target_sections: int) -> int:
+    return min(20, max(8, int(math.ceil(max(1, target_sections) / 10))))
+
+
+def _build_stream_batch_prompt(
+    *,
+    topic: str,
+    target_sections: int,
+    start_index: int,
+    batch_size: int,
+    existing_headings: list[str],
+    mcp_context: str = "",
+) -> str:
+    start_no = start_index + 1
+    end_no = min(target_sections, start_index + batch_size)
+    level_start = _level_for_position(start_index, target_sections)
+    level_end = _level_for_position(max(start_index, end_no - 1), target_sections)
+    existing_blob = "\n".join([f"- {h}" for h in existing_headings[-_MAX_STREAM_HEADINGS_CONTEXT:]])
+    existing_block = existing_blob if existing_blob else "- (none yet)"
+    mcp_block = optional_context_block(
+        "External context (optional, use only if relevant and factual)",
+        mcp_context,
+        2500,
+    )
+    contract = render_contract(
+        schema_label="Return ONLY valid JSON object with this exact schema",
+        schema_block="""{
+  "title": "string",
+  "description": "string",
+  "track": "backend|frontend|system_design|ai_stack",
+  "levels": ["junior", "mid", "senior"],
+  "sections": [
+    {
+      "heading": "specific subtopic title",
+      "content": "2-4 concise sentences with practical learning notes",
+      "level": "junior|mid|senior"
+    }
+  ]
+}""",
+        rules=[
+            f"sections length must be exactly {batch_size}.",
+            f"These sections correspond to positions {start_no}..{end_no} of {target_sections}.",
+            f"Expected level progression in this batch: {level_start} -> {level_end}.",
+            f'All headings must be concrete and specific to "{topic}".',
+            "Do not use generic placeholders for headings.",
+            "Do not repeat or paraphrase these existing headings:",
+            existing_block,
+            "Output JSON only with escaped newlines/quotes/backslashes.",
+        ],
+    )
+    return f"""You are an expert curriculum architect and technical interview coach.
+Generate the next batch of roadmap sections for "{topic}".
+
+{contract}{mcp_block}
+"""
+
+
+def _normalise_stream_batch_sections(
+    *,
+    sections: Any,
+    topic: str,
+    target_sections: int,
+    start_index: int,
+    batch_size: int,
+    seen_headings: set[str],
+) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    if not isinstance(sections, list):
+        return out
+
+    for item in sections:
+        if len(out) >= batch_size:
+            break
+        if not isinstance(item, dict):
+            continue
+        global_index = start_index + len(out)
+        level_raw = str(item.get("level", "")).strip().lower()
+        level = level_raw if level_raw in _VALID_LEVELS else _level_for_position(global_index, target_sections)
+        heading = _format_heading(level, str(item.get("heading", "")).strip())
+        content = str(item.get("content", "")).strip()
+        if not heading or len(content) < 10:
+            continue
+        if _heading_is_generic(heading):
+            continue
+        key = heading.lower()
+        if key in seen_headings:
+            continue
+        seen_headings.add(key)
+        out.append({"heading": heading, "content": content[:1800]})
+
+    return out
+
+
+def _fallback_stream_batch_sections(
+    *,
+    topic: str,
+    target_sections: int,
+    start_index: int,
+    batch_size: int,
+    seen_headings: set[str],
+) -> list[dict[str, str]]:
+    fallback_pool = _normalise_sections([], topic, target_sections)
+    out: list[dict[str, str]] = []
+    while len(out) < batch_size:
+        global_index = start_index + len(out)
+        base = fallback_pool[global_index % len(fallback_pool)]
+        level = _level_for_position(global_index, target_sections)
+        base_heading = re.sub(
+            r"^\s*(junior|mid|senior):\s*",
+            "",
+            str(base.get("heading", "")).strip(),
+            flags=re.IGNORECASE,
+        )
+        heading = _format_heading(level, f"{base_heading} #{global_index + 1}")
+        suffix = 2
+        while heading.lower() in seen_headings:
+            heading = _format_heading(level, f"{base_heading} #{global_index + 1}.{suffix}")
+            suffix += 1
+        seen_headings.add(heading.lower())
+        out.append({"heading": heading, "content": str(base.get("content", "")).strip()[:1800]})
+    return out
+
+
+def _build_topic_detail(
+    *,
+    topic_id: str,
+    title: str,
+    description: str,
+    track: str,
+    levels: list[str],
+    sections: list[dict[str, str]],
+) -> TopicDetail:
+    return TopicDetail(
+        id=topic_id,
+        title=title[:200],
+        description=description[:600],
+        track=track,
+        levels=levels,
+        sections=sections,
+        raw_content=_build_raw_content(title, description, sections),
+    )
+
+
 def _fallback_topic_detail(topic: str, topic_id: str, target_sections: int) -> TopicDetail:
     title = f"{topic.strip().title()} Interview Roadmap"
     description = (
@@ -739,15 +884,52 @@ class CustomTopicGenerator:
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
     ) -> TopicDetail:
+        final_topic: TopicDetail | None = None
+        async for event in self.generate_topic_stream(
+            topic=topic,
+            target_sections=target_sections,
+            llm_config=llm_config,
+            user_identity=user_identity,
+        ):
+            if event.get("type") != "done":
+                continue
+            maybe_topic = event.get("topic")
+            if isinstance(maybe_topic, TopicDetail):
+                final_topic = maybe_topic
+                break
+        if final_topic is not None:
+            return final_topic
+
         source_topic = (topic or "").strip()
         if not source_topic:
             source_topic = "Custom Topic"
-        # Use the complexity estimator when the caller does not specify a value.
         if target_sections is None:
             target = _estimate_target_sections(source_topic)
         else:
             target = _clamp_target_sections(target_sections)
         topic_id = f"custom-{_slugify_topic(source_topic)}"
+
+        logger.warning("custom_topic_generator_stream_missing_done topic=%s", source_topic)
+        return _fallback_topic_detail(source_topic, topic_id, target)
+
+    async def generate_topic_stream(
+        self,
+        *,
+        topic: str,
+        target_sections: Optional[int] = None,
+        llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        source_topic = (topic or "").strip()
+        if not source_topic:
+            source_topic = "Custom Topic"
+
+        if target_sections is None:
+            target = _estimate_target_sections(source_topic)
+        else:
+            target = _clamp_target_sections(target_sections)
+        topic_id = f"custom-{_slugify_topic(source_topic)}"
+
         mcp_context = ""
         if self.mcp:
             mcp_context = await self.mcp.gather_context(
@@ -756,42 +938,116 @@ class CustomTopicGenerator:
                 topic_id=topic_id,
                 topic_title=source_topic,
             )
-        prompt = _build_prompt(source_topic, target, mcp_context=mcp_context)
 
-        for _ in range(_MAX_ATTEMPTS):
-            result = await self.llm.completion(
-                prompt,
-                llm_config,
-                user_identity=user_identity,
+        title = f"{source_topic.title()} Interview Roadmap"
+        description = (
+            f"Comprehensive custom roadmap for {source_topic} with interview-focused "
+            "subtopics and practical depth."
+        )
+        track = _infer_track(source_topic)
+        levels = list(_DEFAULT_LEVELS)
+        sections: list[dict[str, str]] = []
+        seen_headings: set[str] = set()
+        batch_size = _stream_batch_size(target)
+        batch_count = max(1, int(math.ceil(target / batch_size)))
+
+        for batch_index in range(batch_count):
+            start_index = len(sections)
+            if start_index >= target:
+                break
+            remaining = target - start_index
+            current_batch = min(batch_size, remaining)
+            yield {
+                "type": "progress",
+                "batch_index": batch_index + 1,
+                "batch_count": batch_count,
+                "generated_sections": start_index,
+                "target_sections": target,
+                "message": (
+                    f"Generating sections {start_index + 1}-{start_index + current_batch} "
+                    f"of {target}."
+                ),
+            }
+
+            prompt = _build_stream_batch_prompt(
+                topic=source_topic,
+                target_sections=target,
+                start_index=start_index,
+                batch_size=current_batch,
+                existing_headings=[s["heading"] for s in sections],
+                mcp_context=mcp_context,
             )
-            raise_if_policy_blocked_result(result)
-            if not result.get("success"):
-                continue
-            payload = _parse_json_object(result.get("analysis", ""))
-            if not payload:
-                continue
-
-            title = str(payload.get("title", "")).strip() or f"{source_topic.title()} Interview Roadmap"
-            description = str(payload.get("description", "")).strip()
-            if not description:
-                description = (
-                    f"Comprehensive custom roadmap for {source_topic} with interview-focused "
-                    "subtopics and practical depth."
+            batch_sections: list[dict[str, str]] = []
+            for _ in range(_MAX_ATTEMPTS):
+                result = await self.llm.completion(
+                    prompt,
+                    llm_config,
+                    user_identity=user_identity,
                 )
-            track = _normalise_track(str(payload.get("track", ""))) or _infer_track(source_topic)
-            levels = _normalise_levels(payload.get("levels"))
-            sections = _normalise_sections(payload.get("sections"), source_topic, target)
-            if len(sections) < _MIN_SECTIONS:
-                continue
-            return TopicDetail(
-                id=topic_id,
-                title=title[:200],
-                description=description[:600],
-                track=track,
-                levels=levels,
-                sections=sections,
-                raw_content=_build_raw_content(title, description, sections),
-            )
+                raise_if_policy_blocked_result(result)
+                if not result.get("success"):
+                    continue
+                payload = _parse_json_object(result.get("analysis", ""))
+                if not payload:
+                    continue
+                title = str(payload.get("title", "")).strip() or title
+                parsed_description = str(payload.get("description", "")).strip()
+                if parsed_description:
+                    description = parsed_description
+                track = _normalise_track(str(payload.get("track", ""))) or track
+                levels = _normalise_levels(payload.get("levels")) or levels
+                batch_sections = _normalise_stream_batch_sections(
+                    sections=payload.get("sections"),
+                    topic=source_topic,
+                    target_sections=target,
+                    start_index=start_index,
+                    batch_size=current_batch,
+                    seen_headings=seen_headings,
+                )
+                if len(batch_sections) >= current_batch:
+                    break
 
-        logger.warning("Falling back to synthetic custom roadmap for topic=%s", source_topic)
-        return _fallback_topic_detail(source_topic, topic_id, target)
+            if len(batch_sections) < current_batch:
+                logger.warning(
+                    "custom_topic_generator_batch_fallback topic=%s batch=%s size=%s got=%s",
+                    source_topic,
+                    batch_index + 1,
+                    current_batch,
+                    len(batch_sections),
+                )
+                batch_sections.extend(
+                    _fallback_stream_batch_sections(
+                        topic=source_topic,
+                        target_sections=target,
+                        start_index=start_index + len(batch_sections),
+                        batch_size=current_batch - len(batch_sections),
+                        seen_headings=seen_headings,
+                    )
+                )
+
+            for section in batch_sections[:current_batch]:
+                sections.append(section)
+                yield {
+                    "type": "section",
+                    "index": len(sections),
+                    "total_sections": target,
+                    "heading": section["heading"],
+                    "content": section["content"],
+                }
+
+        sections = _normalise_sections(sections, source_topic, target)
+        if len(sections) < _MIN_SECTIONS:
+            logger.warning("Falling back to synthetic custom roadmap for topic=%s", source_topic)
+            topic_detail = _fallback_topic_detail(source_topic, topic_id, target)
+            yield {"type": "done", "topic": topic_detail}
+            return
+
+        topic_detail = _build_topic_detail(
+            topic_id=topic_id,
+            title=title,
+            description=description,
+            track=track,
+            levels=levels,
+            sections=sections,
+        )
+        yield {"type": "done", "topic": topic_detail}

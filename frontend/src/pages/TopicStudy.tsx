@@ -522,6 +522,22 @@ export default function TopicStudy() {
                 ...prev,
                 { index: event.index, heading: event.heading },
               ]);
+              setTopic((prev) => {
+                if (!prev) return prev;
+                const sectionIndex = Math.max(0, event.index - 1);
+                const nextSections = [...(prev.sections || [])];
+                while (nextSections.length <= sectionIndex) {
+                  nextSections.push({ heading: "", content: "" });
+                }
+                nextSections[sectionIndex] = {
+                  heading: event.heading,
+                  content: event.content,
+                };
+                return {
+                  ...prev,
+                  sections: nextSections,
+                };
+              });
             },
             onDone: (event) => {
               setCurriculumProgress("Roadmap generated.");

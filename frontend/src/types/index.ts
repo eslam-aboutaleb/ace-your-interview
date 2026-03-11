@@ -115,9 +115,13 @@ export interface CustomTopicStreamStartEvent {
 
 export interface CustomTopicStreamProgressEvent {
   type: "progress";
-  stage: "analyzing";
+  stage: "analyzing" | "batching" | "ready";
   message: string;
-  elapsed_seconds: number;
+  elapsed_seconds?: number;
+  batch_index?: number;
+  batch_count?: number;
+  generated_sections?: number;
+  target_sections?: number;
 }
 
 export interface CustomTopicStreamSectionEvent {
@@ -174,9 +178,13 @@ export interface TopicContentStreamStartEvent {
 
 export interface TopicContentStreamProgressEvent {
   type: "progress";
-  stage: "analyzing" | "ready";
+  stage: "analyzing" | "batching" | "ready";
   message: string;
   elapsed_seconds?: number;
+  batch_index?: number;
+  batch_count?: number;
+  generated_sections?: number;
+  target_sections?: number;
 }
 
 export interface TopicContentStreamSectionEvent {
@@ -319,6 +327,62 @@ export interface GenerateQuestionsStreamHandlers {
   onQuestion?: (event: GenerateQuestionsStreamQuestionEvent) => void;
   onDone?: (event: GenerateQuestionsStreamDoneEvent) => void;
   onError?: (event: GenerateQuestionsStreamErrorEvent) => void;
+}
+
+export interface GenerateQuizStreamStartEvent {
+  type: "start";
+  target_count: number;
+  topics_used: string[];
+  question_types: QuizQuestionType[];
+}
+
+export interface GenerateQuizStreamProgressEvent {
+  type: "progress";
+  stage: "generating" | "recovering";
+  message: string;
+  generated_count: number;
+  target_count: number;
+}
+
+export interface GenerateQuizStreamQuestionEvent {
+  type: "question";
+  question: QuizQuestionV2;
+}
+
+export interface GenerateQuizStreamDoneEvent {
+  type: "done";
+  generated_count: number;
+  target_count: number;
+  topics_used: string[];
+  provider_used: string;
+  model_used: string;
+  retries_used: number;
+  malformed_items_dropped: number;
+}
+
+export interface GenerateQuizStreamErrorEvent {
+  type: "error";
+  code:
+    | "llm_service_approval_required"
+    | "study_app_llm_not_assigned"
+    | "personal_credential_required"
+    | "generation_failed";
+  message: string;
+}
+
+export type GenerateQuizStreamEvent =
+  | GenerateQuizStreamStartEvent
+  | GenerateQuizStreamProgressEvent
+  | GenerateQuizStreamQuestionEvent
+  | GenerateQuizStreamDoneEvent
+  | GenerateQuizStreamErrorEvent;
+
+export interface GenerateQuizStreamHandlers {
+  onStart?: (event: GenerateQuizStreamStartEvent) => void;
+  onProgress?: (event: GenerateQuizStreamProgressEvent) => void;
+  onQuestion?: (event: GenerateQuizStreamQuestionEvent) => void;
+  onDone?: (event: GenerateQuizStreamDoneEvent) => void;
+  onError?: (event: GenerateQuizStreamErrorEvent) => void;
 }
 
 export interface ProviderStatus {
@@ -734,6 +798,84 @@ export interface InterviewTrendsSummary {
 export interface InterviewTrendsResponse {
   points: InterviewTrendPoint[];
   summary: InterviewTrendsSummary;
+}
+
+export interface InterviewStreamStartEvent {
+  type: "start";
+  stage: string;
+  message: string;
+  session_id?: string;
+}
+
+export interface InterviewStreamProgressEvent {
+  type: "progress";
+  stage: string;
+  message: string;
+  elapsed_seconds: number;
+  session_id?: string;
+}
+
+export interface InterviewStreamErrorEvent {
+  type: "error";
+  code:
+    | "llm_service_approval_required"
+    | "study_app_llm_not_assigned"
+    | "personal_credential_required"
+    | "generation_failed";
+  message: string;
+}
+
+export interface InterviewSessionStreamDoneEvent
+  extends InterviewSessionResponse {
+  type: "done";
+}
+
+export interface InterviewQuestionStreamDoneEvent
+  extends InterviewQuestionResponse {
+  type: "done";
+}
+
+export interface InterviewTurnStreamDoneEvent extends InterviewTurnResponse {
+  type: "done";
+}
+
+export type InterviewSessionStreamEvent =
+  | InterviewStreamStartEvent
+  | InterviewStreamProgressEvent
+  | InterviewSessionStreamDoneEvent
+  | InterviewStreamErrorEvent;
+
+export type InterviewQuestionStreamEvent =
+  | InterviewStreamStartEvent
+  | InterviewStreamProgressEvent
+  | InterviewQuestionStreamDoneEvent
+  | InterviewStreamErrorEvent;
+
+export type InterviewTurnStreamEvent =
+  | InterviewStreamStartEvent
+  | InterviewStreamProgressEvent
+  | InterviewTurnStreamDoneEvent
+  | InterviewStreamErrorEvent;
+
+export interface InterviewSessionStreamHandlers {
+  onStart?: (event: InterviewStreamStartEvent) => void;
+  onProgress?: (event: InterviewStreamProgressEvent) => void;
+  onDone?: (event: InterviewSessionStreamDoneEvent) => void;
+  onError?: (event: InterviewStreamErrorEvent) => void;
+}
+
+export interface InterviewQuestionStreamHandlers {
+  onStart?: (event: InterviewStreamStartEvent) => void;
+  onProgress?: (event: InterviewStreamProgressEvent) => void;
+  onDone?: (event: InterviewQuestionStreamDoneEvent) => void;
+  onError?: (event: InterviewStreamErrorEvent) => void;
+}
+
+export interface InterviewTurnStreamHandlers {
+  onStart?: (event: InterviewStreamStartEvent) => void;
+  onProgress?: (event: InterviewStreamProgressEvent) => void;
+  onDone?: (event: InterviewTurnStreamDoneEvent) => void;
+  onError?: (event: InterviewStreamErrorEvent) => void;
 }
 
 /* ── Ollama Types ────────────────────────────────────────── */
