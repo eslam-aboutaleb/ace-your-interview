@@ -155,7 +155,7 @@ export default function TopicStudy() {
   );
   const [errorMsg, setErrorMsg] = useState("");
   const [responseDetail, setResponseDetail] =
-    useState<ResponseDetail>("concise");
+    useState<ResponseDetail>("very_detailed");
   const [requiresProgramming, setRequiresProgramming] = useState(false);
   const [languageOptions, setLanguageOptions] = useState<string[]>([]);
   const [preferredLanguage, setPreferredLanguage] = useState("");
@@ -332,7 +332,7 @@ export default function TopicStudy() {
     fetchTopic(topicId)
       .then((loaded) => {
         setTopic(loaded);
-        setResponseDetail(loaded.response_detail || "concise");
+        setResponseDetail(loaded.response_detail || "very_detailed");
         setRequiresProgramming(!!loaded.requires_programming);
         setLanguageOptions(loaded.language_options || []);
         setPreferredLanguage(loaded.selected_language || "");
@@ -452,7 +452,7 @@ export default function TopicStudy() {
         if (topic?.is_dynamic_topic && next.preferred_language !== undefined) {
           const refreshed = await fetchTopic(topicId);
           setTopic(refreshed);
-          setResponseDetail(refreshed.response_detail || "concise");
+          setResponseDetail(refreshed.response_detail || "very_detailed");
           setRequiresProgramming(!!refreshed.requires_programming);
           setLanguageOptions(refreshed.language_options || []);
           setPreferredLanguage(refreshed.selected_language || "");
@@ -542,7 +542,7 @@ export default function TopicStudy() {
             onDone: (event) => {
               setCurriculumProgress("Roadmap generated.");
               setTopic(event.topic);
-              setResponseDetail(event.topic.response_detail || "concise");
+              setResponseDetail(event.topic.response_detail || "very_detailed");
               setRequiresProgramming(!!event.topic.requires_programming);
               setLanguageOptions(event.topic.language_options || []);
               setPreferredLanguage(event.topic.selected_language || selected);
@@ -1426,8 +1426,8 @@ export default function TopicStudy() {
                     className="border border-udemy-border rounded px-3 py-2 text-sm"
                     disabled={savingTopicPrefs}
                   >
-                    <option value="concise">Concise</option>
-                    <option value="very_detailed">Very Detailed</option>
+                    <option value="very_detailed">Interview Pass</option>
+                    <option value="concise">Focused Review</option>
                   </select>
                 </div>
 
