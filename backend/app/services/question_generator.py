@@ -199,13 +199,13 @@ def _study_code_language(
 
 _CONCEPTUAL_COACH_LABELS = (
     "**Answer:**",
-    "**Why it's right:**",
+    "**Detailed explanation:**",
     "**Common mistake:**",
 )
 _PROBLEM_SOLVING_WALKTHROUGH_LABELS = (
-    "**Short answer:**",
-    "**How to think about it:**",
-    "**Why it works:**",
+    "**Direct answer:**",
+    "**Detailed explanation:**",
+    "**Why this works:**",
     "**Common mistake:**",
 )
 
@@ -214,26 +214,29 @@ def _question_tutoring_arc_rules(problem_solving_mode: bool, language: str = "")
     if problem_solving_mode:
         walkthrough_labels = ", ".join([f"`{label}`" for label in _PROBLEM_SOLVING_WALKTHROUGH_LABELS])
         return [
-            "Write each answer as coach-style study help for the learner, not as internal answer-writing guidance.",
+            "Write each answer as a direct, detailed study answer for the learner.",
             *_problem_solving_required_markdown(language),
-            "In `### Problem`, begin with `**What the interviewer is really testing:**`.",
+            "Answer the actual question in full; do not turn the response into generic coaching about how to solve problems.",
+            "In `### Problem`, begin with `**What the problem is asking:**`.",
             f"In `### Solution Walkthrough`, include these bold labels in this order: {walkthrough_labels}.",
             (
                 "In `### Complexity`, include `**Time and space:**` followed by "
                 "`**Tradeoff / scaling caveat:**`."
             ),
+            "Under `### Solution Walkthrough`, make the first sentence under `**Direct answer:**` name the final algorithm or solution directly.",
+            "Use `**Detailed explanation:**` to walk through the actual solution logic, not generic interview advice.",
             "Keep the answer generic and topic-grounded; do not inject named canned techniques unless the course content naturally justifies them.",
         ]
 
     coach_labels = ", ".join([f"`{label}`" for label in _CONCEPTUAL_COACH_LABELS])
     return [
-        "Write each answer as coach-style study help for the learner, not as internal answer-writing guidance.",
+        "Write each answer as a direct, detailed study answer for the learner.",
         f"For non-problem-solving answers, use these bold lead-ins in this exact order: {coach_labels}.",
         "Do not add `###` headings to non-problem-solving answers.",
         "The first sentence after `**Answer:**` must directly answer the question.",
-        "Speak to the learner, not to the model.",
+        "Answer the actual question itself, not how a learner should approach answering it.",
         "Do not use meta-guideline phrasing such as `the candidate should`, `you should answer by`, or `when discussing this in an interview` anywhere in the answer.",
-        "Keep all required coach segments regardless of depth setting; `response_detail` only changes how much detail lives inside them.",
+        "Keep all required answer segments regardless of depth setting; `response_detail` only changes how much detail lives inside them.",
     ]
 
 
@@ -254,11 +257,12 @@ def _question_retry_guidance(problem_solving_mode: bool) -> str:
     if problem_solving_mode:
         return "\n".join(
             [
-                "- Regenerate each item as a fresh interview-grade study answer for the learner.",
+                "- Regenerate each item as a fresh, detailed answer to the actual problem.",
                 "- Keep exactly these H3 headings in order: `### Problem`, `### Solution Walkthrough`, `### Complexity`, `### Code`.",
-                "- In `### Problem`, start with `**What the interviewer is really testing:**`.",
-                "- In `### Solution Walkthrough`, put the short answer first, then explain the mental model or invariant before deeper detail.",
-                "- Use numbered lists for decision flow, and use a compact comparison table when showing why the chosen approach beats a weaker alternative.",
+                "- In `### Problem`, start with `**What the problem is asking:**` and summarize the inputs, outputs, and key constraint.",
+                "- In `### Solution Walkthrough`, use `**Direct answer:**`, `**Detailed explanation:**`, `**Why this works:**`, and `**Common mistake:**` in that order.",
+                "- Do not fill the answer with generic coaching phrases like `start by`, `first clarify`, or `the interviewer wants` unless they are directly tied to the actual solution.",
+                "- Use numbered lists only when they describe the actual algorithm or data flow, and use a compact comparison table when showing why the chosen approach beats a weaker alternative.",
                 "- In `### Complexity`, include `**Time and space:**` and `**Tradeoff / scaling caveat:**`.",
                 "- In `### Code`, include exactly one commented fenced code block in the selected language, then `**Invariant note:**`.",
                 "- Keep the answer specific enough that a learner could study from it without extra notes.",
@@ -266,11 +270,11 @@ def _question_retry_guidance(problem_solving_mode: bool) -> str:
         )
     return "\n".join(
         [
-            "- Regenerate each item as a fresh interview-grade study answer for the learner.",
-            "- Use only bold lead-ins in this exact order: `**Answer:**`, `**Why it's right:**`, `**Common mistake:**`.",
+            "- Regenerate each item as a fresh, detailed answer to the actual question.",
+            "- Use only bold lead-ins in this exact order: `**Answer:**`, `**Detailed explanation:**`, `**Common mistake:**`.",
             "- The first sentence after `**Answer:**` must directly answer the question.",
-            "- Speak to the learner, not to the model, and do not use meta-guideline phrasing anywhere in the answer.",
-            "- Use numbered lists for steps or decision flow, bullet lists for pros/cons or failure modes, and a compact table when the answer is mainly comparing alternatives.",
+            "- Do not spend the answer telling the learner how to answer. Explain the concept, mechanism, tradeoff, or failure mode directly.",
+            "- Use numbered lists for actual steps or flows, bullet lists for pros/cons or failure modes, and a compact table when the answer is mainly comparing alternatives.",
             "- Include the tradeoff, bottleneck, or failure mode that would matter in a real interview follow-up.",
         ]
     )
@@ -758,20 +762,13 @@ def _build_conceptual_fallback_answer(
     reasoning_summary = (
         f"Name the main constraint around {focus}, then justify the choice that best protects {angle}."
     )
-    interviewer_steps = "\n".join(
+    impact_table = "\n".join(
         [
-            f"1. Start with the concrete requirement or bottleneck around {focus}.",
-            f"2. Explain why the chosen approach protects {angle} better than the simplest default.",
-            "3. Close with the tradeoff, failure mode, or scaling limit that would change the decision.",
-        ]
-    )
-    comparison_table = "\n".join(
-        [
-            "| Lens | Weak answer | Strong interview answer |",
-            "| --- | --- | --- |",
-            f"| Requirement | Mentions {focus} in general terms | Ties {focus} to the real requirement inside {source_scope} |",
-            f"| Tradeoff | Says a pattern is 'best practice' | Explains how the choice protects {angle} and what gets worse |",
-            "| Follow-up risk | Ignores edge cases and bottlenecks | Names the failure mode, scaling pressure, or operational caveat |",
+            "| Concern | What matters for this topic |",
+            "| --- | --- |",
+            f"| Core role | {focus} should solve a concrete problem inside {source_scope}, not exist as an abstract pattern. |",
+            f"| Main tradeoff | The design choice should protect {angle} first, while making the downside explicit. |",
+            "| Failure risk | Edge cases, scaling pressure, and operational failure paths change whether the same choice still makes sense. |",
         ]
     )
     hard_follow_up = ""
@@ -784,25 +781,21 @@ def _build_conceptual_fallback_answer(
     if requires_programming and code_language:
         code_example = (
             f"\n\n```{code_language}\n"
-            "# Sketch the guardrail that protects the main requirement first.\n"
-            "def evaluate_decision(requirement, tradeoff):\n"
-            "    if not requirement:\n"
-            '        return "clarify constraints first"\n'
-            '    return f"protect {requirement} while accepting {tradeoff}"\n'
+            "# Example: keep the guardrail that protects the main requirement explicit.\n"
+            "def apply_constraint(state, limit):\n"
+            "    if state > limit:\n"
+            "        return limit\n"
+            "    return state\n"
             "```"
         )
     answer = "\n\n".join(
         [
             (
-                f"**Answer:** The right way to reason about {focus} in {source_scope} is to start from the "
-                f"requirements, choose the approach that best protects {angle}, and then verify the edge cases."
+                f"**Answer:** {focus} in {source_scope} matters because it controls whether the system stays correct, maintainable, and predictable under real constraints. A strong answer explains what problem it solves, why that solution is chosen, and what tradeoff or failure mode limits it."
             ),
             (
-                f"**Why it's right:** In plain language, {focus} matters because real systems need a choice that "
-                f"holds up under normal use, failure paths, and future growth. If you anchor the answer in the "
-                "requirements first, the tradeoffs become easier to explain.\n\n"
-                f"{interviewer_steps}\n\n"
-                f"{comparison_table}"
+                f"**Detailed explanation:** In practical terms, {focus} should be explained through the real engineering pressure around it: the requirement it satisfies, the tradeoff it introduces, and the failure path that would force a different design. That makes the answer useful for both study and interview follow-ups.\n\n"
+                f"{impact_table}"
                 f"{hard_follow_up}"
                 f"{code_example}"
             ),
@@ -965,14 +958,6 @@ def _build_problem_solving_fallback_answer(
     )
     short_answer, _remaining_walkthrough = _split_first_sentence(seed["walkthrough"])
     time_and_space, tradeoff = _split_last_sentence(seed["complexity"])
-    thinking_steps = "\n".join(
-        [
-            f"1. Clarify the input, output, and non-negotiable constraint for {focus}.",
-            "2. Ask what state the next step needs in order to stay correct.",
-            "3. Pick the structure that preserves that state without repeated work.",
-            "4. Walk one edge case before coding so the invariant is explicit.",
-        ]
-    )
     approach_table = "\n".join(
         [
             "| Approach | Why interviewers move past it | Why the chosen approach wins |",
@@ -985,19 +970,19 @@ def _build_problem_solving_fallback_answer(
         [
             "### Problem",
             (
-                f"**What the interviewer is really testing:** Can you translate {focus} into inputs, "
-                "constraints, and the invariant before you write code? "
-                f"{seed['problem']}"
+                f"**What the problem is asking:** {seed['problem']}"
             ),
             "### Solution Walkthrough",
-            f"**Short answer:** {short_answer}",
-            f"**How to think about it:**\n{thinking_steps}\n\n{seed['problem']}",
+            f"**Direct answer:** {short_answer}",
             (
-                f"**Why it works:** {seed['walkthrough']}\n"
+                f"**Detailed explanation:** {seed['walkthrough']}\n\n"
+                f"{approach_table}"
+            ),
+            (
+                f"**Why this works:** {seed['walkthrough']}\n"
                 "- The invariant tells you what must stay true after every update.\n"
                 "- The chosen structure stores exactly the information the next step needs.\n"
-                "- The update order prevents invalid reuse or stale state.\n\n"
-                f"{approach_table}"
+                "- The update order prevents invalid reuse or stale state."
             ),
             (
                 f"**Common mistake:** A weak answer for {focus} starts coding the brute-force idea before "
@@ -1207,7 +1192,7 @@ def _build_prompt(
     )
 
     role_clause = (
-        "You are an expert algorithm interview coach and problem-solving educator."
+        "You are an expert algorithm interviewer and problem-solving educator."
         if problem_solving_mode
         else "You are an expert technical interviewer and educator."
     )
@@ -1229,9 +1214,9 @@ def _build_prompt(
         ]
     )
     answer_shape = (
-        "Markdown with exactly ### Problem, ### Solution Walkthrough, ### Complexity, and ### Code; include the required bold coaching labels inside those sections and exactly one fenced code block"
+        "Markdown with exactly ### Problem, ### Solution Walkthrough, ### Complexity, and ### Code; include the required bold labels inside those sections and exactly one fenced code block"
         if problem_solving_mode
-        else "Markdown with bold sections **Answer:**, **Why it's right:**, and **Common mistake:**"
+        else "Markdown with bold sections **Answer:**, **Detailed explanation:**, and **Common mistake:**"
     )
     uniqueness_block = ""
     if existing_seed:
@@ -1261,6 +1246,7 @@ def _build_prompt(
             "Format answers as markdown, but keep structure adaptive.",
             "long answers must be split into short readable paragraphs with blank lines.",
             "Do not compress complex topics into a few generic sentences; explain the mechanism, tradeoffs, edge cases, and the follow-up points a real interviewer would probe.",
+            "Do not turn the answer into generic advice about how to answer. Give the actual explanation, decision, comparison, or solution directly.",
             *_study_markdown_rules(
                 code_language=study_code_language or PROBLEM_SOLVING_DEFAULT_LANGUAGE,
                 problem_solving_mode=problem_solving_mode,
@@ -1289,7 +1275,7 @@ def _build_prompt(
     )
     return f"""{role_clause}
 
-Given documentation about {scope}, generate exactly {count} interview-style questions with coach-style educational answers.{diff_clause}
+Given documentation about {scope}, generate exactly {count} interview-style questions with direct, detailed study answers.{diff_clause}
 Target candidate level: "{target_level}".
 User requested total questions for this checkpoint: {requested_total}.
 This call is generating {count} new questions to fill remaining slots.

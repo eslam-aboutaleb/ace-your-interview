@@ -12,8 +12,8 @@ def _question_payload(question: str) -> dict:
     return {
         "question": question,
         "answer": (
-            f"**Answer:** {question} should be answered by starting with the real constraint and the direct takeaway.\n\n"
-            "**Why it's right:** In plain language, the best answer connects the concept to the implementation detail that actually controls correctness or tradeoffs.\n\n"
+            f"**Answer:** {question} is best understood by tying it to the real constraint and the direct engineering tradeoff.\n\n"
+            "**Detailed explanation:** In plain language, the best answer connects the concept to the implementation detail that actually controls correctness or tradeoffs.\n\n"
             "**Common mistake:** A weak answer repeats definitions without showing why the constraint changes the decision."
         ),
         "difficulty": "medium",
@@ -31,11 +31,11 @@ def _problem_solving_payload(question: str, code: str) -> dict:
         "question": question,
         "answer": (
             "### Problem\n"
-            "**What the interviewer is really testing:** Can you identify the invariant before you write code and use it to justify the data structure?\n\n"
+            "**What the problem is asking:** Return the required result while preserving the key constraint that makes the efficient solution valid.\n\n"
             "### Solution Walkthrough\n"
-            "**Short answer:** Use the invariant to choose the data structure that removes repeated work.\n\n"
-            "**How to think about it:** Clarify inputs, outputs, and the state the next step needs.\n\n"
-            "**Why it works:** The chosen structure preserves the invariant after every update, so the scan never has to restart.\n\n"
+            "**Direct answer:** Use the invariant to choose the data structure that removes repeated work.\n\n"
+            "**Detailed explanation:** The solution keeps only the state needed for the next step, so each update builds on previous work instead of restarting the scan.\n\n"
+            "**Why this works:** The chosen structure preserves the invariant after every update, so the scan never has to restart.\n\n"
             "**Common mistake:** A weak answer starts coding before proving why the invariant supports the approach.\n\n"
             "### Complexity\n"
             "**Time and space:** Time complexity is derived from the primary loop or operations, and space reflects the supporting data structures.\n\n"
@@ -226,7 +226,7 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
         answer = str(question_event["question"]["answer"])
         self.assertNotIn("walk through how you would solve this using", question)
         self.assertNotIn("reasoning under interview pressure", question)
-        self.assertIn("**What the interviewer is really testing:**", answer)
+        self.assertIn("**What the problem is asking:**", answer)
         self.assertIn("**Invariant note:**", answer)
 
     def test_problem_solving_fallback_rotates_problem_patterns(self):
