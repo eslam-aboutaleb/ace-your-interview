@@ -1,0 +1,927 @@
+{
+  "topics": {
+    "01-backend-fundamentals-and-http": {
+      "title": "Backend Fundamentals and HTTP",
+      "sections_to_add": [
+        {
+          "section": "HTTP Semantics",
+          "content_needed": [
+            "GET method: Purpose, idempotency, cacheability, use cases",
+            "POST method: Purpose, when to use, creating resources",
+            "PUT method: Full resource replacement, idempotency",
+            "PATCH method: Partial updates, difference from PUT",
+            "DELETE method: Resource removal, idempotency",
+            "HTTP Status Codes: 2xx, 3xx, 4xx, 5xx meanings and use cases",
+            "HTTP Headers: Request headers, response headers, custom headers",
+            "Content negotiation and MIME types"
+          ]
+        },
+        {
+          "section": "Request Lifecycle",
+          "content_needed": [
+            "DNS resolution process and caching",
+            "TCP connection and three-way handshake",
+            "TLS/SSL handshake for HTTPS",
+            "HTTP request/response structure",
+            "Server-side request processing pipeline",
+            "Load balancing and routing",
+            "Connection pooling"
+          ]
+        },
+        {
+          "section": "Idempotency and Retries",
+          "content_needed": [
+            "What is idempotency and why it matters",
+            "Idempotent vs non-idempotent operations",
+            "Implementing idempotency keys",
+            "Retry strategies and exponential backoff",
+            "Circuit breakers pattern",
+            "Handling duplicate requests safely"
+          ]
+        },
+        {
+          "section": "Timeouts and Cancellation",
+          "content_needed": [
+            "Types of timeouts: connect, read, write, pool",
+            "Setting appropriate timeout values",
+            "Graceful cancellation patterns",
+            "Timeout vs circuit breaker",
+            "Handling timeout errors gracefully"
+          ]
+        },
+        {
+          "section": "Observability Basics",
+          "content_needed": [
+            "Three pillars: Logs, Metrics, Traces",
+            "Structured logging best practices",
+            "Metric types: counters, gauges, histograms",
+            "Distributed tracing with correlation IDs",
+            "Building dashboards and alerts"
+          ]
+        }
+      ]
+    },
+    "02-backend-api-design-and-contracts": {
+      "title": "Backend API Design and Contracts",
+      "sections_to_add": [
+        {
+          "section": "API Contract Design",
+          "content_needed": [
+            "RESTful API design principles",
+            "Resource naming conventions",
+            "URL structure and versioning",
+            "Request/response formats",
+            "API documentation standards"
+          ]
+        },
+        {
+          "section": "Versioning and Compatibility",
+          "content_needed": [
+            "URL path versioning",
+            "Header-based versioning",
+            "Query parameter versioning",
+            "Breaking vs non-breaking changes",
+            "Deprecation strategies"
+          ]
+        },
+        {
+          "section": "Error Taxonomy",
+          "content_needed": [
+            "Standard error response format",
+            "Error codes and messages",
+            "HTTP status codes for errors",
+            "Error handling best practices"
+          ]
+        },
+        {
+          "section": "Pagination and Filtering",
+          "content_needed": [
+            "Offset-based pagination",
+            "Cursor-based pagination",
+            "Query parameter filters",
+            "Sorting and field selection",
+            "Handling large datasets"
+          ]
+        },
+        {
+          "section": "Rate Limiting",
+          "content_needed": [
+            "Rate limiting algorithms: token bucket, leaky bucket, sliding window",
+            "Rate limit headers",
+            "Implementing rate limiters",
+            "Throttling strategies"
+          ]
+        }
+      ]
+    },
+    "03-backend-data-modeling-and-persistence": {
+      "title": "Backend Data Modeling and Persistence",
+      "sections_to_add": [
+        {
+          "section": "Database Types",
+          "content_needed": [
+            "Relational databases: use cases, strengths, limitations",
+            "Document databases: use cases, strengths, limitations",
+            "Key-value stores: use cases, strengths, limitations",
+            "Time-series databases: use cases",
+            "Choosing the right database type"
+          ]
+        },
+        {
+          "section": "Data Modeling",
+          "content_needed": [
+            "Normalization and why it matters",
+            "Denormalization trade-offs",
+            "Entity-relationship modeling",
+            "Schema design patterns",
+            "Indexing strategies"
+          ]
+        },
+        {
+          "section": "Transactions",
+          "content_needed": [
+            "ACID properties",
+            "Transaction isolation levels",
+            "Distributed transactions",
+            "Handling deadlocks"
+          ]
+        }
+      ]
+    },
+    "04-backend-auth-security-observability": {
+      "title": "Backend Auth Security Observability",
+      "sections_to_add": [
+        {
+          "section": "Authentication",
+          "content_needed": [
+            "JWT tokens: structure, validation",
+            "OAuth 2.0 flows",
+            "Session-based authentication",
+            "API keys and tokens",
+            "Multi-factor authentication"
+          ]
+        },
+        {
+          "section": "Authorization",
+          "content_needed": [
+            "RBAC: Role-based access control",
+            "ABAC: Attribute-based access control",
+            "Permission models",
+            "API permissions scopes"
+          ]
+        },
+        {
+          "section": "Security Best Practices",
+          "content_needed": [
+            "Input validation and sanitization",
+            "SQL injection prevention",
+            "XSS and CSRF protection",
+            "HTTPS and TLS",
+            "Security headers"
+          ]
+        }
+      ]
+    },
+    "05-backend-testing-performance-concurrency": {
+      "title": "Backend Testing Performance Concurrency",
+      "sections_to_add": [
+        {
+          "section": "Testing Strategies",
+          "content_needed": [
+            "Unit testing best practices",
+            "Integration testing",
+            "End-to-end testing",
+            "Test-driven development",
+            "Mocking and stubbing"
+          ]
+        },
+        {
+          "section": "Performance Optimization",
+          "content_needed": [
+            "Profiling and benchmarking",
+            "Caching strategies",
+            "Query optimization",
+            "Connection pooling",
+            "Async processing"
+          ]
+        },
+        {
+          "section": "Concurrency",
+          "content_needed": [
+            "Thread vs event-driven models",
+            "Async/await patterns",
+            "Worker queues",
+            "Parallel processing",
+            "Race conditions and handling"
+          ]
+        }
+      ]
+    },
+    "06-frontend-core-architecture": {
+      "title": "Frontend Core Architecture",
+      "sections_to_add": [
+        {
+          "section": "Rendering Pipeline",
+          "content_needed": [
+            "Browser rendering steps: DOM, CSSOM, Render tree, Layout, Paint, Composite",
+            "Critical rendering path",
+            "React rendering process",
+            "Virtual DOM explanation",
+            "Component lifecycle"
+          ]
+        },
+        {
+          "section": "Component Architecture",
+          "content_needed": [
+            "Presentational vs container components",
+            "Compound components pattern",
+            "Higher-order components",
+            "Custom hooks",
+            "Component composition"
+          ]
+        },
+        {
+          "section": "State Ownership",
+          "content_needed": [
+            "Local component state",
+            "Lifted state",
+            "Context for shared state",
+            "When to use each state type"
+          ]
+        },
+        {
+          "section": "Accessibility",
+          "content_needed": [
+            "WCAG guidelines overview",
+            "Semantic HTML",
+            "ARIA labels and roles",
+            "Keyboard navigation",
+            "Screen reader compatibility"
+          ]
+        },
+        {
+          "section": "Build Tooling",
+          "content_needed": [
+            "Webpack, Vite, esbuild overview",
+            "Code splitting and lazy loading",
+            "Tree shaking",
+            "Hot module replacement"
+          ]
+        }
+      ]
+    },
+    "07-frontend-state-data-fetching": {
+      "title": "Frontend State and Data Fetching",
+      "sections_to_add": [
+        {
+          "section": "State Management",
+          "content_needed": [
+            "Local UI state: useState, useReducer",
+            "Server state: React Query, SWR features",
+            "Global UI state: Context, Zustand, Redux",
+            "URL state and routing",
+            "When to use each approach"
+          ]
+        },
+        {
+          "section": "React Query / SWR",
+          "content_needed": [
+            "Query caching and invalidation",
+            "Mutations and updates",
+            "Optimistic updates",
+            "Error handling and retry",
+            "Infinite queries for pagination"
+          ]
+        },
+        {
+          "section": "Data Fetching Patterns",
+          "content_needed": [
+            "Parallel requests",
+            "Dependent queries",
+            "Infinite scroll",
+            "Prefetching",
+            "Request cancellation"
+          ]
+        }
+      ]
+    },
+    "08-frontend-performance-accessibility": {
+      "title": "Frontend Performance and Accessibility",
+      "sections_to_add": [
+        {
+          "section": "Performance Optimization",
+          "content_needed": [
+            "Core Web Vitals: LCP, FID, CLS",
+            "Code splitting and lazy loading",
+            "Image optimization",
+            "Bundle size optimization",
+            "Caching strategies"
+          ]
+        },
+        {
+          "section": "Accessibility Deep Dive",
+          "content_needed": [
+            "WCAG 2.1 levels: A, AA, AAA",
+            "Color contrast requirements",
+            "Focus management",
+            "Form accessibility",
+            "Accessibility testing tools"
+          ]
+        }
+      ]
+    },
+    "09-frontend-testing-and-ui-systems": {
+      "title": "Frontend Testing and UI Systems",
+      "sections_to_add": [
+        {
+          "section": "Testing Strategies",
+          "content_needed": [
+            "Unit testing with Jest",
+            "Component testing with React Testing Library",
+            "E2E testing with Cypress/Playwright",
+            "Snapshot testing",
+            "Testing async code"
+          ]
+        },
+        {
+          "section": "Component Libraries",
+          "content_needed": [
+            "Building reusable component library",
+            "Storybook for component documentation",
+            "Design tokens and theming",
+            "Component composition patterns"
+          ]
+        }
+      ]
+    },
+    "10-system-design-foundations": {
+      "title": "System Design Foundations",
+      "sections_to_add": [
+        {
+          "section": "Requirement Clarification",
+          "content_needed": [
+            "Functional vs non-functional requirements",
+            "Questions to ask before designing",
+            "Understanding scale and constraints",
+            "Defining success criteria"
+          ]
+        },
+        {
+          "section": "Capacity Estimation",
+          "content_needed": [
+            "Back-of-the-envelope calculations",
+            "Estimating QPS, storage, bandwidth",
+            "Scaling factors and projections",
+            "Reading and write patterns"
+          ]
+        },
+        {
+          "section": "Data Flow Modeling",
+          "content_needed": [
+            "Data flow diagrams",
+            "Request-response flows",
+            "Async message flows",
+            "Event-driven architectures"
+          ]
+        },
+        {
+          "section": "Storage Selection",
+          "content_needed": [
+            "SQL vs NoSQL decision",
+            "Object storage vs block storage",
+            "Caching layer placement",
+            "Data replication strategies"
+          ]
+        },
+        {
+          "section": "Caching Strategy",
+          "content_needed": [
+            "Cache-aside pattern",
+            "Write-through pattern",
+            "Write-behind pattern",
+            "Eviction policies: LRU, LFU, TTL"
+          ]
+        },
+        {
+          "section": "Queue and Async Processing",
+          "content_needed": [
+            "Message queues overview",
+            "Pub/sub patterns",
+            "Event sourcing basics",
+            "Handling failures and retries"
+          ]
+        }
+      ]
+    },
+    "11-system-design-scaling-and-reliability": {
+      "title": "System Design Scaling and Reliability",
+      "sections_to_add": [
+        {
+          "section": "Horizontal vs Vertical Scaling",
+          "content_needed": [
+            "Vertical scaling: adding resources",
+            "Horizontal scaling: adding machines",
+            "When to use each approach",
+            "Trade-offs and limitations"
+          ]
+        },
+        {
+          "section": "Load Balancing",
+          "content_needed": [
+            "Load balancing algorithms",
+            "Health checks",
+            "Sticky sessions",
+            "Global vs regional load balancing"
+          ]
+        },
+        {
+          "section": "Database Scaling",
+          "content_needed": [
+            "Read replicas",
+            "Database sharding strategies",
+            "Connection pooling",
+            "CQRS pattern"
+          ]
+        },
+        {
+          "section": "High Availability",
+          "content_needed": [
+            "Redundancy and replication",
+            "Failover strategies",
+            "Multi-region deployments",
+            "Disaster recovery planning"
+          ]
+        }
+      ]
+    },
+    "12-system-design-data-consistency-and-tradeoffs": {
+      "title": "System Design Data Consistency and Tradeoffs",
+      "sections_to_add": [
+        {
+          "section": "CAP Theorem",
+          "content_needed": [
+            "Consistency, Availability, Partition tolerance",
+            "Impossible to have all three",
+            "CP vs AP systems",
+            "Real-world examples"
+          ]
+        },
+        {
+          "section": "Eventual Consistency",
+          "content_needed": [
+            "What is eventual consistency",
+            "Conflict resolution strategies",
+            "Vector clocks",
+            "CRDTs introduction"
+          ]
+        },
+        {
+          "section": "Data Replication",
+          "content_needed": [
+            "Synchronous vs asynchronous replication",
+            "Multi-leader replication",
+            "Conflict resolution",
+            "Quorum-based systems"
+          ]
+        }
+      ]
+    },
+    "13-ai-stack-llm-and-prompting": {
+      "title": "AI Stack LLM and Prompting",
+      "sections_to_add": [
+        {
+          "section": "Tokenization and Context Windows",
+          "content_needed": [
+            "How text is converted to tokens",
+            "Token limits and context windows",
+            "Handling long context",
+            "Token counting and optimization"
+          ]
+        },
+        {
+          "section": "Prompt Design Patterns",
+          "content_needed": [
+            "Chain-of-thought prompting",
+            "Few-shot prompting",
+            "ReAct prompting",
+            "System vs user prompts"
+          ]
+        },
+        {
+          "section": "Structured Output",
+          "content_needed": [
+            "JSON schema generation",
+            "Function calling",
+            "Output validation",
+            "Handling parsing errors"
+          ]
+        },
+        {
+          "section": "Hallucination Mitigation",
+          "content_needed": [
+            "What causes hallucinations",
+            "Retrieval-augmented generation",
+            "Grounding techniques",
+            "Confidence scoring"
+          ]
+        },
+        {
+          "section": "Evaluation Rubrics",
+          "content_needed": [
+            "LLM evaluation metrics",
+            "Building test sets",
+            "A/B testing prompts",
+            "Quality vs cost trade-offs"
+          ]
+        },
+        {
+          "section": "Safety Constraints",
+          "content_needed": [
+            "Content filtering",
+            "Prompt injection prevention",
+            "Output validation",
+            "Rate limiting and abuse prevention"
+          ]
+        }
+      ]
+    },
+    "14-ai-stack-rag-and-evaluation": {
+      "title": "AI Stack RAG and Evaluation",
+      "sections_to_add": [
+        {
+          "section": "Retrieval-Augmented Generation",
+          "content_needed": [
+            "RAG architecture overview",
+            "Vector databases",
+            "Embedding models",
+            "Chunking strategies"
+          ]
+        },
+        {
+          "section": "Vector Databases",
+          "content_needed": [
+            "What are vector embeddings",
+            "Similarity search",
+            "Pinecone, Weaviate, Chroma overview",
+            "Indexing strategies"
+          ]
+        },
+        {
+          "section": "Evaluation Metrics",
+          "content_needed": [
+            "RAG evaluation: precision, recall",
+            "Answer quality metrics",
+            "Context relevance",
+            "Hallucination detection"
+          ]
+        }
+      ]
+    },
+    "15-ai-stack-agents-tools-and-guardrails": {
+      "title": "AI Stack Agents Tools and Guardrails",
+      "sections_to_add": [
+        {
+          "section": "AI Agents",
+          "content_needed": [
+            "Agent architecture",
+            "Agent loops: planning, execution, reflection",
+            "Tool use in agents",
+            "Agent frameworks: LangChain, AutoGen"
+          ]
+        },
+        {
+          "section": "Tool Integration",
+          "content_needed": [
+            "Function calling",
+            "Building custom tools",
+            "Tool choice and routing",
+            "Handling tool errors"
+          ]
+        },
+        {
+          "section": "Guardrails",
+          "content_needed": [
+            "Input validation for AI",
+            "Output filtering",
+            "PII detection",
+            "Safety layers architecture"
+          ]
+        }
+      ]
+    },
+    "16-ai-stack-serving-monitoring-and-cost": {
+      "title": "AI Stack Serving Monitoring and Cost",
+      "sections_to_add": [
+        {
+          "section": "LLM Serving",
+          "content_needed": [
+            "Self-hosted vs API providers",
+            "Model quantization",
+            "Batch inference",
+            "Streaming responses"
+          ]
+        },
+        {
+          "section": "Monitoring AI Systems",
+          "content_needed": [
+            "Token usage tracking",
+            "Latency monitoring",
+            "Error rate tracking",
+            "Cost analytics"
+          ]
+        },
+        {
+          "section": "Cost Optimization",
+          "content_needed": [
+            "Token cost management",
+            "Caching responses",
+            "Model selection by task",
+            "Budget alerts and limits"
+          ]
+        }
+      ]
+    },
+    "17-infrastructure-docker-deep-dive": {
+      "title": "Infrastructure Docker Deep Dive",
+      "sections_to_add": [
+        {
+          "section": "Docker Fundamentals",
+          "content_needed": [
+            "Container vs virtual machines",
+            "Docker architecture: daemon, client, registry",
+            "Images and containers",
+            "Dockerfile basics"
+          ]
+        },
+        {
+          "section": "Image Construction",
+          "content_needed": [
+            "Writing efficient Dockerfiles",
+            "Multi-stage builds",
+            "Layer caching optimization",
+            "Base image selection"
+          ]
+        },
+        {
+          "section": "Runtime Security",
+          "content_needed": [
+            "Running containers as non-root",
+            "Container security scanning",
+            "Resource limits and memory",
+            "Network isolation"
+          ]
+        },
+        {
+          "section": "Docker Networking",
+          "content_needed": [
+            "Bridge, host, overlay networks",
+            "Port mapping",
+            "DNS and service discovery",
+            "Container communication"
+          ]
+        },
+        {
+          "section": "Volumes and Persistence",
+          "content_needed": [
+            "Named volumes",
+            "Bind mounts",
+            "Data persistence strategies",
+            "Backup and restore"
+          ]
+        },
+        {
+          "section": "Docker Compose",
+          "content_needed": [
+            "Compose file syntax",
+            "Multi-container applications",
+            "Environment variables",
+            "Development workflows"
+          ]
+        }
+      ]
+    },
+    "18-infrastructure-terraform-infrastructure-as-code": {
+      "title": "Infrastructure Terraform Infrastructure as Code",
+      "sections_to_add": [
+        {
+          "section": "Terraform Basics",
+          "content_needed": [
+            "Infrastructure as Code concepts",
+            "Terraform workflow: init, plan, apply, destroy",
+            "Providers and resources",
+            "State management"
+          ]
+        },
+        {
+          "section": "Configuration Language",
+          "content_needed": [
+            "HCL syntax",
+            "Variables and outputs",
+            "Modules",
+            "Functions and expressions"
+          ]
+        },
+        {
+          "section": "State Management",
+          "content_needed": [
+            "Local vs remote state",
+            "State locking",
+            "State backends: S3, Terraform Cloud",
+            "Handling sensitive data"
+          ]
+        },
+        {
+          "section": "Best Practices",
+          "content_needed": [
+            "Code organization",
+            "Workspace management",
+            "CI/CD integration",
+            "Testing IaC"
+          ]
+        }
+      ]
+    },
+    "19-infrastructure-kubernetes-orchestration": {
+      "title": "Infrastructure Kubernetes Orchestration",
+      "sections_to_add": [
+        {
+          "section": "Kubernetes Basics",
+          "content_needed": [
+            "Container orchestration overview",
+            "Kubernetes architecture: pods, nodes, clusters",
+            "kubectl basics",
+            "Kubernetes objects overview"
+          ]
+        },
+        {
+          "section": "Workloads",
+          "content_needed": [
+            "Pods and ReplicaSets",
+            "Deployments and rolling updates",
+            "StatefulSets",
+            "Jobs and CronJobs"
+          ]
+        },
+        {
+          "section": "Services and Networking",
+          "content_needed": [
+            "Service types: ClusterIP, NodePort, LoadBalancer",
+            "Ingress controllers",
+            "Network policies",
+            "DNS and service discovery"
+          ]
+        },
+        {
+          "section": "Storage",
+          "content_needed": [
+            "PersistentVolumes",
+            "PersistentVolumeClaims",
+            "StorageClasses",
+            "ConfigMaps and Secrets"
+          ]
+        },
+        {
+          "section": "Helm",
+          "content_needed": [
+            "Helm charts overview",
+            "Chart structure",
+            "Values and templates",
+            "Helmfile"
+          ]
+        }
+      ]
+    },
+    "20-cloud-aws-associate-exam-panel": {
+      "title": "Cloud AWS Associate Exam Prep",
+      "sections_to_add": [
+        {
+          "section": "AWS Compute",
+          "content_needed": [
+            "EC2: instance types, pricing models",
+            "Lambda: serverless, limits, pricing",
+            "ECS/EKS: container services",
+            "Lightsail: simple workloads"
+          ]
+        },
+        {
+          "section": "AWS Storage",
+          "content_needed": [
+            "S3: buckets, versioning, lifecycle policies",
+            "EBS: block storage, snapshots",
+            "EFS: file storage",
+            "Glacier: archival storage"
+          ]
+        },
+        {
+          "section": "AWS Databases",
+          "content_needed": [
+            "RDS: PostgreSQL, MySQL, Aurora",
+            "DynamoDB: NoSQL, keys and GSI",
+            "ElastiCache: Redis, Memcached",
+            "Redshift: data warehousing"
+          ]
+        },
+        {
+          "section": "AWS Networking",
+          "content_needed": [
+            "VPC: subnets, route tables, security groups",
+            "Route53: DNS, health checks",
+            "CloudFront: CDN",
+            "API Gateway: API management"
+          ]
+        },
+        {
+          "section": "AWS Security",
+          "content_needed": [
+            "IAM: users, roles, policies",
+            "KMS: encryption keys",
+            "Security Hub: security posture",
+            "WAF: web application firewall"
+          ]
+        }
+      ]
+    },
+    "21-cloud-gcp-associate-exam-panel": {
+      "title": "Cloud GCP Associate Exam Prep",
+      "sections_to_add": [
+        {
+          "section": "GCP Compute",
+          "content_needed": [
+            "Compute Engine: VMs, managed instances",
+            "Cloud Functions: serverless",
+            "Cloud Run: container serverless",
+            "GKE: Kubernetes service"
+          ]
+        },
+        {
+          "section": "GCP Storage",
+          "content_needed": [
+            "Cloud Storage: buckets, classes",
+            "Cloud SQL: managed databases",
+            "Firestore: NoSQL document database",
+            "Bigtable: wide-column store"
+          ]
+        },
+        {
+          "section": "GCP Networking",
+          "content_needed": [
+            "VPC: networks, subnets",
+            "Cloud CDN: content delivery",
+            "Cloud DNS: managed DNS",
+            "Load Balancing: types and use cases"
+          ]
+        },
+        {
+          "section": "GCP Security",
+          "content_needed": [
+            "IAM: roles, policies, service accounts",
+            "KMS: key management",
+            "Resource Manager: organization hierarchy",
+            "Security Command Center"
+          ]
+        }
+      ]
+    },
+    "22-cloud-azure-associate-exam-panel": {
+      "title": "Cloud Azure Associate Exam Prep",
+      "sections_to_add": [
+        {
+          "section": "Azure Compute",
+          "content_needed": [
+            "Virtual Machines: sizing, availability sets",
+            "Azure Functions: serverless",
+            "AKS: Kubernetes service",
+            "App Service: PaaS web apps"
+          ]
+        },
+        {
+          "section": "Azure Storage",
+          "content_needed": [
+            "Blob Storage: tiers, access tiers",
+            "Azure SQL: managed SQL",
+            "Cosmos DB: multi-model NoSQL",
+            "Azure Files: file shares"
+          ]
+        },
+        {
+          "section": "Azure Networking",
+          "content_needed": [
+            "Virtual Networks: VNets, subnets",
+            "Azure Load Balancer: L4",
+            "Application Gateway: L7, WAF",
+            "Azure CDN: content delivery"
+          ]
+        },
+        {
+          "section": "Azure Security",
+          "content_needed": [
+            "Azure AD: identity, SSO",
+            "RBAC: role-based access control",
+            "Key Vault: secrets management",
+            "Security Center: posture management"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -5,244 +5,264 @@ levels: [junior, mid, senior]
 
 # System Design Scaling and Reliability
 
-Scale is sustainable only when reliability engineering is embedded in architecture decisions.
+This topic turns System Design Scaling and Reliability into a practical study guide covering Horizontal vs Vertical Scaling, Load Balancing, and Database Scaling, and related production concerns. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in scale, fault tolerance, data flow, and operational tradeoffs. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Horizontal Scaling: Foundations 01
+## Horizontal vs Vertical Scaling
 
-This module expands horizontal scaling in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Horizontal vs Vertical Scaling ties together vertical scaling, horizontal scaling, when to use each approach, and trade-offs and limitations inside System Design Scaling and Reliability and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Vertical scaling: focus on adding resources and how those choices change system behavior.
+- Horizontal scaling: focus on adding machines and how those choices change system behavior.
+- When to use each approach: study the definition, normal flow, edge cases, and production consequences.
+- Trade-offs and limitations: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Load Balancing: Foundations 02
+### Horizontal vs Vertical Scaling: Vertical scaling
 
-This module expands load balancing in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Vertical scaling is a concrete part of horizontal vs vertical scaling and directly affects how teams implement and operate System Design Scaling and Reliability. Key angles include adding resources, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Sharding and Partitioning: Foundations 03
+### Horizontal vs Vertical Scaling: Horizontal scaling
 
-This module expands sharding and partitioning in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Horizontal scaling is a concrete part of horizontal vs vertical scaling and directly affects how teams implement and operate System Design Scaling and Reliability. Key angles include adding machines, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Replication Topologies: Foundations 04
+### Horizontal vs Vertical Scaling: When to use each approach
 
-This module expands replication topologies in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+When to use each approach is a concrete part of horizontal vs vertical scaling and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Fault Tolerance: Foundations 05
+### Horizontal vs Vertical Scaling: Trade-offs and limitations
 
-This module expands fault tolerance in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Trade-offs and limitations is a concrete part of horizontal vs vertical scaling and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## SLO and Error Budgets: Foundations 06
+## Load Balancing
 
-This module expands slo and error budgets in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Load Balancing ties together load balancing algorithms, health checks, sticky sessions, and global vs regional load balancing inside System Design Scaling and Reliability and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Load balancing algorithms: study the definition, normal flow, edge cases, and production consequences.
+- Health checks: study the definition, normal flow, edge cases, and production consequences.
+- Sticky sessions: study the definition, normal flow, edge cases, and production consequences.
+- Global vs regional load balancing: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Disaster Recovery: Foundations 07
+### Load Balancing: Load balancing algorithms
 
-This module expands disaster recovery in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Load balancing algorithms is a concrete part of load balancing and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Reliability Reviews: Foundations 08
+### Load Balancing: Health checks
 
-This module expands reliability reviews in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Health checks is a concrete part of load balancing and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Horizontal Scaling: Mental Model 09
+### Load Balancing: Sticky sessions
 
-This module expands horizontal scaling in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Sticky sessions is a concrete part of load balancing and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Load Balancing: Mental Model 10
+### Load Balancing: Global vs regional load balancing
 
-This module expands load balancing in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Global vs regional load balancing is a concrete part of load balancing and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Sharding and Partitioning: Mental Model 11
+## Database Scaling
 
-This module expands sharding and partitioning in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Database Scaling ties together read replicas, database sharding strategies, connection pooling, and cqrs pattern inside System Design Scaling and Reliability and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Read replicas: study the definition, normal flow, edge cases, and production consequences.
+- Database sharding strategies: study the definition, normal flow, edge cases, and production consequences.
+- Connection pooling: study the definition, normal flow, edge cases, and production consequences.
+- CQRS pattern: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Replication Topologies: Mental Model 12
+### Database Scaling: Read replicas
 
-This module expands replication topologies in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Read replicas is a concrete part of database scaling and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Fault Tolerance: Mental Model 13
+### Database Scaling: Database sharding strategies
 
-This module expands fault tolerance in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Database sharding strategies is a concrete part of database scaling and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## SLO and Error Budgets: Mental Model 14
+### Database Scaling: Connection pooling
 
-This module expands slo and error budgets in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connection pooling is a concrete part of database scaling and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Disaster Recovery: Mental Model 15
+### Database Scaling: CQRS pattern
 
-This module expands disaster recovery in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+CQRS pattern is a concrete part of database scaling and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Reliability Reviews: Mental Model 16
+## High Availability
 
-This module expands reliability reviews in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+High Availability ties together redundancy and replication, failover strategies, multi-region deployments, and disaster recovery planning inside System Design Scaling and Reliability and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Redundancy and replication: study the definition, normal flow, edge cases, and production consequences.
+- Failover strategies: study the definition, normal flow, edge cases, and production consequences.
+- Multi-region deployments: study the definition, normal flow, edge cases, and production consequences.
+- Disaster recovery planning: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Horizontal Scaling: Architecture Pattern 17
+### High Availability: Redundancy and replication
 
-This module expands horizontal scaling in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Redundancy and replication is a concrete part of high availability and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Load Balancing: Architecture Pattern 18
+### High Availability: Failover strategies
 
-This module expands load balancing in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Failover strategies is a concrete part of high availability and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Sharding and Partitioning: Architecture Pattern 19
+### High Availability: Multi-region deployments
 
-This module expands sharding and partitioning in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Multi-region deployments is a concrete part of high availability and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Replication Topologies: Architecture Pattern 20
+### High Availability: Disaster recovery planning
 
-This module expands replication topologies in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Disaster recovery planning is a concrete part of high availability and directly affects how teams implement and operate System Design Scaling and Reliability. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Fault Tolerance: Architecture Pattern 21
+### Horizontal vs Vertical Scaling: Implementation Checklist
 
-This module expands fault tolerance in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn horizontal vs vertical scaling into a build-and-review checklist centered on vertical scaling, horizontal scaling, and when to use each approach. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## SLO and Error Budgets: Architecture Pattern 22
+### Load Balancing: Common Pitfalls
 
-This module expands slo and error budgets in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat load balancing as only a definition instead of an operating concern. Tie the discussion back to load balancing algorithms, health checks, and sticky sessions and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Disaster Recovery: Architecture Pattern 23
+### Database Scaling: Debugging Workflow
 
-This module expands disaster recovery in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use database scaling as a troubleshooting path for failures involving read replicas, database sharding strategies, and connection pooling. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Reliability Reviews: Architecture Pattern 24
+### High Availability: Design Review Questions
 
-This module expands reliability reviews in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame high availability as a design review conversation around redundancy and replication, failover strategies, and multi-region deployments. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Horizontal Scaling: Implementation Workflow 25
+### Horizontal vs Vertical Scaling: Failure Modes
 
-This module expands horizontal scaling in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how horizontal vs vertical scaling fails when vertical scaling, horizontal scaling, and when to use each approach is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Load Balancing: Implementation Workflow 26
+### Load Balancing: Operational Signals
 
-This module expands load balancing in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect load balancing to the signals operators need when load balancing algorithms, health checks, and sticky sessions changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Sharding and Partitioning: Implementation Workflow 27
+### Database Scaling: Tradeoff Analysis
 
-This module expands sharding and partitioning in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach database scaling, using read replicas, database sharding strategies, and connection pooling as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Replication Topologies: Implementation Workflow 28
+### High Availability: Practice Exercise
 
-This module expands replication topologies in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn high availability into a practical exercise built around redundancy and replication, failover strategies, and multi-region deployments. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Fault Tolerance: Implementation Workflow 29
+### Horizontal vs Vertical Scaling: Implementation Checklist 02
 
-This module expands fault tolerance in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn horizontal vs vertical scaling into a build-and-review checklist centered on vertical scaling, horizontal scaling, and when to use each approach. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## SLO and Error Budgets: Implementation Workflow 30
+### Load Balancing: Common Pitfalls 02
 
-This module expands slo and error budgets in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat load balancing as only a definition instead of an operating concern. Tie the discussion back to load balancing algorithms, health checks, and sticky sessions and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Disaster Recovery: Implementation Workflow 31
+### Database Scaling: Debugging Workflow 02
 
-This module expands disaster recovery in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use database scaling as a troubleshooting path for failures involving read replicas, database sharding strategies, and connection pooling. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Reliability Reviews: Implementation Workflow 32
+### High Availability: Design Review Questions 02
 
-This module expands reliability reviews in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame high availability as a design review conversation around redundancy and replication, failover strategies, and multi-region deployments. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Horizontal Scaling: Design Decisions 33
+### Horizontal vs Vertical Scaling: Failure Modes 02
 
-This module expands horizontal scaling in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how horizontal vs vertical scaling fails when vertical scaling, horizontal scaling, and when to use each approach is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Load Balancing: Design Decisions 34
+### Load Balancing: Operational Signals 02
 
-This module expands load balancing in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect load balancing to the signals operators need when load balancing algorithms, health checks, and sticky sessions changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Sharding and Partitioning: Design Decisions 35
+### Database Scaling: Tradeoff Analysis 02
 
-This module expands sharding and partitioning in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach database scaling, using read replicas, database sharding strategies, and connection pooling as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Replication Topologies: Design Decisions 36
+### High Availability: Practice Exercise 02
 
-This module expands replication topologies in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn high availability into a practical exercise built around redundancy and replication, failover strategies, and multi-region deployments. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Fault Tolerance: Design Decisions 37
+### Horizontal vs Vertical Scaling: Implementation Checklist 03
 
-This module expands fault tolerance in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn horizontal vs vertical scaling into a build-and-review checklist centered on vertical scaling, horizontal scaling, and when to use each approach. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## SLO and Error Budgets: Design Decisions 38
+### Load Balancing: Common Pitfalls 03
 
-This module expands slo and error budgets in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat load balancing as only a definition instead of an operating concern. Tie the discussion back to load balancing algorithms, health checks, and sticky sessions and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Disaster Recovery: Design Decisions 39
+### Database Scaling: Debugging Workflow 03
 
-This module expands disaster recovery in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use database scaling as a troubleshooting path for failures involving read replicas, database sharding strategies, and connection pooling. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Reliability Reviews: Design Decisions 40
+### High Availability: Design Review Questions 03
 
-This module expands reliability reviews in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame high availability as a design review conversation around redundancy and replication, failover strategies, and multi-region deployments. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Horizontal Scaling: Failure Modes 41
+### Horizontal vs Vertical Scaling: Failure Modes 03
 
-This module expands horizontal scaling in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how horizontal vs vertical scaling fails when vertical scaling, horizontal scaling, and when to use each approach is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Load Balancing: Failure Modes 42
+### Load Balancing: Operational Signals 03
 
-This module expands load balancing in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect load balancing to the signals operators need when load balancing algorithms, health checks, and sticky sessions changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Sharding and Partitioning: Failure Modes 43
+### Database Scaling: Tradeoff Analysis 03
 
-This module expands sharding and partitioning in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach database scaling, using read replicas, database sharding strategies, and connection pooling as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Replication Topologies: Failure Modes 44
+### High Availability: Practice Exercise 03
 
-This module expands replication topologies in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn high availability into a practical exercise built around redundancy and replication, failover strategies, and multi-region deployments. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Fault Tolerance: Failure Modes 45
+### Horizontal vs Vertical Scaling: Implementation Checklist 04
 
-This module expands fault tolerance in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn horizontal vs vertical scaling into a build-and-review checklist centered on vertical scaling, horizontal scaling, and when to use each approach. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## SLO and Error Budgets: Failure Modes 46
+### Load Balancing: Common Pitfalls 04
 
-This module expands slo and error budgets in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat load balancing as only a definition instead of an operating concern. Tie the discussion back to load balancing algorithms, health checks, and sticky sessions and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Disaster Recovery: Failure Modes 47
+### Database Scaling: Debugging Workflow 04
 
-This module expands disaster recovery in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use database scaling as a troubleshooting path for failures involving read replicas, database sharding strategies, and connection pooling. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Reliability Reviews: Failure Modes 48
+### High Availability: Design Review Questions 04
 
-This module expands reliability reviews in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame high availability as a design review conversation around redundancy and replication, failover strategies, and multi-region deployments. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Horizontal Scaling: Debugging Strategy 49
+### Horizontal vs Vertical Scaling: Failure Modes 04
 
-This module expands horizontal scaling in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how horizontal vs vertical scaling fails when vertical scaling, horizontal scaling, and when to use each approach is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Load Balancing: Debugging Strategy 50
+### Load Balancing: Operational Signals 04
 
-This module expands load balancing in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect load balancing to the signals operators need when load balancing algorithms, health checks, and sticky sessions changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Sharding and Partitioning: Debugging Strategy 51
+### Database Scaling: Tradeoff Analysis 04
 
-This module expands sharding and partitioning in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach database scaling, using read replicas, database sharding strategies, and connection pooling as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Replication Topologies: Debugging Strategy 52
+### High Availability: Practice Exercise 04
 
-This module expands replication topologies in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn high availability into a practical exercise built around redundancy and replication, failover strategies, and multi-region deployments. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Fault Tolerance: Debugging Strategy 53
+### Horizontal vs Vertical Scaling: Implementation Checklist 05
 
-This module expands fault tolerance in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn horizontal vs vertical scaling into a build-and-review checklist centered on vertical scaling, horizontal scaling, and when to use each approach. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## SLO and Error Budgets: Debugging Strategy 54
+### Load Balancing: Common Pitfalls 05
 
-This module expands slo and error budgets in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat load balancing as only a definition instead of an operating concern. Tie the discussion back to load balancing algorithms, health checks, and sticky sessions and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Disaster Recovery: Debugging Strategy 55
+### Database Scaling: Debugging Workflow 05
 
-This module expands disaster recovery in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use database scaling as a troubleshooting path for failures involving read replicas, database sharding strategies, and connection pooling. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Reliability Reviews: Debugging Strategy 56
+### High Availability: Design Review Questions 05
 
-This module expands reliability reviews in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame high availability as a design review conversation around redundancy and replication, failover strategies, and multi-region deployments. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Horizontal Scaling: Performance Lens 57
+### Horizontal vs Vertical Scaling: Failure Modes 05
 
-This module expands horizontal scaling in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how horizontal vs vertical scaling fails when vertical scaling, horizontal scaling, and when to use each approach is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Load Balancing: Performance Lens 58
+### Load Balancing: Operational Signals 05
 
-This module expands load balancing in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect load balancing to the signals operators need when load balancing algorithms, health checks, and sticky sessions changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Sharding and Partitioning: Performance Lens 59
+### Database Scaling: Tradeoff Analysis 05
 
-This module expands sharding and partitioning in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach database scaling, using read replicas, database sharding strategies, and connection pooling as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Replication Topologies: Performance Lens 60
+### High Availability: Practice Exercise 05
 
-This module expands replication topologies in System Design Scaling and Reliability so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn high availability into a practical exercise built around redundancy and replication, failover strategies, and multi-region deployments. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.

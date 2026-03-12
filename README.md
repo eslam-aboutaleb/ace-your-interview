@@ -150,4 +150,4 @@ Mock interview endpoints are gated by:
 ```bash
 STUDY_ENABLE_MOCK_INTERVIEW_V1=true
 ```
-Default is `false`.
+Default is `true`. Set it to `false` only if you explicitly want to hide or disable mock interviews.

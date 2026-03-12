@@ -170,7 +170,7 @@ async def generate_questions(
         user_identity=user,
         section_title=body.section_title,
         section_content=body.section_content,
-        response_detail=ai_settings.get("response_detail", "concise"),
+        response_detail=ai_settings.get("response_detail", "very_detailed"),
         preferred_language=ai_settings.get("preferred_language", ""),
         requires_programming=bool(ai_settings.get("requires_programming")),
     )
@@ -221,7 +221,7 @@ async def generate_questions_v2(
         user_identity=user,
         section_title=body.section_title,
         section_content=body.section_content,
-        response_detail=ai_settings.get("response_detail", "concise"),
+        response_detail=ai_settings.get("response_detail", "very_detailed"),
         preferred_language=ai_settings.get("preferred_language", ""),
         requires_programming=bool(ai_settings.get("requires_programming")),
     )
@@ -274,7 +274,7 @@ async def generate_questions_v2_stream(
             user_identity=user,
             section_title=body.section_title,
             section_content=body.section_content,
-            response_detail=ai_settings.get("response_detail", "concise"),
+            response_detail=ai_settings.get("response_detail", "very_detailed"),
             preferred_language=ai_settings.get("preferred_language", ""),
             requires_programming=bool(ai_settings.get("requires_programming")),
         ):

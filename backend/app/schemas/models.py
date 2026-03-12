@@ -171,7 +171,7 @@ class TopicDetail(BaseModel):
     requires_programming: bool = False
     language_options: list[str] = Field(default_factory=list)
     selected_language: str = ""
-    response_detail: ResponseDetailEnum = ResponseDetailEnum.CONCISE
+    response_detail: ResponseDetailEnum = ResponseDetailEnum.VERY_DETAILED
     is_dynamic_topic: bool = False
     content_ready: bool = True
 
@@ -191,7 +191,7 @@ class GenerateTopicContentRequest(BaseModel):
 
 class TopicPreferencesResponse(BaseModel):
     topic_id: str
-    response_detail: ResponseDetailEnum = ResponseDetailEnum.CONCISE
+    response_detail: ResponseDetailEnum = ResponseDetailEnum.VERY_DETAILED
     preferred_language: str = ""
     requires_programming: bool = False
     language_options: list[str] = Field(default_factory=list)

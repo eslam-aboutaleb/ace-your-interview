@@ -5,236 +5,261 @@ levels: [junior, mid, senior]
 
 # Infrastructure Kubernetes Orchestration
 
-Kubernetes interviews focus on orchestration fundamentals, service reliability, and operational maturity.
+This topic turns Infrastructure Kubernetes Orchestration into a practical study guide covering Kubernetes Basics, Workloads, and Services and Networking, and related production concerns. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in scale, fault tolerance, data flow, and operational tradeoffs. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Cluster Architecture: Foundations 01
+## Kubernetes Basics
 
-This module expands cluster architecture in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Kubernetes Basics ties together container orchestration overview, kubernetes architecture, kubectl basics, and kubernetes objects overview inside Infrastructure Kubernetes Orchestration and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Container orchestration overview: study the definition, normal flow, edge cases, and production consequences.
+- Kubernetes architecture: focus on pods, nodes, and clusters and how those choices change system behavior.
+- kubectl basics: study the definition, normal flow, edge cases, and production consequences.
+- Kubernetes objects overview: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Workload Controllers: Foundations 02
+### Kubernetes Basics: Container orchestration overview
 
-This module expands workload controllers in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Container orchestration overview is a concrete part of kubernetes basics and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Service Discovery: Foundations 03
+### Kubernetes Basics: Kubernetes architecture
 
-This module expands service discovery in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Kubernetes architecture is a concrete part of kubernetes basics and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Key angles include pods, nodes, and clusters, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Config and Secrets: Foundations 04
+### Kubernetes Basics: kubectl basics
 
-This module expands config and secrets in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+kubectl basics is a concrete part of kubernetes basics and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Autoscaling: Foundations 05
+### Kubernetes Basics: Kubernetes objects overview
 
-This module expands autoscaling in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Kubernetes objects overview is a concrete part of kubernetes basics and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Observability and Logging: Foundations 06
+## Workloads
 
-This module expands observability and logging in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Workloads ties together pods and replicasets, deployments and rolling updates, statefulsets, and jobs and cronjobs inside Infrastructure Kubernetes Orchestration and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Pods and ReplicaSets: study the definition, normal flow, edge cases, and production consequences.
+- Deployments and rolling updates: study the definition, normal flow, edge cases, and production consequences.
+- StatefulSets: study the definition, normal flow, edge cases, and production consequences.
+- Jobs and CronJobs: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Security Hardening: Foundations 07
+### Workloads: Pods and ReplicaSets
 
-This module expands security hardening in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Pods and ReplicaSets is a concrete part of workloads and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Kubernetes Operations: Foundations 08
+### Workloads: Deployments and rolling updates
 
-This module expands kubernetes operations in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Deployments and rolling updates is a concrete part of workloads and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Cluster Architecture: Mental Model 09
+### Workloads: StatefulSets
 
-This module expands cluster architecture in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+StatefulSets is a concrete part of workloads and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Workload Controllers: Mental Model 10
+### Workloads: Jobs and CronJobs
 
-This module expands workload controllers in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Jobs and CronJobs is a concrete part of workloads and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Service Discovery: Mental Model 11
+## Services and Networking
 
-This module expands service discovery in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Services and Networking ties together service types, ingress controllers, network policies, and dns and service discovery inside Infrastructure Kubernetes Orchestration and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Service types: focus on clusterip, nodeport, and loadbalancer and how those choices change system behavior.
+- Ingress controllers: study the definition, normal flow, edge cases, and production consequences.
+- Network policies: study the definition, normal flow, edge cases, and production consequences.
+- DNS and service discovery: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Config and Secrets: Mental Model 12
+### Services and Networking: Service types
 
-This module expands config and secrets in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Service types is a concrete part of services and networking and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Key angles include clusterip, nodeport, and loadbalancer, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Autoscaling: Mental Model 13
+### Services and Networking: Ingress controllers
 
-This module expands autoscaling in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Ingress controllers is a concrete part of services and networking and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Observability and Logging: Mental Model 14
+### Services and Networking: Network policies
 
-This module expands observability and logging in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Network policies is a concrete part of services and networking and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Security Hardening: Mental Model 15
+### Services and Networking: DNS and service discovery
 
-This module expands security hardening in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+DNS and service discovery is a concrete part of services and networking and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Kubernetes Operations: Mental Model 16
+## Storage
 
-This module expands kubernetes operations in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Storage ties together persistentvolumes, persistentvolumeclaims, storageclasses, and configmaps and secrets inside Infrastructure Kubernetes Orchestration and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- PersistentVolumes: study the definition, normal flow, edge cases, and production consequences.
+- PersistentVolumeClaims: study the definition, normal flow, edge cases, and production consequences.
+- StorageClasses: study the definition, normal flow, edge cases, and production consequences.
+- ConfigMaps and Secrets: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Cluster Architecture: Architecture Pattern 17
+### Storage: PersistentVolumes
 
-This module expands cluster architecture in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+PersistentVolumes is a concrete part of storage and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Workload Controllers: Architecture Pattern 18
+### Storage: PersistentVolumeClaims
 
-This module expands workload controllers in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+PersistentVolumeClaims is a concrete part of storage and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Service Discovery: Architecture Pattern 19
+### Storage: StorageClasses
 
-This module expands service discovery in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+StorageClasses is a concrete part of storage and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Config and Secrets: Architecture Pattern 20
+### Storage: ConfigMaps and Secrets
 
-This module expands config and secrets in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+ConfigMaps and Secrets is a concrete part of storage and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Autoscaling: Architecture Pattern 21
+## Helm
 
-This module expands autoscaling in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Helm ties together helm charts overview, chart structure, values and templates, and helmfile inside Infrastructure Kubernetes Orchestration and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Helm charts overview: study the definition, normal flow, edge cases, and production consequences.
+- Chart structure: study the definition, normal flow, edge cases, and production consequences.
+- Values and templates: study the definition, normal flow, edge cases, and production consequences.
+- Helmfile: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Observability and Logging: Architecture Pattern 22
+### Helm: Helm charts overview
 
-This module expands observability and logging in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Helm charts overview is a concrete part of helm and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Security Hardening: Architecture Pattern 23
+### Helm: Chart structure
 
-This module expands security hardening in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Chart structure is a concrete part of helm and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Kubernetes Operations: Architecture Pattern 24
+### Helm: Values and templates
 
-This module expands kubernetes operations in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Values and templates is a concrete part of helm and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Cluster Architecture: Implementation Workflow 25
+### Helm: Helmfile
 
-This module expands cluster architecture in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Helmfile is a concrete part of helm and directly affects how teams implement and operate Infrastructure Kubernetes Orchestration. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Workload Controllers: Implementation Workflow 26
+### Kubernetes Basics: Implementation Checklist
 
-This module expands workload controllers in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn kubernetes basics into a build-and-review checklist centered on container orchestration overview, kubernetes architecture, and kubectl basics. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Service Discovery: Implementation Workflow 27
+### Workloads: Common Pitfalls
 
-This module expands service discovery in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat workloads as only a definition instead of an operating concern. Tie the discussion back to pods and replicasets, deployments and rolling updates, and statefulsets and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Config and Secrets: Implementation Workflow 28
+### Services and Networking: Debugging Workflow
 
-This module expands config and secrets in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use services and networking as a troubleshooting path for failures involving service types, ingress controllers, and network policies. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Autoscaling: Implementation Workflow 29
+### Storage: Design Review Questions
 
-This module expands autoscaling in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame storage as a design review conversation around persistentvolumes, persistentvolumeclaims, and storageclasses. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Observability and Logging: Implementation Workflow 30
+### Helm: Failure Modes
 
-This module expands observability and logging in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how helm fails when helm charts overview, chart structure, and values and templates is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Security Hardening: Implementation Workflow 31
+### Kubernetes Basics: Operational Signals
 
-This module expands security hardening in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect kubernetes basics to the signals operators need when container orchestration overview, kubernetes architecture, and kubectl basics changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Kubernetes Operations: Implementation Workflow 32
+### Workloads: Tradeoff Analysis
 
-This module expands kubernetes operations in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach workloads, using pods and replicasets, deployments and rolling updates, and statefulsets as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Cluster Architecture: Design Decisions 33
+### Services and Networking: Practice Exercise
 
-This module expands cluster architecture in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn services and networking into a practical exercise built around service types, ingress controllers, and network policies. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Workload Controllers: Design Decisions 34
+### Storage: Implementation Checklist
 
-This module expands workload controllers in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn storage into a build-and-review checklist centered on persistentvolumes, persistentvolumeclaims, and storageclasses. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Service Discovery: Design Decisions 35
+### Helm: Common Pitfalls
 
-This module expands service discovery in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat helm as only a definition instead of an operating concern. Tie the discussion back to helm charts overview, chart structure, and values and templates and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Config and Secrets: Design Decisions 36
+### Kubernetes Basics: Debugging Workflow
 
-This module expands config and secrets in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use kubernetes basics as a troubleshooting path for failures involving container orchestration overview, kubernetes architecture, and kubectl basics. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Autoscaling: Design Decisions 37
+### Workloads: Design Review Questions
 
-This module expands autoscaling in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame workloads as a design review conversation around pods and replicasets, deployments and rolling updates, and statefulsets. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Observability and Logging: Design Decisions 38
+### Services and Networking: Failure Modes
 
-This module expands observability and logging in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how services and networking fails when service types, ingress controllers, and network policies is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Security Hardening: Design Decisions 39
+### Storage: Operational Signals
 
-This module expands security hardening in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect storage to the signals operators need when persistentvolumes, persistentvolumeclaims, and storageclasses changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Kubernetes Operations: Design Decisions 40
+### Helm: Tradeoff Analysis
 
-This module expands kubernetes operations in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach helm, using helm charts overview, chart structure, and values and templates as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Cluster Architecture: Failure Modes 41
+### Kubernetes Basics: Practice Exercise
 
-This module expands cluster architecture in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn kubernetes basics into a practical exercise built around container orchestration overview, kubernetes architecture, and kubectl basics. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Workload Controllers: Failure Modes 42
+### Workloads: Implementation Checklist
 
-This module expands workload controllers in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn workloads into a build-and-review checklist centered on pods and replicasets, deployments and rolling updates, and statefulsets. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Service Discovery: Failure Modes 43
+### Services and Networking: Common Pitfalls
 
-This module expands service discovery in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat services and networking as only a definition instead of an operating concern. Tie the discussion back to service types, ingress controllers, and network policies and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Config and Secrets: Failure Modes 44
+### Storage: Debugging Workflow
 
-This module expands config and secrets in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use storage as a troubleshooting path for failures involving persistentvolumes, persistentvolumeclaims, and storageclasses. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Autoscaling: Failure Modes 45
+### Helm: Design Review Questions
 
-This module expands autoscaling in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame helm as a design review conversation around helm charts overview, chart structure, and values and templates. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Observability and Logging: Failure Modes 46
+### Kubernetes Basics: Failure Modes
 
-This module expands observability and logging in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how kubernetes basics fails when container orchestration overview, kubernetes architecture, and kubectl basics is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Security Hardening: Failure Modes 47
+### Workloads: Operational Signals
 
-This module expands security hardening in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect workloads to the signals operators need when pods and replicasets, deployments and rolling updates, and statefulsets changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Kubernetes Operations: Failure Modes 48
+### Services and Networking: Tradeoff Analysis
 
-This module expands kubernetes operations in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach services and networking, using service types, ingress controllers, and network policies as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Cluster Architecture: Debugging Strategy 49
+### Storage: Practice Exercise
 
-This module expands cluster architecture in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn storage into a practical exercise built around persistentvolumes, persistentvolumeclaims, and storageclasses. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Workload Controllers: Debugging Strategy 50
+### Helm: Implementation Checklist
 
-This module expands workload controllers in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn helm into a build-and-review checklist centered on helm charts overview, chart structure, and values and templates. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Service Discovery: Debugging Strategy 51
+### Kubernetes Basics: Common Pitfalls
 
-This module expands service discovery in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat kubernetes basics as only a definition instead of an operating concern. Tie the discussion back to container orchestration overview, kubernetes architecture, and kubectl basics and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Config and Secrets: Debugging Strategy 52
+### Workloads: Debugging Workflow
 
-This module expands config and secrets in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use workloads as a troubleshooting path for failures involving pods and replicasets, deployments and rolling updates, and statefulsets. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Autoscaling: Debugging Strategy 53
+### Services and Networking: Design Review Questions
 
-This module expands autoscaling in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame services and networking as a design review conversation around service types, ingress controllers, and network policies. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Observability and Logging: Debugging Strategy 54
+### Storage: Failure Modes
 
-This module expands observability and logging in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how storage fails when persistentvolumes, persistentvolumeclaims, and storageclasses is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Security Hardening: Debugging Strategy 55
+### Helm: Operational Signals
 
-This module expands security hardening in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect helm to the signals operators need when helm charts overview, chart structure, and values and templates changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Kubernetes Operations: Debugging Strategy 56
+### Kubernetes Basics: Tradeoff Analysis
 
-This module expands kubernetes operations in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach kubernetes basics, using container orchestration overview, kubernetes architecture, and kubectl basics as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Cluster Architecture: Performance Lens 57
+### Workloads: Practice Exercise
 
-This module expands cluster architecture in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn workloads into a practical exercise built around pods and replicasets, deployments and rolling updates, and statefulsets. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Workload Controllers: Performance Lens 58
+### Services and Networking: Implementation Checklist
 
-This module expands workload controllers in Infrastructure Kubernetes Orchestration so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn services and networking into a build-and-review checklist centered on service types, ingress controllers, and network policies. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.

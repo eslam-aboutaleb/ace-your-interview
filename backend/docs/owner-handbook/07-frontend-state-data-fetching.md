@@ -5,188 +5,206 @@ levels: [junior, mid, senior]
 
 # Frontend State and Data Fetching
 
-State and server data strategies directly impact UX correctness and perceived speed.
+This topic turns Frontend State and Data Fetching into a practical study guide covering State Management, React Query / SWR, and Data Fetching Patterns. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in rendering, state ownership, user experience, and accessibility. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Local vs Remote State: Foundations 01
+## State Management
 
-This module expands local vs remote state in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+State Management ties together local ui state, server state, global ui state, and url state and routing inside Frontend State and Data Fetching and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Local UI state: focus on usestate and usereducer and how those choices change system behavior.
+- Server state: focus on react query and swr features and how those choices change system behavior.
+- Global UI state: focus on context, zustand, and redux and how those choices change system behavior.
+- URL state and routing: study the definition, normal flow, edge cases, and production consequences.
+- When to use each approach: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Query Caching: Foundations 02
+### State Management: Local UI state
 
-This module expands query caching in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Local UI state is a concrete part of state management and directly affects how teams implement and operate Frontend State and Data Fetching. Key angles include usestate and usereducer, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Optimistic Updates: Foundations 03
+### State Management: Server state
 
-This module expands optimistic updates in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Server state is a concrete part of state management and directly affects how teams implement and operate Frontend State and Data Fetching. Key angles include react query and swr features, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Revalidation Strategies: Foundations 04
+### State Management: Global UI state
 
-This module expands revalidation strategies in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Global UI state is a concrete part of state management and directly affects how teams implement and operate Frontend State and Data Fetching. Key angles include context, zustand, and redux, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Error Recovery UX: Foundations 05
+### State Management: URL state and routing
 
-This module expands error recovery ux in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+URL state and routing is a concrete part of state management and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## API Normalization: Foundations 06
+### State Management: When to use each approach
 
-This module expands api normalization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+When to use each approach is a concrete part of state management and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Data Synchronization: Foundations 07
+## React Query / SWR
 
-This module expands data synchronization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+React Query / SWR ties together query caching and invalidation, mutations and updates, optimistic updates, and error handling and retry inside Frontend State and Data Fetching and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Query caching and invalidation: study the definition, normal flow, edge cases, and production consequences.
+- Mutations and updates: study the definition, normal flow, edge cases, and production consequences.
+- Optimistic updates: study the definition, normal flow, edge cases, and production consequences.
+- Error handling and retry: study the definition, normal flow, edge cases, and production consequences.
+- Infinite queries for pagination: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Offline-first Patterns: Foundations 08
+### React Query / SWR: Query caching and invalidation
 
-This module expands offline-first patterns in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Query caching and invalidation is a concrete part of react query / swr and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Local vs Remote State: Mental Model 09
+### React Query / SWR: Mutations and updates
 
-This module expands local vs remote state in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Mutations and updates is a concrete part of react query / swr and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Query Caching: Mental Model 10
+### React Query / SWR: Optimistic updates
 
-This module expands query caching in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Optimistic updates is a concrete part of react query / swr and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Optimistic Updates: Mental Model 11
+### React Query / SWR: Error handling and retry
 
-This module expands optimistic updates in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Error handling and retry is a concrete part of react query / swr and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Revalidation Strategies: Mental Model 12
+### React Query / SWR: Infinite queries for pagination
 
-This module expands revalidation strategies in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Infinite queries for pagination is a concrete part of react query / swr and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Error Recovery UX: Mental Model 13
+## Data Fetching Patterns
 
-This module expands error recovery ux in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Data Fetching Patterns ties together parallel requests, dependent queries, infinite scroll, and prefetching inside Frontend State and Data Fetching and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Parallel requests: study the definition, normal flow, edge cases, and production consequences.
+- Dependent queries: study the definition, normal flow, edge cases, and production consequences.
+- Infinite scroll: study the definition, normal flow, edge cases, and production consequences.
+- Prefetching: study the definition, normal flow, edge cases, and production consequences.
+- Request cancellation: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## API Normalization: Mental Model 14
+### Data Fetching Patterns: Parallel requests
 
-This module expands api normalization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Parallel requests is a concrete part of data fetching patterns and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Data Synchronization: Mental Model 15
+### Data Fetching Patterns: Dependent queries
 
-This module expands data synchronization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Dependent queries is a concrete part of data fetching patterns and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Offline-first Patterns: Mental Model 16
+### Data Fetching Patterns: Infinite scroll
 
-This module expands offline-first patterns in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Infinite scroll is a concrete part of data fetching patterns and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Local vs Remote State: Architecture Pattern 17
+### Data Fetching Patterns: Prefetching
 
-This module expands local vs remote state in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Prefetching is a concrete part of data fetching patterns and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Query Caching: Architecture Pattern 18
+### Data Fetching Patterns: Request cancellation
 
-This module expands query caching in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Request cancellation is a concrete part of data fetching patterns and directly affects how teams implement and operate Frontend State and Data Fetching. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Optimistic Updates: Architecture Pattern 19
+### State Management: Implementation Checklist
 
-This module expands optimistic updates in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn state management into a build-and-review checklist centered on local ui state, server state, and global ui state. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Revalidation Strategies: Architecture Pattern 20
+### React Query / SWR: Common Pitfalls
 
-This module expands revalidation strategies in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat react query / swr as only a definition instead of an operating concern. Tie the discussion back to query caching and invalidation, mutations and updates, and optimistic updates and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Error Recovery UX: Architecture Pattern 21
+### Data Fetching Patterns: Debugging Workflow
 
-This module expands error recovery ux in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use data fetching patterns as a troubleshooting path for failures involving parallel requests, dependent queries, and infinite scroll. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## API Normalization: Architecture Pattern 22
+### State Management: Design Review Questions
 
-This module expands api normalization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame state management as a design review conversation around local ui state, server state, and global ui state. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Data Synchronization: Architecture Pattern 23
+### React Query / SWR: Failure Modes
 
-This module expands data synchronization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how react query / swr fails when query caching and invalidation, mutations and updates, and optimistic updates is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Offline-first Patterns: Architecture Pattern 24
+### Data Fetching Patterns: Operational Signals
 
-This module expands offline-first patterns in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect data fetching patterns to the signals operators need when parallel requests, dependent queries, and infinite scroll changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Local vs Remote State: Implementation Workflow 25
+### State Management: Tradeoff Analysis
 
-This module expands local vs remote state in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach state management, using local ui state, server state, and global ui state as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Query Caching: Implementation Workflow 26
+### React Query / SWR: Practice Exercise
 
-This module expands query caching in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn react query / swr into a practical exercise built around query caching and invalidation, mutations and updates, and optimistic updates. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Optimistic Updates: Implementation Workflow 27
+### Data Fetching Patterns: Implementation Checklist
 
-This module expands optimistic updates in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn data fetching patterns into a build-and-review checklist centered on parallel requests, dependent queries, and infinite scroll. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Revalidation Strategies: Implementation Workflow 28
+### State Management: Common Pitfalls
 
-This module expands revalidation strategies in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat state management as only a definition instead of an operating concern. Tie the discussion back to local ui state, server state, and global ui state and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Error Recovery UX: Implementation Workflow 29
+### React Query / SWR: Debugging Workflow
 
-This module expands error recovery ux in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use react query / swr as a troubleshooting path for failures involving query caching and invalidation, mutations and updates, and optimistic updates. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## API Normalization: Implementation Workflow 30
+### Data Fetching Patterns: Design Review Questions
 
-This module expands api normalization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame data fetching patterns as a design review conversation around parallel requests, dependent queries, and infinite scroll. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Data Synchronization: Implementation Workflow 31
+### State Management: Failure Modes
 
-This module expands data synchronization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how state management fails when local ui state, server state, and global ui state is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Offline-first Patterns: Implementation Workflow 32
+### React Query / SWR: Operational Signals
 
-This module expands offline-first patterns in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect react query / swr to the signals operators need when query caching and invalidation, mutations and updates, and optimistic updates changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Local vs Remote State: Design Decisions 33
+### Data Fetching Patterns: Tradeoff Analysis
 
-This module expands local vs remote state in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach data fetching patterns, using parallel requests, dependent queries, and infinite scroll as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Query Caching: Design Decisions 34
+### State Management: Practice Exercise
 
-This module expands query caching in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn state management into a practical exercise built around local ui state, server state, and global ui state. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Optimistic Updates: Design Decisions 35
+### React Query / SWR: Implementation Checklist
 
-This module expands optimistic updates in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn react query / swr into a build-and-review checklist centered on query caching and invalidation, mutations and updates, and optimistic updates. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Revalidation Strategies: Design Decisions 36
+### Data Fetching Patterns: Common Pitfalls
 
-This module expands revalidation strategies in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat data fetching patterns as only a definition instead of an operating concern. Tie the discussion back to parallel requests, dependent queries, and infinite scroll and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Error Recovery UX: Design Decisions 37
+### State Management: Debugging Workflow
 
-This module expands error recovery ux in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use state management as a troubleshooting path for failures involving local ui state, server state, and global ui state. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## API Normalization: Design Decisions 38
+### React Query / SWR: Design Review Questions
 
-This module expands api normalization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame react query / swr as a design review conversation around query caching and invalidation, mutations and updates, and optimistic updates. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Data Synchronization: Design Decisions 39
+### Data Fetching Patterns: Failure Modes
 
-This module expands data synchronization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how data fetching patterns fails when parallel requests, dependent queries, and infinite scroll is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Offline-first Patterns: Design Decisions 40
+### State Management: Operational Signals
 
-This module expands offline-first patterns in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect state management to the signals operators need when local ui state, server state, and global ui state changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Local vs Remote State: Failure Modes 41
+### React Query / SWR: Tradeoff Analysis
 
-This module expands local vs remote state in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach react query / swr, using query caching and invalidation, mutations and updates, and optimistic updates as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Query Caching: Failure Modes 42
+### Data Fetching Patterns: Practice Exercise
 
-This module expands query caching in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn data fetching patterns into a practical exercise built around parallel requests, dependent queries, and infinite scroll. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Optimistic Updates: Failure Modes 43
+### State Management: Implementation Checklist 02
 
-This module expands optimistic updates in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn state management into a build-and-review checklist centered on local ui state, server state, and global ui state. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Revalidation Strategies: Failure Modes 44
+### React Query / SWR: Common Pitfalls 02
 
-This module expands revalidation strategies in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat react query / swr as only a definition instead of an operating concern. Tie the discussion back to query caching and invalidation, mutations and updates, and optimistic updates and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Error Recovery UX: Failure Modes 45
+### Data Fetching Patterns: Debugging Workflow 02
 
-This module expands error recovery ux in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use data fetching patterns as a troubleshooting path for failures involving parallel requests, dependent queries, and infinite scroll. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## API Normalization: Failure Modes 46
+### State Management: Design Review Questions 02
 
-This module expands api normalization in Frontend State and Data Fetching so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame state management as a design review conversation around local ui state, server state, and global ui state. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.

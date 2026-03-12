@@ -5,244 +5,259 @@ levels: [junior, mid, senior]
 
 # System Design Data Consistency and Tradeoffs
 
-Distributed systems succeed when consistency expectations are explicit and enforceable.
+This topic turns System Design Data Consistency and Tradeoffs into a practical study guide covering CAP Theorem, Eventual Consistency, and Data Replication. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in scale, fault tolerance, data flow, and operational tradeoffs. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Consistency Models: Foundations 01
+## CAP Theorem
 
-This module expands consistency models in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+CAP Theorem ties together consistency, availability, partition tolerance, impossible to have all three, cp vs ap systems, and real-world examples inside System Design Data Consistency and Tradeoffs and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Consistency, Availability, Partition tolerance: study the definition, normal flow, edge cases, and production consequences.
+- Impossible to have all three: study the definition, normal flow, edge cases, and production consequences.
+- CP vs AP systems: study the definition, normal flow, edge cases, and production consequences.
+- Real-world examples: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Transactions and Sagas: Foundations 02
+### CAP Theorem: Consistency, Availability, Partition tolerance
 
-This module expands transactions and sagas in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Consistency, Availability, Partition tolerance is a concrete part of cap theorem and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Eventual Consistency: Foundations 03
+### CAP Theorem: Impossible to have all three
 
-This module expands eventual consistency in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Impossible to have all three is a concrete part of cap theorem and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Conflict Resolution: Foundations 04
+### CAP Theorem: CP vs AP systems
 
-This module expands conflict resolution in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+CP vs AP systems is a concrete part of cap theorem and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Distributed Locking: Foundations 05
+### CAP Theorem: Real-world examples
 
-This module expands distributed locking in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Real-world examples is a concrete part of cap theorem and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Consensus Concepts: Foundations 06
+## Eventual Consistency
 
-This module expands consensus concepts in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Eventual Consistency ties together what is eventual consistency, conflict resolution strategies, vector clocks, and crdts introduction inside System Design Data Consistency and Tradeoffs and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- What is eventual consistency: study the definition, normal flow, edge cases, and production consequences.
+- Conflict resolution strategies: study the definition, normal flow, edge cases, and production consequences.
+- Vector clocks: study the definition, normal flow, edge cases, and production consequences.
+- CRDTs introduction: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Read/Write Tradeoffs: Foundations 07
+### Eventual Consistency: What is eventual consistency
 
-This module expands read/write tradeoffs in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+What is eventual consistency is a concrete part of eventual consistency and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Data Correctness Testing: Foundations 08
+### Eventual Consistency: Conflict resolution strategies
 
-This module expands data correctness testing in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Conflict resolution strategies is a concrete part of eventual consistency and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Consistency Models: Mental Model 09
+### Eventual Consistency: Vector clocks
 
-This module expands consistency models in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Vector clocks is a concrete part of eventual consistency and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Transactions and Sagas: Mental Model 10
+### Eventual Consistency: CRDTs introduction
 
-This module expands transactions and sagas in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+CRDTs introduction is a concrete part of eventual consistency and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Eventual Consistency: Mental Model 11
+## Data Replication
 
-This module expands eventual consistency in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Data Replication ties together synchronous vs asynchronous replication, multi-leader replication, conflict resolution, and quorum-based systems inside System Design Data Consistency and Tradeoffs and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Synchronous vs asynchronous replication: study the definition, normal flow, edge cases, and production consequences.
+- Multi-leader replication: study the definition, normal flow, edge cases, and production consequences.
+- Conflict resolution: study the definition, normal flow, edge cases, and production consequences.
+- Quorum-based systems: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Conflict Resolution: Mental Model 12
+### Data Replication: Synchronous vs asynchronous replication
 
-This module expands conflict resolution in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Synchronous vs asynchronous replication is a concrete part of data replication and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Distributed Locking: Mental Model 13
+### Data Replication: Multi-leader replication
 
-This module expands distributed locking in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Multi-leader replication is a concrete part of data replication and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Consensus Concepts: Mental Model 14
+### Data Replication: Conflict resolution
 
-This module expands consensus concepts in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Conflict resolution is a concrete part of data replication and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Read/Write Tradeoffs: Mental Model 15
+### Data Replication: Quorum-based systems
 
-This module expands read/write tradeoffs in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Quorum-based systems is a concrete part of data replication and directly affects how teams implement and operate System Design Data Consistency and Tradeoffs. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Data Correctness Testing: Mental Model 16
+### CAP Theorem: Implementation Checklist
 
-This module expands data correctness testing in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn cap theorem into a build-and-review checklist centered on consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Consistency Models: Architecture Pattern 17
+### Eventual Consistency: Common Pitfalls
 
-This module expands consistency models in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat eventual consistency as only a definition instead of an operating concern. Tie the discussion back to what is eventual consistency, conflict resolution strategies, and vector clocks and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Transactions and Sagas: Architecture Pattern 18
+### Data Replication: Debugging Workflow
 
-This module expands transactions and sagas in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use data replication as a troubleshooting path for failures involving synchronous vs asynchronous replication, multi-leader replication, and conflict resolution. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Eventual Consistency: Architecture Pattern 19
+### CAP Theorem: Design Review Questions
 
-This module expands eventual consistency in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame cap theorem as a design review conversation around consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Conflict Resolution: Architecture Pattern 20
+### Eventual Consistency: Failure Modes
 
-This module expands conflict resolution in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how eventual consistency fails when what is eventual consistency, conflict resolution strategies, and vector clocks is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Distributed Locking: Architecture Pattern 21
+### Data Replication: Operational Signals
 
-This module expands distributed locking in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect data replication to the signals operators need when synchronous vs asynchronous replication, multi-leader replication, and conflict resolution changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Consensus Concepts: Architecture Pattern 22
+### CAP Theorem: Tradeoff Analysis
 
-This module expands consensus concepts in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach cap theorem, using consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Read/Write Tradeoffs: Architecture Pattern 23
+### Eventual Consistency: Practice Exercise
 
-This module expands read/write tradeoffs in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn eventual consistency into a practical exercise built around what is eventual consistency, conflict resolution strategies, and vector clocks. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Data Correctness Testing: Architecture Pattern 24
+### Data Replication: Implementation Checklist
 
-This module expands data correctness testing in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn data replication into a build-and-review checklist centered on synchronous vs asynchronous replication, multi-leader replication, and conflict resolution. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Consistency Models: Implementation Workflow 25
+### CAP Theorem: Common Pitfalls
 
-This module expands consistency models in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat cap theorem as only a definition instead of an operating concern. Tie the discussion back to consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Transactions and Sagas: Implementation Workflow 26
+### Eventual Consistency: Debugging Workflow
 
-This module expands transactions and sagas in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use eventual consistency as a troubleshooting path for failures involving what is eventual consistency, conflict resolution strategies, and vector clocks. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Eventual Consistency: Implementation Workflow 27
+### Data Replication: Design Review Questions
 
-This module expands eventual consistency in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame data replication as a design review conversation around synchronous vs asynchronous replication, multi-leader replication, and conflict resolution. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Conflict Resolution: Implementation Workflow 28
+### CAP Theorem: Failure Modes
 
-This module expands conflict resolution in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how cap theorem fails when consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Distributed Locking: Implementation Workflow 29
+### Eventual Consistency: Operational Signals
 
-This module expands distributed locking in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect eventual consistency to the signals operators need when what is eventual consistency, conflict resolution strategies, and vector clocks changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Consensus Concepts: Implementation Workflow 30
+### Data Replication: Tradeoff Analysis
 
-This module expands consensus concepts in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach data replication, using synchronous vs asynchronous replication, multi-leader replication, and conflict resolution as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Read/Write Tradeoffs: Implementation Workflow 31
+### CAP Theorem: Practice Exercise
 
-This module expands read/write tradeoffs in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn cap theorem into a practical exercise built around consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Data Correctness Testing: Implementation Workflow 32
+### Eventual Consistency: Implementation Checklist
 
-This module expands data correctness testing in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn eventual consistency into a build-and-review checklist centered on what is eventual consistency, conflict resolution strategies, and vector clocks. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Consistency Models: Design Decisions 33
+### Data Replication: Common Pitfalls
 
-This module expands consistency models in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat data replication as only a definition instead of an operating concern. Tie the discussion back to synchronous vs asynchronous replication, multi-leader replication, and conflict resolution and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Transactions and Sagas: Design Decisions 34
+### CAP Theorem: Debugging Workflow
 
-This module expands transactions and sagas in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use cap theorem as a troubleshooting path for failures involving consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Eventual Consistency: Design Decisions 35
+### Eventual Consistency: Design Review Questions
 
-This module expands eventual consistency in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame eventual consistency as a design review conversation around what is eventual consistency, conflict resolution strategies, and vector clocks. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Conflict Resolution: Design Decisions 36
+### Data Replication: Failure Modes
 
-This module expands conflict resolution in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how data replication fails when synchronous vs asynchronous replication, multi-leader replication, and conflict resolution is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Distributed Locking: Design Decisions 37
+### CAP Theorem: Operational Signals
 
-This module expands distributed locking in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect cap theorem to the signals operators need when consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Consensus Concepts: Design Decisions 38
+### Eventual Consistency: Tradeoff Analysis
 
-This module expands consensus concepts in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach eventual consistency, using what is eventual consistency, conflict resolution strategies, and vector clocks as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Read/Write Tradeoffs: Design Decisions 39
+### Data Replication: Practice Exercise
 
-This module expands read/write tradeoffs in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn data replication into a practical exercise built around synchronous vs asynchronous replication, multi-leader replication, and conflict resolution. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Data Correctness Testing: Design Decisions 40
+### CAP Theorem: Implementation Checklist 02
 
-This module expands data correctness testing in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn cap theorem into a build-and-review checklist centered on consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Consistency Models: Failure Modes 41
+### Eventual Consistency: Common Pitfalls 02
 
-This module expands consistency models in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat eventual consistency as only a definition instead of an operating concern. Tie the discussion back to what is eventual consistency, conflict resolution strategies, and vector clocks and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Transactions and Sagas: Failure Modes 42
+### Data Replication: Debugging Workflow 02
 
-This module expands transactions and sagas in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use data replication as a troubleshooting path for failures involving synchronous vs asynchronous replication, multi-leader replication, and conflict resolution. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Eventual Consistency: Failure Modes 43
+### CAP Theorem: Design Review Questions 02
 
-This module expands eventual consistency in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame cap theorem as a design review conversation around consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Conflict Resolution: Failure Modes 44
+### Eventual Consistency: Failure Modes 02
 
-This module expands conflict resolution in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how eventual consistency fails when what is eventual consistency, conflict resolution strategies, and vector clocks is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Distributed Locking: Failure Modes 45
+### Data Replication: Operational Signals 02
 
-This module expands distributed locking in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect data replication to the signals operators need when synchronous vs asynchronous replication, multi-leader replication, and conflict resolution changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Consensus Concepts: Failure Modes 46
+### CAP Theorem: Tradeoff Analysis 02
 
-This module expands consensus concepts in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach cap theorem, using consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Read/Write Tradeoffs: Failure Modes 47
+### Eventual Consistency: Practice Exercise 02
 
-This module expands read/write tradeoffs in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn eventual consistency into a practical exercise built around what is eventual consistency, conflict resolution strategies, and vector clocks. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Data Correctness Testing: Failure Modes 48
+### Data Replication: Implementation Checklist 02
 
-This module expands data correctness testing in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn data replication into a build-and-review checklist centered on synchronous vs asynchronous replication, multi-leader replication, and conflict resolution. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Consistency Models: Debugging Strategy 49
+### CAP Theorem: Common Pitfalls 02
 
-This module expands consistency models in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat cap theorem as only a definition instead of an operating concern. Tie the discussion back to consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Transactions and Sagas: Debugging Strategy 50
+### Eventual Consistency: Debugging Workflow 02
 
-This module expands transactions and sagas in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use eventual consistency as a troubleshooting path for failures involving what is eventual consistency, conflict resolution strategies, and vector clocks. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Eventual Consistency: Debugging Strategy 51
+### Data Replication: Design Review Questions 02
 
-This module expands eventual consistency in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame data replication as a design review conversation around synchronous vs asynchronous replication, multi-leader replication, and conflict resolution. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Conflict Resolution: Debugging Strategy 52
+### CAP Theorem: Failure Modes 02
 
-This module expands conflict resolution in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how cap theorem fails when consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Distributed Locking: Debugging Strategy 53
+### Eventual Consistency: Operational Signals 02
 
-This module expands distributed locking in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect eventual consistency to the signals operators need when what is eventual consistency, conflict resolution strategies, and vector clocks changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Consensus Concepts: Debugging Strategy 54
+### Data Replication: Tradeoff Analysis 02
 
-This module expands consensus concepts in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach data replication, using synchronous vs asynchronous replication, multi-leader replication, and conflict resolution as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Read/Write Tradeoffs: Debugging Strategy 55
+### CAP Theorem: Practice Exercise 02
 
-This module expands read/write tradeoffs in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn cap theorem into a practical exercise built around consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Data Correctness Testing: Debugging Strategy 56
+### Eventual Consistency: Implementation Checklist 02
 
-This module expands data correctness testing in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn eventual consistency into a build-and-review checklist centered on what is eventual consistency, conflict resolution strategies, and vector clocks. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Consistency Models: Performance Lens 57
+### Data Replication: Common Pitfalls 02
 
-This module expands consistency models in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat data replication as only a definition instead of an operating concern. Tie the discussion back to synchronous vs asynchronous replication, multi-leader replication, and conflict resolution and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Transactions and Sagas: Performance Lens 58
+### CAP Theorem: Debugging Workflow 02
 
-This module expands transactions and sagas in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use cap theorem as a troubleshooting path for failures involving consistency, availability, partition tolerance, impossible to have all three, and cp vs ap systems. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Eventual Consistency: Performance Lens 59
+### Eventual Consistency: Design Review Questions 02
 
-This module expands eventual consistency in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame eventual consistency as a design review conversation around what is eventual consistency, conflict resolution strategies, and vector clocks. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Conflict Resolution: Performance Lens 60
+### Data Replication: Failure Modes 02
 
-This module expands conflict resolution in System Design Data Consistency and Tradeoffs so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how data replication fails when synchronous vs asynchronous replication, multi-leader replication, and conflict resolution is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.

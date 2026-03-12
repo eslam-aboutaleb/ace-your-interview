@@ -971,7 +971,7 @@ class LearningStore:
                 "requires_programming": True,
                 "language_options": list(PROBLEM_SOLVING_LANGUAGE_OPTIONS),
                 "selected_language": language,
-                "response_detail": "concise",
+                "response_detail": "very_detailed",
                 "is_dynamic_topic": True,
                 "content_ready": True,
             }
@@ -990,7 +990,7 @@ class LearningStore:
             "requires_programming": True,
             "language_options": list(PROBLEM_SOLVING_LANGUAGE_OPTIONS),
             "selected_language": language,
-            "response_detail": "concise",
+            "response_detail": "very_detailed",
             "is_dynamic_topic": True,
             "content_ready": False,
         }
@@ -1104,7 +1104,7 @@ class LearningStore:
         next_response_detail = (
             self._normalise_response_detail(response_detail)
             if response_detail is not None
-            else (existing or {}).get("response_detail", "concise")
+            else (existing or {}).get("response_detail", "very_detailed")
         )
         next_language = (
             self._normalise_language(preferred_language)
@@ -1227,7 +1227,7 @@ class LearningStore:
                 else []
             )
         response_detail = self._normalise_response_detail(
-            (prefs or {}).get("response_detail", "concise")
+            (prefs or {}).get("response_detail", "very_detailed")
         )
         preferred_language = self._normalise_language((prefs or {}).get("preferred_language", ""))
 

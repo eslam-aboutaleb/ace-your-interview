@@ -51,8 +51,6 @@ class FakeLLM:
 
 **Why it works:** Every number only needs a previously seen complement. The hash map stores each seen value with its index, so every step can compute the complement, check for it in O(1), and then store the current value after the check.
 
-**Interviewer-ready phrasing:** "I would state the complement invariant first, then explain why a hash map preserves that invariant while keeping the scan linear."
-
 **Common mistake:** A weak answer writes nested loops before proving why the invariant allows a one-pass lookup.
 
 ### Complexity
@@ -98,9 +96,7 @@ def two_sum(nums, target):
                     "answer": (
                         "**Answer:** The JVM memory model tradeoffs are easiest to explain by starting with stack vs heap responsibilities, then tying that to visibility, synchronization, and runtime cost.\n\n"
                         "**Why it's right:** In plain language, memory layout affects correctness first and performance second. If you explain where data lives, who can see it, and what coordination it needs, the tradeoffs become concrete.\n\n"
-                        "**Interviewer-ready phrasing:** \"I would explain the memory areas first, then connect them to visibility guarantees, synchronization needs, and the latency or throughput tradeoffs they create.\"\n\n"
-                        "**Common mistake:** A weak answer assumes garbage collection removes the need to reason about concurrency or visibility.\n\n"
-                        "**Self-check:** If a race condition appeared in production, which part of this explanation would help you diagnose it first?"
+                        "**Common mistake:** A weak answer assumes garbage collection removes the need to reason about concurrency or visibility."
                     ),
                     "difficulty": "medium",
                     "learning_objective": "After this question, the learner should be able to explain memory model fundamentals and interview tradeoffs.",

@@ -18,9 +18,7 @@ def _conceptual_answer(topic: str = "this service") -> str:
     return (
         f"**Answer:** {topic.title()} works by handling the core request path directly and enforcing the important constraints.\n\n"
         f"**Why it's right:** In plain language, {topic} stays reliable when the system validates inputs, preserves invariants, and checks the failure cases that matter.\n\n"
-        f"**Interviewer-ready phrasing:** \"I would explain {topic} by starting with the request flow, then I would connect the implementation to the constraints and failure modes.\"\n\n"
-        f"**Common mistake:** A weak answer about {topic} names the components but never explains why they fit the requirements.\n\n"
-        f"**Self-check:** If the main constraint changed tomorrow, what part of your explanation would you revisit first?"
+        f"**Common mistake:** A weak answer about {topic} names the components but never explains why they fit the requirements."
     )
 
 
@@ -36,8 +34,6 @@ def _problem_solving_answer(language: str = "python") -> str:
 **How to think about it:** Translate the prompt into a complement lookup problem and reject the nested-loop version once the invariant is clear.
 
 **Why it works:** Each number only needs to know whether its complement has already appeared, so the map preserves exactly the state the next step needs.
-
-**Interviewer-ready phrasing:** "I would state the complement invariant first, then use a hash map to preserve that invariant while scanning once from left to right."
 
 **Common mistake:** A weak answer starts coding the O(n^2) scan before explaining why the invariant allows a one-pass lookup.
 
@@ -318,17 +314,31 @@ Answer 2: Pagination controls payload size, improves latency, and avoids memory 
         )
         self.assertIn("**Answer:**", prompt)
         self.assertIn("**Why it's right:**", prompt)
-        self.assertIn("**Interviewer-ready phrasing:**", prompt)
         self.assertIn("**Common mistake:**", prompt)
-        self.assertIn("**Self-check:**", prompt)
         self.assertIn("Do not use meta-guideline phrasing", prompt)
         self.assertIn(
             "After this question, the learner should be able to",
             prompt,
         )
+        self.assertIn("common interview questions", prompt)
+        self.assertIn("how it works, when to use it, tradeoffs", prompt)
+        self.assertIn("keep the batch naturally progressive", prompt)
         self.assertIn("short readable paragraphs", prompt)
-        self.assertIn("use bullets only when listing steps/checklists/categories", prompt)
+        self.assertIn("Do not compress complex topics into a few generic sentences", prompt)
+        self.assertIn(
+            "use numbered lists instead of dense prose",
+            prompt,
+        )
+        self.assertIn(
+            "Use bullet lists for components, pros/cons, bottlenecks, failure modes",
+            prompt,
+        )
+        self.assertIn(
+            "If the question is mainly asking for a comparison, prefer a compact GFM table",
+            prompt,
+        )
         self.assertIn("valid GFM table syntax", prompt)
+        self.assertIn("relevant consistency/CAP implications", prompt)
         self.assertIn("fenced code blocks", prompt)
         self.assertIn("fenced Mermaid diagrams", prompt)
         self.assertIn("valid JSON, escape newlines", prompt)
@@ -352,11 +362,26 @@ Answer 2: Pagination controls payload size, improves latency, and avoids memory 
         self.assertIn("**Short answer:**", prompt)
         self.assertIn("**How to think about it:**", prompt)
         self.assertIn("**Why it works:**", prompt)
+        self.assertIn("**Common mistake:**", prompt)
         self.assertIn("**Tradeoff / scaling caveat:**", prompt)
         self.assertIn("**Invariant note:**", prompt)
+        self.assertIn("common coding interview questions", prompt)
+        self.assertIn("keep the batch naturally progressive", prompt)
+        self.assertIn("Prefer high-frequency interviewer prompts first", prompt)
         self.assertIn('exactly one fenced "python"', prompt)
         self.assertNotIn("Two Sum", prompt)
         self.assertNotIn("complement-hash-map", prompt)
+
+    def test_conceptual_programming_prompt_defaults_code_examples_to_python(self):
+        prompt = _build_prompt(
+            topic_id="topic-rate-limiting",
+            topic_title="Rate Limiting",
+            doc_content="Token bucket and sliding window counters protect services from bursts.",
+            count=1,
+            level="mid",
+            requires_programming=True,
+        )
+        self.assertIn('fenced "python" example', prompt)
 
     def test_problem_solving_validation_rejects_missing_required_headings(self):
         item = {
@@ -450,6 +475,8 @@ Use a dictionary and a loop.""",
         self.assertIn("**Why it works:**", items[0]["answer"])
         self.assertIn("**Tradeoff / scaling caveat:**", items[0]["answer"])
         self.assertIn("**Invariant note:**", items[0]["answer"])
+        self.assertIn("| Approach |", items[0]["answer"])
+        self.assertIn("1. Clarify the input", items[0]["answer"])
         self.assertIn("```python", items[0]["answer"])
         self.assertTrue(
             items[0]["learning_objective"].startswith(
@@ -468,11 +495,14 @@ Use a dictionary and a loop.""",
             level="mid",
         )
         self.assertEqual(len(items), 1)
+        self.assertTrue(
+            items[0]["question"].startswith(("How would you", "When would you", "If ")),
+        )
         self.assertIn("**Answer:**", items[0]["answer"])
         self.assertIn("**Why it's right:**", items[0]["answer"])
-        self.assertIn("**Interviewer-ready phrasing:**", items[0]["answer"])
         self.assertIn("**Common mistake:**", items[0]["answer"])
-        self.assertIn("**Self-check:**", items[0]["answer"])
+        self.assertIn("| Lens | Weak answer | Strong interview answer |", items[0]["answer"])
+        self.assertIn("1. Start with the concrete requirement", items[0]["answer"])
         self.assertTrue(
             items[0]["learning_objective"].startswith(
                 "After this question, the learner should be able to",
@@ -489,12 +519,12 @@ Use a dictionary and a loop.""",
             recovery_guidance=(
                 "- Use `**Answer:**`.\n"
                 "- Use `**Why it's right:**`.\n"
-                "- Use `**Interviewer-ready phrasing:**`."
+                "- Use `**Common mistake:**`."
             ),
         )
         self.assertIn("Recovery guidance:", conceptual_retry)
         self.assertIn("**Answer:**", conceptual_retry)
-        self.assertIn("**Interviewer-ready phrasing:**", conceptual_retry)
+        self.assertIn("**Common mistake:**", conceptual_retry)
 
         problem_retry = _build_retry_prompt(
             base_prompt="Base prompt",

@@ -5,188 +5,199 @@ levels: [junior, mid, senior]
 
 # Frontend Testing and UI Systems
 
-Scalable frontend teams need both reliable tests and a coherent UI system.
+This topic turns Frontend Testing and UI Systems into a practical study guide covering Testing Strategies and Component Libraries. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in rendering, state ownership, user experience, and accessibility. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Unit and Component Testing: Foundations 01
+## Testing Strategies
 
-This module expands unit and component testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Testing Strategies ties together unit testing with jest, component testing with react testing library, e2e testing with cypress/playwright, and snapshot testing inside Frontend Testing and UI Systems and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Unit testing with Jest: study the definition, normal flow, edge cases, and production consequences.
+- Component testing with React Testing Library: study the definition, normal flow, edge cases, and production consequences.
+- E2E testing with Cypress/Playwright: study the definition, normal flow, edge cases, and production consequences.
+- Snapshot testing: study the definition, normal flow, edge cases, and production consequences.
+- Testing async code: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Integration Testing: Foundations 02
+### Testing Strategies: Unit testing with Jest
 
-This module expands integration testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Unit testing with Jest is a concrete part of testing strategies and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## End-to-End Testing: Foundations 03
+### Testing Strategies: Component testing with React Testing Library
 
-This module expands end-to-end testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Component testing with React Testing Library is a concrete part of testing strategies and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Visual Regression: Foundations 04
+### Testing Strategies: E2E testing with Cypress/Playwright
 
-This module expands visual regression in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+E2E testing with Cypress/Playwright is a concrete part of testing strategies and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Design System Architecture: Foundations 05
+### Testing Strategies: Snapshot testing
 
-This module expands design system architecture in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Snapshot testing is a concrete part of testing strategies and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Component API Design: Foundations 06
+### Testing Strategies: Testing async code
 
-This module expands component api design in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Testing async code is a concrete part of testing strategies and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Theming and Tokens: Foundations 07
+## Component Libraries
 
-This module expands theming and tokens in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Component Libraries ties together building reusable component library, storybook for component documentation, design tokens and theming, and component composition patterns inside Frontend Testing and UI Systems and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Building reusable component library: study the definition, normal flow, edge cases, and production consequences.
+- Storybook for component documentation: study the definition, normal flow, edge cases, and production consequences.
+- Design tokens and theming: study the definition, normal flow, edge cases, and production consequences.
+- Component composition patterns: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## UI Quality Gates: Foundations 08
+### Component Libraries: Building reusable component library
 
-This module expands ui quality gates in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Building reusable component library is a concrete part of component libraries and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Unit and Component Testing: Mental Model 09
+### Component Libraries: Storybook for component documentation
 
-This module expands unit and component testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Storybook for component documentation is a concrete part of component libraries and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Integration Testing: Mental Model 10
+### Component Libraries: Design tokens and theming
 
-This module expands integration testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Design tokens and theming is a concrete part of component libraries and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## End-to-End Testing: Mental Model 11
+### Component Libraries: Component composition patterns
 
-This module expands end-to-end testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Component composition patterns is a concrete part of component libraries and directly affects how teams implement and operate Frontend Testing and UI Systems. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Visual Regression: Mental Model 12
+### Testing Strategies: Implementation Checklist
 
-This module expands visual regression in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn testing strategies into a build-and-review checklist centered on unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Design System Architecture: Mental Model 13
+### Component Libraries: Common Pitfalls
 
-This module expands design system architecture in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat component libraries as only a definition instead of an operating concern. Tie the discussion back to building reusable component library, storybook for component documentation, and design tokens and theming and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Component API Design: Mental Model 14
+### Testing Strategies: Debugging Workflow
 
-This module expands component api design in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use testing strategies as a troubleshooting path for failures involving unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Theming and Tokens: Mental Model 15
+### Component Libraries: Design Review Questions
 
-This module expands theming and tokens in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame component libraries as a design review conversation around building reusable component library, storybook for component documentation, and design tokens and theming. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## UI Quality Gates: Mental Model 16
+### Testing Strategies: Failure Modes
 
-This module expands ui quality gates in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how testing strategies fails when unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Unit and Component Testing: Architecture Pattern 17
+### Component Libraries: Operational Signals
 
-This module expands unit and component testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect component libraries to the signals operators need when building reusable component library, storybook for component documentation, and design tokens and theming changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Integration Testing: Architecture Pattern 18
+### Testing Strategies: Tradeoff Analysis
 
-This module expands integration testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach testing strategies, using unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## End-to-End Testing: Architecture Pattern 19
+### Component Libraries: Practice Exercise
 
-This module expands end-to-end testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn component libraries into a practical exercise built around building reusable component library, storybook for component documentation, and design tokens and theming. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Visual Regression: Architecture Pattern 20
+### Testing Strategies: Implementation Checklist 02
 
-This module expands visual regression in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn testing strategies into a build-and-review checklist centered on unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Design System Architecture: Architecture Pattern 21
+### Component Libraries: Common Pitfalls 02
 
-This module expands design system architecture in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat component libraries as only a definition instead of an operating concern. Tie the discussion back to building reusable component library, storybook for component documentation, and design tokens and theming and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Component API Design: Architecture Pattern 22
+### Testing Strategies: Debugging Workflow 02
 
-This module expands component api design in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use testing strategies as a troubleshooting path for failures involving unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Theming and Tokens: Architecture Pattern 23
+### Component Libraries: Design Review Questions 02
 
-This module expands theming and tokens in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame component libraries as a design review conversation around building reusable component library, storybook for component documentation, and design tokens and theming. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## UI Quality Gates: Architecture Pattern 24
+### Testing Strategies: Failure Modes 02
 
-This module expands ui quality gates in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how testing strategies fails when unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Unit and Component Testing: Implementation Workflow 25
+### Component Libraries: Operational Signals 02
 
-This module expands unit and component testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect component libraries to the signals operators need when building reusable component library, storybook for component documentation, and design tokens and theming changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Integration Testing: Implementation Workflow 26
+### Testing Strategies: Tradeoff Analysis 02
 
-This module expands integration testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach testing strategies, using unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## End-to-End Testing: Implementation Workflow 27
+### Component Libraries: Practice Exercise 02
 
-This module expands end-to-end testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn component libraries into a practical exercise built around building reusable component library, storybook for component documentation, and design tokens and theming. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Visual Regression: Implementation Workflow 28
+### Testing Strategies: Implementation Checklist 03
 
-This module expands visual regression in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn testing strategies into a build-and-review checklist centered on unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Design System Architecture: Implementation Workflow 29
+### Component Libraries: Common Pitfalls 03
 
-This module expands design system architecture in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat component libraries as only a definition instead of an operating concern. Tie the discussion back to building reusable component library, storybook for component documentation, and design tokens and theming and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Component API Design: Implementation Workflow 30
+### Testing Strategies: Debugging Workflow 03
 
-This module expands component api design in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use testing strategies as a troubleshooting path for failures involving unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Theming and Tokens: Implementation Workflow 31
+### Component Libraries: Design Review Questions 03
 
-This module expands theming and tokens in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame component libraries as a design review conversation around building reusable component library, storybook for component documentation, and design tokens and theming. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## UI Quality Gates: Implementation Workflow 32
+### Testing Strategies: Failure Modes 03
 
-This module expands ui quality gates in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how testing strategies fails when unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Unit and Component Testing: Design Decisions 33
+### Component Libraries: Operational Signals 03
 
-This module expands unit and component testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect component libraries to the signals operators need when building reusable component library, storybook for component documentation, and design tokens and theming changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Integration Testing: Design Decisions 34
+### Testing Strategies: Tradeoff Analysis 03
 
-This module expands integration testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach testing strategies, using unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## End-to-End Testing: Design Decisions 35
+### Component Libraries: Practice Exercise 03
 
-This module expands end-to-end testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn component libraries into a practical exercise built around building reusable component library, storybook for component documentation, and design tokens and theming. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Visual Regression: Design Decisions 36
+### Testing Strategies: Implementation Checklist 04
 
-This module expands visual regression in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn testing strategies into a build-and-review checklist centered on unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Design System Architecture: Design Decisions 37
+### Component Libraries: Common Pitfalls 04
 
-This module expands design system architecture in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat component libraries as only a definition instead of an operating concern. Tie the discussion back to building reusable component library, storybook for component documentation, and design tokens and theming and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Component API Design: Design Decisions 38
+### Testing Strategies: Debugging Workflow 04
 
-This module expands component api design in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use testing strategies as a troubleshooting path for failures involving unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Theming and Tokens: Design Decisions 39
+### Component Libraries: Design Review Questions 04
 
-This module expands theming and tokens in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame component libraries as a design review conversation around building reusable component library, storybook for component documentation, and design tokens and theming. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## UI Quality Gates: Design Decisions 40
+### Testing Strategies: Failure Modes 04
 
-This module expands ui quality gates in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how testing strategies fails when unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Unit and Component Testing: Failure Modes 41
+### Component Libraries: Operational Signals 04
 
-This module expands unit and component testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect component libraries to the signals operators need when building reusable component library, storybook for component documentation, and design tokens and theming changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Integration Testing: Failure Modes 42
+### Testing Strategies: Tradeoff Analysis 04
 
-This module expands integration testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach testing strategies, using unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## End-to-End Testing: Failure Modes 43
+### Component Libraries: Practice Exercise 04
 
-This module expands end-to-end testing in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn component libraries into a practical exercise built around building reusable component library, storybook for component documentation, and design tokens and theming. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Visual Regression: Failure Modes 44
+### Testing Strategies: Implementation Checklist 05
 
-This module expands visual regression in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn testing strategies into a build-and-review checklist centered on unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Design System Architecture: Failure Modes 45
+### Component Libraries: Common Pitfalls 05
 
-This module expands design system architecture in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat component libraries as only a definition instead of an operating concern. Tie the discussion back to building reusable component library, storybook for component documentation, and design tokens and theming and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Component API Design: Failure Modes 46
+### Testing Strategies: Debugging Workflow 05
 
-This module expands component api design in Frontend Testing and UI Systems so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use testing strategies as a troubleshooting path for failures involving unit testing with jest, component testing with react testing library, and e2e testing with cypress/playwright. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.

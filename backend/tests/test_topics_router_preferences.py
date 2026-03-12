@@ -99,7 +99,7 @@ API implementation details.
         get1 = self.client.get("/api/topics/01-static/preferences")
         self.assertEqual(get1.status_code, 200)
         initial = get1.json()
-        self.assertEqual(initial["response_detail"], "concise")
+        self.assertEqual(initial["response_detail"], "very_detailed")
 
         put = self.client.put(
             "/api/topics/01-static/preferences",

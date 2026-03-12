@@ -5,236 +5,266 @@ levels: [junior, mid, senior]
 
 # Infrastructure Docker Deep Dive
 
-Docker literacy is expected for modern backend and platform interviews.
+This topic turns Infrastructure Docker Deep Dive into a practical study guide covering Docker Fundamentals, Image Construction, and Runtime Security, and related production concerns. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in scale, fault tolerance, data flow, and operational tradeoffs. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Image Construction: Foundations 01
+## Docker Fundamentals
 
-This module expands image construction in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Docker Fundamentals ties together container vs virtual machines, docker architecture, images and containers, and dockerfile basics inside Infrastructure Docker Deep Dive and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Container vs virtual machines: study the definition, normal flow, edge cases, and production consequences.
+- Docker architecture: focus on daemon, client, and registry and how those choices change system behavior.
+- Images and containers: study the definition, normal flow, edge cases, and production consequences.
+- Dockerfile basics: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Layer Caching: Foundations 02
+### Docker Fundamentals: Container vs virtual machines
 
-This module expands layer caching in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Container vs virtual machines is a concrete part of docker fundamentals and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Multi-stage Builds: Foundations 03
+### Docker Fundamentals: Docker architecture
 
-This module expands multi-stage builds in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Docker architecture is a concrete part of docker fundamentals and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Key angles include daemon, client, and registry, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Runtime Security: Foundations 04
+### Docker Fundamentals: Images and containers
 
-This module expands runtime security in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Images and containers is a concrete part of docker fundamentals and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Networking: Foundations 05
+### Docker Fundamentals: Dockerfile basics
 
-This module expands networking in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Dockerfile basics is a concrete part of docker fundamentals and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Volumes and Persistence: Foundations 06
+## Image Construction
 
-This module expands volumes and persistence in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Image Construction ties together writing efficient dockerfiles, multi-stage builds, layer caching optimization, and base image selection inside Infrastructure Docker Deep Dive and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Writing efficient Dockerfiles: study the definition, normal flow, edge cases, and production consequences.
+- Multi-stage builds: study the definition, normal flow, edge cases, and production consequences.
+- Layer caching optimization: study the definition, normal flow, edge cases, and production consequences.
+- Base image selection: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Compose Workflows: Foundations 07
+### Image Construction: Writing efficient Dockerfiles
 
-This module expands compose workflows in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Writing efficient Dockerfiles is a concrete part of image construction and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Troubleshooting Containers: Foundations 08
+### Image Construction: Multi-stage builds
 
-This module expands troubleshooting containers in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Multi-stage builds is a concrete part of image construction and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Image Construction: Mental Model 09
+### Image Construction: Layer caching optimization
 
-This module expands image construction in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Layer caching optimization is a concrete part of image construction and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Layer Caching: Mental Model 10
+### Image Construction: Base image selection
 
-This module expands layer caching in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Base image selection is a concrete part of image construction and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Multi-stage Builds: Mental Model 11
+## Runtime Security
 
-This module expands multi-stage builds in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Runtime Security ties together running containers as non-root, container security scanning, resource limits and memory, and network isolation inside Infrastructure Docker Deep Dive and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Running containers as non-root: study the definition, normal flow, edge cases, and production consequences.
+- Container security scanning: study the definition, normal flow, edge cases, and production consequences.
+- Resource limits and memory: study the definition, normal flow, edge cases, and production consequences.
+- Network isolation: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Runtime Security: Mental Model 12
+### Runtime Security: Running containers as non-root
 
-This module expands runtime security in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Running containers as non-root is a concrete part of runtime security and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Networking: Mental Model 13
+### Runtime Security: Container security scanning
 
-This module expands networking in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Container security scanning is a concrete part of runtime security and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Volumes and Persistence: Mental Model 14
+### Runtime Security: Resource limits and memory
 
-This module expands volumes and persistence in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Resource limits and memory is a concrete part of runtime security and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Compose Workflows: Mental Model 15
+### Runtime Security: Network isolation
 
-This module expands compose workflows in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Network isolation is a concrete part of runtime security and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Troubleshooting Containers: Mental Model 16
+## Docker Networking
 
-This module expands troubleshooting containers in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Docker Networking ties together bridge, host, overlay networks, port mapping, dns and service discovery, and container communication inside Infrastructure Docker Deep Dive and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Bridge, host, overlay networks: study the definition, normal flow, edge cases, and production consequences.
+- Port mapping: study the definition, normal flow, edge cases, and production consequences.
+- DNS and service discovery: study the definition, normal flow, edge cases, and production consequences.
+- Container communication: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Image Construction: Architecture Pattern 17
+### Docker Networking: Bridge, host, overlay networks
 
-This module expands image construction in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Bridge, host, overlay networks is a concrete part of docker networking and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Layer Caching: Architecture Pattern 18
+### Docker Networking: Port mapping
 
-This module expands layer caching in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Port mapping is a concrete part of docker networking and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Multi-stage Builds: Architecture Pattern 19
+### Docker Networking: DNS and service discovery
 
-This module expands multi-stage builds in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+DNS and service discovery is a concrete part of docker networking and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Runtime Security: Architecture Pattern 20
+### Docker Networking: Container communication
 
-This module expands runtime security in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Container communication is a concrete part of docker networking and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Networking: Architecture Pattern 21
+## Volumes and Persistence
 
-This module expands networking in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Volumes and Persistence ties together named volumes, bind mounts, data persistence strategies, and backup and restore inside Infrastructure Docker Deep Dive and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Named volumes: study the definition, normal flow, edge cases, and production consequences.
+- Bind mounts: study the definition, normal flow, edge cases, and production consequences.
+- Data persistence strategies: study the definition, normal flow, edge cases, and production consequences.
+- Backup and restore: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Volumes and Persistence: Architecture Pattern 22
+### Volumes and Persistence: Named volumes
 
-This module expands volumes and persistence in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Named volumes is a concrete part of volumes and persistence and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Compose Workflows: Architecture Pattern 23
+### Volumes and Persistence: Bind mounts
 
-This module expands compose workflows in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Bind mounts is a concrete part of volumes and persistence and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Troubleshooting Containers: Architecture Pattern 24
+### Volumes and Persistence: Data persistence strategies
 
-This module expands troubleshooting containers in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Data persistence strategies is a concrete part of volumes and persistence and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Image Construction: Implementation Workflow 25
+### Volumes and Persistence: Backup and restore
 
-This module expands image construction in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Backup and restore is a concrete part of volumes and persistence and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Layer Caching: Implementation Workflow 26
+## Docker Compose
 
-This module expands layer caching in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Docker Compose ties together compose file syntax, multi-container applications, environment variables, and development workflows inside Infrastructure Docker Deep Dive and shows how the concepts behave in real scale, fault tolerance, data flow, and operational tradeoffs. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Compose file syntax: study the definition, normal flow, edge cases, and production consequences.
+- Multi-container applications: study the definition, normal flow, edge cases, and production consequences.
+- Environment variables: study the definition, normal flow, edge cases, and production consequences.
+- Development workflows: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Multi-stage Builds: Implementation Workflow 27
+### Docker Compose: Compose file syntax
 
-This module expands multi-stage builds in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compose file syntax is a concrete part of docker compose and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Runtime Security: Implementation Workflow 28
+### Docker Compose: Multi-container applications
 
-This module expands runtime security in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Multi-container applications is a concrete part of docker compose and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Networking: Implementation Workflow 29
+### Docker Compose: Environment variables
 
-This module expands networking in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Environment variables is a concrete part of docker compose and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Volumes and Persistence: Implementation Workflow 30
+### Docker Compose: Development workflows
 
-This module expands volumes and persistence in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Development workflows is a concrete part of docker compose and directly affects how teams implement and operate Infrastructure Docker Deep Dive. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in scale, fault tolerance, data flow, and operational tradeoffs.
 
-## Compose Workflows: Implementation Workflow 31
+### Docker Fundamentals: Implementation Checklist
 
-This module expands compose workflows in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn docker fundamentals into a build-and-review checklist centered on container vs virtual machines, docker architecture, and images and containers. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Troubleshooting Containers: Implementation Workflow 32
+### Image Construction: Common Pitfalls
 
-This module expands troubleshooting containers in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat image construction as only a definition instead of an operating concern. Tie the discussion back to writing efficient dockerfiles, multi-stage builds, and layer caching optimization and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Image Construction: Design Decisions 33
+### Runtime Security: Debugging Workflow
 
-This module expands image construction in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use runtime security as a troubleshooting path for failures involving running containers as non-root, container security scanning, and resource limits and memory. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Layer Caching: Design Decisions 34
+### Docker Networking: Design Review Questions
 
-This module expands layer caching in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame docker networking as a design review conversation around bridge, host, overlay networks, port mapping, and dns and service discovery. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Multi-stage Builds: Design Decisions 35
+### Volumes and Persistence: Failure Modes
 
-This module expands multi-stage builds in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how volumes and persistence fails when named volumes, bind mounts, and data persistence strategies is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Runtime Security: Design Decisions 36
+### Docker Compose: Operational Signals
 
-This module expands runtime security in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect docker compose to the signals operators need when compose file syntax, multi-container applications, and environment variables changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Networking: Design Decisions 37
+### Docker Fundamentals: Tradeoff Analysis
 
-This module expands networking in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach docker fundamentals, using container vs virtual machines, docker architecture, and images and containers as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Volumes and Persistence: Design Decisions 38
+### Image Construction: Practice Exercise
 
-This module expands volumes and persistence in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn image construction into a practical exercise built around writing efficient dockerfiles, multi-stage builds, and layer caching optimization. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Compose Workflows: Design Decisions 39
+### Runtime Security: Implementation Checklist
 
-This module expands compose workflows in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn runtime security into a build-and-review checklist centered on running containers as non-root, container security scanning, and resource limits and memory. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Troubleshooting Containers: Design Decisions 40
+### Docker Networking: Common Pitfalls
 
-This module expands troubleshooting containers in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat docker networking as only a definition instead of an operating concern. Tie the discussion back to bridge, host, overlay networks, port mapping, and dns and service discovery and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Image Construction: Failure Modes 41
+### Volumes and Persistence: Debugging Workflow
 
-This module expands image construction in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use volumes and persistence as a troubleshooting path for failures involving named volumes, bind mounts, and data persistence strategies. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Layer Caching: Failure Modes 42
+### Docker Compose: Design Review Questions
 
-This module expands layer caching in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame docker compose as a design review conversation around compose file syntax, multi-container applications, and environment variables. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Multi-stage Builds: Failure Modes 43
+### Docker Fundamentals: Failure Modes
 
-This module expands multi-stage builds in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how docker fundamentals fails when container vs virtual machines, docker architecture, and images and containers is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Runtime Security: Failure Modes 44
+### Image Construction: Operational Signals
 
-This module expands runtime security in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect image construction to the signals operators need when writing efficient dockerfiles, multi-stage builds, and layer caching optimization changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Networking: Failure Modes 45
+### Runtime Security: Tradeoff Analysis
 
-This module expands networking in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach runtime security, using running containers as non-root, container security scanning, and resource limits and memory as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Volumes and Persistence: Failure Modes 46
+### Docker Networking: Practice Exercise
 
-This module expands volumes and persistence in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn docker networking into a practical exercise built around bridge, host, overlay networks, port mapping, and dns and service discovery. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Compose Workflows: Failure Modes 47
+### Volumes and Persistence: Implementation Checklist
 
-This module expands compose workflows in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn volumes and persistence into a build-and-review checklist centered on named volumes, bind mounts, and data persistence strategies. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Troubleshooting Containers: Failure Modes 48
+### Docker Compose: Common Pitfalls
 
-This module expands troubleshooting containers in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat docker compose as only a definition instead of an operating concern. Tie the discussion back to compose file syntax, multi-container applications, and environment variables and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Image Construction: Debugging Strategy 49
+### Docker Fundamentals: Debugging Workflow
 
-This module expands image construction in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use docker fundamentals as a troubleshooting path for failures involving container vs virtual machines, docker architecture, and images and containers. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Layer Caching: Debugging Strategy 50
+### Image Construction: Design Review Questions
 
-This module expands layer caching in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame image construction as a design review conversation around writing efficient dockerfiles, multi-stage builds, and layer caching optimization. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Multi-stage Builds: Debugging Strategy 51
+### Runtime Security: Failure Modes
 
-This module expands multi-stage builds in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how runtime security fails when running containers as non-root, container security scanning, and resource limits and memory is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Runtime Security: Debugging Strategy 52
+### Docker Networking: Operational Signals
 
-This module expands runtime security in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect docker networking to the signals operators need when bridge, host, overlay networks, port mapping, and dns and service discovery changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Networking: Debugging Strategy 53
+### Volumes and Persistence: Tradeoff Analysis
 
-This module expands networking in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach volumes and persistence, using named volumes, bind mounts, and data persistence strategies as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Volumes and Persistence: Debugging Strategy 54
+### Docker Compose: Practice Exercise
 
-This module expands volumes and persistence in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn docker compose into a practical exercise built around compose file syntax, multi-container applications, and environment variables. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Compose Workflows: Debugging Strategy 55
+### Docker Fundamentals: Implementation Checklist 02
 
-This module expands compose workflows in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn docker fundamentals into a build-and-review checklist centered on container vs virtual machines, docker architecture, and images and containers. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Troubleshooting Containers: Debugging Strategy 56
+### Image Construction: Common Pitfalls 02
 
-This module expands troubleshooting containers in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat image construction as only a definition instead of an operating concern. Tie the discussion back to writing efficient dockerfiles, multi-stage builds, and layer caching optimization and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Image Construction: Performance Lens 57
+### Runtime Security: Debugging Workflow 02
 
-This module expands image construction in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use runtime security as a troubleshooting path for failures involving running containers as non-root, container security scanning, and resource limits and memory. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Layer Caching: Performance Lens 58
+### Docker Networking: Design Review Questions 02
 
-This module expands layer caching in Infrastructure Docker Deep Dive so candidates can explain how the concept behaves in real distributed systems work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame docker networking as a design review conversation around bridge, host, overlay networks, port mapping, and dns and service discovery. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.

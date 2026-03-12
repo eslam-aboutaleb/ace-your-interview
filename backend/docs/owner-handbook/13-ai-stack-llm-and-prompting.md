@@ -5,212 +5,242 @@ levels: [junior, mid, senior]
 
 # AI Stack LLM and Prompting
 
-Model output quality depends on prompt design, schema rigor, and validation loops.
+This topic turns AI Stack LLM and Prompting into a practical study guide covering Tokenization and Context Windows, Prompt Design Patterns, and Structured Output, and related production concerns. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in prompt design, retrieval quality, tool orchestration, and monitoring. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Tokenization and Context Windows: Foundations 01
+## Tokenization and Context Windows
 
-This module expands tokenization and context windows in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Tokenization and Context Windows ties together how text is converted to tokens, token limits and context windows, handling long context, and token counting and optimization inside AI Stack LLM and Prompting and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- How text is converted to tokens: study the definition, normal flow, edge cases, and production consequences.
+- Token limits and context windows: study the definition, normal flow, edge cases, and production consequences.
+- Handling long context: study the definition, normal flow, edge cases, and production consequences.
+- Token counting and optimization: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Prompt Design Patterns: Foundations 02
+### Tokenization and Context Windows: How text is converted to tokens
 
-This module expands prompt design patterns in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+How text is converted to tokens is a concrete part of tokenization and context windows and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Structured Output: Foundations 03
+### Tokenization and Context Windows: Token limits and context windows
 
-This module expands structured output in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Token limits and context windows is a concrete part of tokenization and context windows and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Tool Calling Basics: Foundations 04
+### Tokenization and Context Windows: Handling long context
 
-This module expands tool calling basics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Handling long context is a concrete part of tokenization and context windows and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Hallucination Mitigation: Foundations 05
+### Tokenization and Context Windows: Token counting and optimization
 
-This module expands hallucination mitigation in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Token counting and optimization is a concrete part of tokenization and context windows and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Evaluation Rubrics: Foundations 06
+## Prompt Design Patterns
 
-This module expands evaluation rubrics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Prompt Design Patterns ties together chain-of-thought prompting, few-shot prompting, react prompting, and system vs user prompts inside AI Stack LLM and Prompting and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Chain-of-thought prompting: study the definition, normal flow, edge cases, and production consequences.
+- Few-shot prompting: study the definition, normal flow, edge cases, and production consequences.
+- ReAct prompting: study the definition, normal flow, edge cases, and production consequences.
+- System vs user prompts: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Safety Constraints: Foundations 07
+### Prompt Design Patterns: Chain-of-thought prompting
 
-This module expands safety constraints in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Chain-of-thought prompting is a concrete part of prompt design patterns and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Production Prompt Ops: Foundations 08
+### Prompt Design Patterns: Few-shot prompting
 
-This module expands production prompt ops in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Few-shot prompting is a concrete part of prompt design patterns and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Tokenization and Context Windows: Mental Model 09
+### Prompt Design Patterns: ReAct prompting
 
-This module expands tokenization and context windows in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+ReAct prompting is a concrete part of prompt design patterns and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Prompt Design Patterns: Mental Model 10
+### Prompt Design Patterns: System vs user prompts
 
-This module expands prompt design patterns in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+System vs user prompts is a concrete part of prompt design patterns and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Structured Output: Mental Model 11
+## Structured Output
 
-This module expands structured output in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Structured Output ties together json schema generation, function calling, output validation, and handling parsing errors inside AI Stack LLM and Prompting and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- JSON schema generation: study the definition, normal flow, edge cases, and production consequences.
+- Function calling: study the definition, normal flow, edge cases, and production consequences.
+- Output validation: study the definition, normal flow, edge cases, and production consequences.
+- Handling parsing errors: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Tool Calling Basics: Mental Model 12
+### Structured Output: JSON schema generation
 
-This module expands tool calling basics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+JSON schema generation is a concrete part of structured output and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Hallucination Mitigation: Mental Model 13
+### Structured Output: Function calling
 
-This module expands hallucination mitigation in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Function calling is a concrete part of structured output and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Evaluation Rubrics: Mental Model 14
+### Structured Output: Output validation
 
-This module expands evaluation rubrics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Output validation is a concrete part of structured output and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Safety Constraints: Mental Model 15
+### Structured Output: Handling parsing errors
 
-This module expands safety constraints in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Handling parsing errors is a concrete part of structured output and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Production Prompt Ops: Mental Model 16
+## Hallucination Mitigation
 
-This module expands production prompt ops in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Hallucination Mitigation ties together what causes hallucinations, retrieval-augmented generation, grounding techniques, and confidence scoring inside AI Stack LLM and Prompting and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- What causes hallucinations: study the definition, normal flow, edge cases, and production consequences.
+- Retrieval-augmented generation: study the definition, normal flow, edge cases, and production consequences.
+- Grounding techniques: study the definition, normal flow, edge cases, and production consequences.
+- Confidence scoring: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Tokenization and Context Windows: Architecture Pattern 17
+### Hallucination Mitigation: What causes hallucinations
 
-This module expands tokenization and context windows in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+What causes hallucinations is a concrete part of hallucination mitigation and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Prompt Design Patterns: Architecture Pattern 18
+### Hallucination Mitigation: Retrieval-augmented generation
 
-This module expands prompt design patterns in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Retrieval-augmented generation is a concrete part of hallucination mitigation and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Structured Output: Architecture Pattern 19
+### Hallucination Mitigation: Grounding techniques
 
-This module expands structured output in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Grounding techniques is a concrete part of hallucination mitigation and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Tool Calling Basics: Architecture Pattern 20
+### Hallucination Mitigation: Confidence scoring
 
-This module expands tool calling basics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Confidence scoring is a concrete part of hallucination mitigation and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Hallucination Mitigation: Architecture Pattern 21
+## Evaluation Rubrics
 
-This module expands hallucination mitigation in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Evaluation Rubrics ties together llm evaluation metrics, building test sets, a/b testing prompts, and quality vs cost trade-offs inside AI Stack LLM and Prompting and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- LLM evaluation metrics: study the definition, normal flow, edge cases, and production consequences.
+- Building test sets: study the definition, normal flow, edge cases, and production consequences.
+- A/B testing prompts: study the definition, normal flow, edge cases, and production consequences.
+- Quality vs cost trade-offs: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Evaluation Rubrics: Architecture Pattern 22
+### Evaluation Rubrics: LLM evaluation metrics
 
-This module expands evaluation rubrics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+LLM evaluation metrics is a concrete part of evaluation rubrics and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Safety Constraints: Architecture Pattern 23
+### Evaluation Rubrics: Building test sets
 
-This module expands safety constraints in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Building test sets is a concrete part of evaluation rubrics and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Production Prompt Ops: Architecture Pattern 24
+### Evaluation Rubrics: A/B testing prompts
 
-This module expands production prompt ops in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+A/B testing prompts is a concrete part of evaluation rubrics and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Tokenization and Context Windows: Implementation Workflow 25
+### Evaluation Rubrics: Quality vs cost trade-offs
 
-This module expands tokenization and context windows in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Quality vs cost trade-offs is a concrete part of evaluation rubrics and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Prompt Design Patterns: Implementation Workflow 26
+## Safety Constraints
 
-This module expands prompt design patterns in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Safety Constraints ties together content filtering, prompt injection prevention, output validation, and rate limiting and abuse prevention inside AI Stack LLM and Prompting and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Content filtering: study the definition, normal flow, edge cases, and production consequences.
+- Prompt injection prevention: study the definition, normal flow, edge cases, and production consequences.
+- Output validation: study the definition, normal flow, edge cases, and production consequences.
+- Rate limiting and abuse prevention: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Structured Output: Implementation Workflow 27
+### Safety Constraints: Content filtering
 
-This module expands structured output in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Content filtering is a concrete part of safety constraints and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Tool Calling Basics: Implementation Workflow 28
+### Safety Constraints: Prompt injection prevention
 
-This module expands tool calling basics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Prompt injection prevention is a concrete part of safety constraints and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Hallucination Mitigation: Implementation Workflow 29
+### Safety Constraints: Output validation
 
-This module expands hallucination mitigation in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Output validation is a concrete part of safety constraints and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Evaluation Rubrics: Implementation Workflow 30
+### Safety Constraints: Rate limiting and abuse prevention
 
-This module expands evaluation rubrics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Rate limiting and abuse prevention is a concrete part of safety constraints and directly affects how teams implement and operate AI Stack LLM and Prompting. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Safety Constraints: Implementation Workflow 31
+### Tokenization and Context Windows: Implementation Checklist
 
-This module expands safety constraints in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn tokenization and context windows into a build-and-review checklist centered on how text is converted to tokens, token limits and context windows, and handling long context. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Production Prompt Ops: Implementation Workflow 32
+### Prompt Design Patterns: Common Pitfalls
 
-This module expands production prompt ops in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat prompt design patterns as only a definition instead of an operating concern. Tie the discussion back to chain-of-thought prompting, few-shot prompting, and react prompting and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Tokenization and Context Windows: Design Decisions 33
+### Structured Output: Debugging Workflow
 
-This module expands tokenization and context windows in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use structured output as a troubleshooting path for failures involving json schema generation, function calling, and output validation. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Prompt Design Patterns: Design Decisions 34
+### Hallucination Mitigation: Design Review Questions
 
-This module expands prompt design patterns in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame hallucination mitigation as a design review conversation around what causes hallucinations, retrieval-augmented generation, and grounding techniques. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Structured Output: Design Decisions 35
+### Evaluation Rubrics: Failure Modes
 
-This module expands structured output in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how evaluation rubrics fails when llm evaluation metrics, building test sets, and a/b testing prompts is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Tool Calling Basics: Design Decisions 36
+### Safety Constraints: Operational Signals
 
-This module expands tool calling basics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect safety constraints to the signals operators need when content filtering, prompt injection prevention, and output validation changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Hallucination Mitigation: Design Decisions 37
+### Tokenization and Context Windows: Tradeoff Analysis
 
-This module expands hallucination mitigation in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach tokenization and context windows, using how text is converted to tokens, token limits and context windows, and handling long context as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Evaluation Rubrics: Design Decisions 38
+### Prompt Design Patterns: Practice Exercise
 
-This module expands evaluation rubrics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn prompt design patterns into a practical exercise built around chain-of-thought prompting, few-shot prompting, and react prompting. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Safety Constraints: Design Decisions 39
+### Structured Output: Implementation Checklist
 
-This module expands safety constraints in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn structured output into a build-and-review checklist centered on json schema generation, function calling, and output validation. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Production Prompt Ops: Design Decisions 40
+### Hallucination Mitigation: Common Pitfalls
 
-This module expands production prompt ops in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat hallucination mitigation as only a definition instead of an operating concern. Tie the discussion back to what causes hallucinations, retrieval-augmented generation, and grounding techniques and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Tokenization and Context Windows: Failure Modes 41
+### Evaluation Rubrics: Debugging Workflow
 
-This module expands tokenization and context windows in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use evaluation rubrics as a troubleshooting path for failures involving llm evaluation metrics, building test sets, and a/b testing prompts. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Prompt Design Patterns: Failure Modes 42
+### Safety Constraints: Design Review Questions
 
-This module expands prompt design patterns in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame safety constraints as a design review conversation around content filtering, prompt injection prevention, and output validation. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Structured Output: Failure Modes 43
+### Tokenization and Context Windows: Failure Modes
 
-This module expands structured output in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how tokenization and context windows fails when how text is converted to tokens, token limits and context windows, and handling long context is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Tool Calling Basics: Failure Modes 44
+### Prompt Design Patterns: Operational Signals
 
-This module expands tool calling basics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect prompt design patterns to the signals operators need when chain-of-thought prompting, few-shot prompting, and react prompting changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Hallucination Mitigation: Failure Modes 45
+### Structured Output: Tradeoff Analysis
 
-This module expands hallucination mitigation in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach structured output, using json schema generation, function calling, and output validation as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Evaluation Rubrics: Failure Modes 46
+### Hallucination Mitigation: Practice Exercise
 
-This module expands evaluation rubrics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn hallucination mitigation into a practical exercise built around what causes hallucinations, retrieval-augmented generation, and grounding techniques. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Safety Constraints: Failure Modes 47
+### Evaluation Rubrics: Implementation Checklist
 
-This module expands safety constraints in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn evaluation rubrics into a build-and-review checklist centered on llm evaluation metrics, building test sets, and a/b testing prompts. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Production Prompt Ops: Failure Modes 48
+### Safety Constraints: Common Pitfalls
 
-This module expands production prompt ops in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat safety constraints as only a definition instead of an operating concern. Tie the discussion back to content filtering, prompt injection prevention, and output validation and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Tokenization and Context Windows: Debugging Strategy 49
+### Tokenization and Context Windows: Debugging Workflow
 
-This module expands tokenization and context windows in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use tokenization and context windows as a troubleshooting path for failures involving how text is converted to tokens, token limits and context windows, and handling long context. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Prompt Design Patterns: Debugging Strategy 50
+### Prompt Design Patterns: Design Review Questions
 
-This module expands prompt design patterns in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame prompt design patterns as a design review conversation around chain-of-thought prompting, few-shot prompting, and react prompting. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Structured Output: Debugging Strategy 51
+### Structured Output: Failure Modes
 
-This module expands structured output in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how structured output fails when json schema generation, function calling, and output validation is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Tool Calling Basics: Debugging Strategy 52
+### Hallucination Mitigation: Operational Signals
 
-This module expands tool calling basics in AI Stack LLM and Prompting so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect hallucination mitigation to the signals operators need when what causes hallucinations, retrieval-augmented generation, and grounding techniques changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.

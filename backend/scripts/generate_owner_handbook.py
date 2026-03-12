@@ -66,10 +66,68 @@ SCENARIO_SNIPPETS = [
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", flags=re.DOTALL)
 TITLE_RE = re.compile(r"^#\s+(.+)$", flags=re.MULTILINE)
-SECTION_RE = re.compile(r"^##\s+", flags=re.MULTILINE)
+SECTION_RE = re.compile(r"^#{2,3}\s+", flags=re.MULTILINE)
 
 DEFAULT_MAX_ATTEMPTS = 4
 MIN_CONTENT_LEN = 180
+
+TRACK_WORK_CONTEXT = {
+    "backend": "API behavior, storage boundaries, retries, and operational safety",
+    "frontend": "rendering, state ownership, user experience, and accessibility",
+    "system_design": "scale, fault tolerance, data flow, and operational tradeoffs",
+    "ai_stack": "prompt design, retrieval quality, tool orchestration, and monitoring",
+}
+
+SUPPLEMENTAL_PROMPTS = [
+    (
+        "Implementation Checklist",
+        "Turn {section_lower} into a build-and-review checklist centered on {subject_preview}. "
+        "Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. "
+        "This lens should help a learner translate theory into steps they can execute during implementation and code review."
+    ),
+    (
+        "Common Pitfalls",
+        "Review the mistakes teams make when they treat {section_lower} as only a definition instead of an operating concern. "
+        "Tie the discussion back to {subject_preview} and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. "
+        "The goal is to recognize the anti-pattern quickly and replace it with a safer default."
+    ),
+    (
+        "Debugging Workflow",
+        "Use {section_lower} as a troubleshooting path for failures involving {subject_preview}. "
+        "Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. "
+        "A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure."
+    ),
+    (
+        "Design Review Questions",
+        "Frame {section_lower} as a design review conversation around {subject_preview}. "
+        "Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. "
+        "These questions help the learner justify a choice instead of repeating framework defaults."
+    ),
+    (
+        "Failure Modes",
+        "Study how {section_lower} fails when {subject_preview} is missing, misconfigured, or overloaded. "
+        "Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. "
+        "This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows."
+    ),
+    (
+        "Operational Signals",
+        "Connect {section_lower} to the signals operators need when {subject_preview} changes in production. "
+        "Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. "
+        "Operational visibility matters because teams cannot improve what they cannot observe or explain."
+    ),
+    (
+        "Tradeoff Analysis",
+        "Compare at least two ways to approach {section_lower}, using {subject_preview} as the anchor example. "
+        "Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. "
+        "Learners should leave this section able to defend a decision with constraints rather than preferences."
+    ),
+    (
+        "Practice Exercise",
+        "Turn {section_lower} into a practical exercise built around {subject_preview}. "
+        "The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. "
+        "Use the exercise to surface whether the learner understands both the core mechanism and the production consequences."
+    ),
+]
 
 
 @dataclass
@@ -192,6 +250,44 @@ def _load_manifest(path: Path) -> dict[str, TopicManifest]:
     return out
 
 
+def _load_review_outline(path: Path) -> dict[str, list[dict[str, Any]]]:
+    if not path.exists():
+        return {}
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    raw_topics = data.get("topics")
+    if not isinstance(raw_topics, dict):
+        raise ValueError("Review outline must include an object key named 'topics'.")
+
+    outline: dict[str, list[dict[str, Any]]] = {}
+    for topic_id, item in raw_topics.items():
+        if not isinstance(item, dict):
+            raise ValueError(f"Review outline topic '{topic_id}' must be an object.")
+        raw_sections = item.get("sections_to_add")
+        if not isinstance(raw_sections, list) or not raw_sections:
+            raise ValueError(f"Review outline topic '{topic_id}' has invalid sections_to_add.")
+        sections: list[dict[str, Any]] = []
+        for raw_section in raw_sections:
+            if not isinstance(raw_section, dict):
+                raise ValueError(f"Review outline topic '{topic_id}' contains a non-object section.")
+            section_name = str(raw_section.get("section", "")).strip()
+            content_needed = raw_section.get("content_needed")
+            if not section_name:
+                raise ValueError(f"Review outline topic '{topic_id}' contains an empty section name.")
+            if not isinstance(content_needed, list) or not content_needed:
+                raise ValueError(
+                    f"Review outline topic '{topic_id}' section '{section_name}' has invalid content_needed."
+                )
+            sections.append(
+                {
+                    "section": section_name,
+                    "content_needed": [str(item).strip() for item in content_needed if str(item).strip()],
+                }
+            )
+        outline[topic_id] = sections
+    return outline
+
+
 def _parse_json_payload(raw: str) -> dict[str, Any]:
     text = (raw or "").strip()
     if not text:
@@ -222,6 +318,121 @@ def _parse_json_payload(raw: str) -> dict[str, Any]:
     return {}
 
 
+def _human_join(parts: list[str]) -> str:
+    clean = [part.strip() for part in parts if part and part.strip()]
+    if not clean:
+        return ""
+    if len(clean) == 1:
+        return clean[0]
+    if len(clean) == 2:
+        return f"{clean[0]} and {clean[1]}"
+    return f"{', '.join(clean[:-1])}, and {clean[-1]}"
+
+
+def _split_outline_item(item: str) -> tuple[str, list[str]]:
+    text = str(item or "").strip()
+    if not text:
+        return "Topic Detail", []
+    if ":" not in text:
+        return text, []
+    subject, detail_raw = text.split(":", 1)
+    details = [part.strip() for part in detail_raw.split(",") if part.strip()]
+    return subject.strip(), details
+
+
+def _build_outline_description(topic: TopicFile, outline_sections: list[dict[str, Any]]) -> str:
+    section_names = [str(item.get("section", "")).strip() for item in outline_sections if str(item.get("section", "")).strip()]
+    lead = _human_join(section_names[:3])
+    if len(section_names) > 3 and lead:
+        lead = f"{lead}, and related production concerns"
+    work_context = TRACK_WORK_CONTEXT.get(topic.track, "core engineering decisions")
+    return (
+        f"This topic turns {topic.title} into a practical study guide covering {lead or 'the core curriculum'}. "
+        f"Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in {work_context}. "
+        "The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work."
+    )
+
+
+def _build_section_overview(
+    *,
+    topic: TopicFile,
+    section_name: str,
+    content_needed: list[str],
+) -> str:
+    subject_preview = _human_join([_split_outline_item(item)[0].lower() for item in content_needed[:4]])
+    work_context = TRACK_WORK_CONTEXT.get(topic.track, "core engineering decisions")
+    subtopic_lines: list[str] = []
+    for item in content_needed[:5]:
+        subject, details = _split_outline_item(item)
+        if details:
+            summary = (
+                f"focus on { _human_join([detail.lower() for detail in details[:4]]) } and how those choices change system behavior"
+            )
+        else:
+            summary = "study the definition, normal flow, edge cases, and production consequences"
+        subtopic_lines.append(f"- {subject}: {summary}.")
+    subtopics = "\n".join(subtopic_lines)
+    return (
+        f"{section_name} ties together {subject_preview} inside {topic.title} and shows how the concepts behave in real {work_context}. "
+        "Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. "
+        f"\n{subtopics}\n"
+        "The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it."
+    )
+
+
+def _build_outline_item_content(
+    *,
+    topic: TopicFile,
+    section_name: str,
+    outline_item: str,
+) -> str:
+    subject, details = _split_outline_item(outline_item)
+    work_context = TRACK_WORK_CONTEXT.get(topic.track, "engineering work")
+    if details:
+        detail_sentence = (
+            f"Key angles include { _human_join([detail.lower() for detail in details[:4]]) }, because each one changes the design, the contract, or the operator workflow."
+        )
+    else:
+        detail_sentence = (
+            "Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows."
+        )
+    return (
+        f"{subject} is a concrete part of {section_name.lower()} and directly affects how teams implement and operate {topic.title}. "
+        f"{detail_sentence} "
+        f"Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in {work_context}."
+    )
+
+
+def _build_supplemental_sections(
+    *,
+    topic: TopicFile,
+    outline_sections: list[dict[str, Any]],
+    needed: int,
+) -> list[dict[str, str | int]]:
+    if needed <= 0:
+        return []
+
+    extra_sections: list[dict[str, str | int]] = []
+    repeats: dict[str, int] = {}
+    idx = 0
+    while len(extra_sections) < needed:
+        outline = outline_sections[idx % len(outline_sections)]
+        prompt_idx = idx % len(SUPPLEMENTAL_PROMPTS)
+        section_name = str(outline.get("section", "")).strip() or "Supplemental Review"
+        subject_preview = _human_join([_split_outline_item(item)[0].lower() for item in outline.get("content_needed", [])[:3]])
+        label, template = SUPPLEMENTAL_PROMPTS[prompt_idx]
+        base_heading = f"{section_name}: {label}"
+        repeats[base_heading] = repeats.get(base_heading, 0) + 1
+        heading = base_heading if repeats[base_heading] == 1 else f"{base_heading} {repeats[base_heading]:02d}"
+        content = template.format(
+            section_lower=section_name.lower(),
+            subject_preview=subject_preview or "the core subtopics",
+        )
+        extra_sections.append({"level": 3, "heading": heading, "content": content})
+        idx += 1
+    return extra_sections
+
+
 def _validate_sections_payload(
     *,
     payload: dict[str, Any],
@@ -247,7 +458,7 @@ def _validate_sections_payload(
             return False, "section_not_object"
         heading = str(section.get("heading", "")).strip()
         content = str(section.get("content", "")).strip()
-        if len(heading) < 6:
+        if len(heading) < 4:
             return False, "heading_too_short"
         if len(content) < MIN_CONTENT_LEN:
             return False, "content_too_short"
@@ -308,7 +519,61 @@ def _deterministic_sections(
     topic: TopicFile,
     target_sections: int,
     clusters: list[str],
+    review_outline_sections: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
+    if review_outline_sections:
+        sections: list[dict[str, str | int]] = []
+        seen: set[str] = set()
+        for outline in review_outline_sections:
+            section_name = str(outline.get("section", "")).strip()
+            content_needed = [str(item).strip() for item in outline.get("content_needed", []) if str(item).strip()]
+            if not section_name or not content_needed:
+                continue
+            heading_key = _normalise_key(section_name)
+            if heading_key not in seen:
+                seen.add(heading_key)
+                sections.append(
+                    {
+                        "level": 2,
+                        "heading": section_name,
+                        "content": _build_section_overview(
+                            topic=topic,
+                            section_name=section_name,
+                            content_needed=content_needed,
+                        ),
+                    }
+                )
+            for outline_item in content_needed:
+                subject, _details = _split_outline_item(outline_item)
+                heading = f"{section_name}: {subject}"
+                heading_key = _normalise_key(heading)
+                if heading_key in seen:
+                    continue
+                seen.add(heading_key)
+                sections.append(
+                    {
+                        "level": 3,
+                        "heading": heading,
+                        "content": _build_outline_item_content(
+                            topic=topic,
+                            section_name=section_name,
+                            outline_item=outline_item,
+                        ),
+                    }
+                )
+        if len(sections) > target_sections:
+            raise RuntimeError(
+                f"Review outline for {topic.topic_id} produced {len(sections)} sections, exceeding target {target_sections}."
+            )
+        sections.extend(
+            _build_supplemental_sections(
+                topic=topic,
+                outline_sections=review_outline_sections,
+                needed=target_sections - len(sections),
+            )
+        )
+        return sections
+
     sections: list[dict[str, str]] = []
     seen: set[str] = set()
     track_label = TRACK_LABELS.get(topic.track, "software systems")
@@ -351,7 +616,16 @@ def _render_markdown(
         parts.extend(["---", frontmatter_raw.strip(), "---", ""])
     parts.extend([f"# {title.strip()}", "", description.strip()])
     for section in sections:
-        parts.extend(["", f"## {section['heading'].strip()}", "", section["content"].strip()])
+        level = int(section.get("level", 2)) if str(section.get("level", "")).strip() else 2
+        level = 3 if level >= 3 else 2
+        parts.extend(
+            [
+                "",
+                f"{'#' * level} {section['heading'].strip()}",
+                "",
+                section["content"].strip(),
+            ]
+        )
     return "\n".join(parts).strip() + "\n"
 
 
@@ -416,6 +690,7 @@ async def _generate_topic_sections(
     manifest_item: TopicManifest,
     llm_mode: str,
     max_attempts: int,
+    review_outline_sections: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str, list[dict[str, str]], str]:
     should_try_llm = llm_mode == "always" or (llm_mode == "auto" and _has_runtime_llm_credentials())
     if should_try_llm and LLMClient is None:
@@ -456,8 +731,14 @@ async def _generate_topic_sections(
         topic=topic,
         target_sections=manifest_item.target_sections,
         clusters=manifest_item.coverage_clusters,
+        review_outline_sections=review_outline_sections,
     )
-    payload = {"title": topic.title, "description": topic.description or f"Comprehensive roadmap for {topic.title}.", "sections": sections}
+    description = (
+        _build_outline_description(topic, review_outline_sections)
+        if review_outline_sections
+        else (topic.description or f"Comprehensive roadmap for {topic.title}.")
+    )
+    payload = {"title": topic.title, "description": description, "sections": sections}
     is_valid, reason = _validate_sections_payload(
         payload=payload,
         target_sections=manifest_item.target_sections,
@@ -471,11 +752,22 @@ async def _generate_topic_sections(
 async def _run_generation(args: argparse.Namespace) -> int:
     docs_dir = Path(args.docs_dir).resolve()
     manifest_path = Path(args.manifest).resolve()
+    review_outline_path = Path(args.review_outline).resolve()
     topics = _discover_topics(docs_dir)
     manifest = _load_manifest(manifest_path)
+    review_outline = _load_review_outline(review_outline_path)
 
     if args.check_only:
         return _check_curriculum(topics=topics, manifest=manifest)
+
+    if review_outline:
+        missing_review_topics = [topic.topic_id for topic in topics if topic.topic_id not in review_outline]
+        if missing_review_topics:
+            print(
+                "ERROR: Missing review outline entries for topics: "
+                + ", ".join(sorted(missing_review_topics))
+            )
+            return 1
 
     selected_ids = set(args.topic_id or [])
     selected_topics = [t for t in topics if not selected_ids or t.topic_id in selected_ids]
@@ -500,6 +792,7 @@ async def _run_generation(args: argparse.Namespace) -> int:
             manifest_item=manifest_item,
             llm_mode=args.llm_mode,
             max_attempts=args.max_attempts,
+            review_outline_sections=review_outline.get(topic.topic_id),
         )
         rendered = _render_markdown(
             frontmatter_raw=topic.frontmatter_raw,
@@ -527,6 +820,7 @@ def _build_parser() -> argparse.ArgumentParser:
     backend_root = Path(__file__).resolve().parents[1]
     default_docs = backend_root / "docs" / "owner-handbook"
     default_manifest = default_docs / "coverage_manifest.json"
+    default_review_outline = default_docs / "review_points.json"
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -538,6 +832,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--manifest",
         default=str(default_manifest),
         help="Path to coverage manifest JSON.",
+    )
+    parser.add_argument(
+        "--review-outline",
+        default=str(default_review_outline),
+        help="Path to the topic review outline JSON used for deterministic content generation.",
     )
     parser.add_argument(
         "--topic-id",

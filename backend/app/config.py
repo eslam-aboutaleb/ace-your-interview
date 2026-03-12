@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     port: int = 8001
     environment: str = "development"
 
-    # Docs path
-    docs_path: str = "docs"
+    # Static curriculum source
+    curriculum_path: str = "app/data/static_curriculum.json"
 
     # Default LLM settings
     default_provider: str = "groq"      # Free tier friendly default
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     learning_db_path: str = "/tmp/study_hub_learning.db"
     enable_v2_generation: bool = True
     enable_adaptive_learning: bool = True
-    enable_mock_interview_v1: bool = False
+    enable_mock_interview_v1: bool = True
     enable_topic_videos: bool = False
     youtube_api_key: str = ""
     topic_videos_default_limit: int = 3
