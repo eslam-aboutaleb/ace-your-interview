@@ -152,6 +152,19 @@
 .markdown-content h3 {
   @apply text-lg font-semibold mt-4 mb-2;
 }
+.markdown-content h4 {
+  @apply text-base font-semibold mt-4 mb-2;
+}
+.markdown-content .markdown-heading {
+  @apply tracking-tight text-udemy-text;
+}
+.markdown-content .markdown-heading-2 {
+  @apply border-b border-udemy-border pb-2;
+}
+.markdown-content .markdown-heading-3,
+.markdown-content .markdown-heading-4 {
+  @apply text-udemy-text;
+}
 .markdown-content .coach-section-heading {
   @apply rounded-xl border px-4 py-3 mt-5 mb-3 text-base font-bold tracking-tight;
   border-color: rgba(80, 41, 255, 0.14);
@@ -214,16 +227,9 @@
 .markdown-content .coach-paragraph[data-coach-label="Why it's right:"] > strong:first-child,
 .markdown-content .coach-paragraph[data-coach-label="Why it works:"] > strong:first-child,
 .markdown-content .coach-paragraph[data-coach-label="How to think about it:"] > strong:first-child,
-.markdown-content .coach-paragraph[data-coach-label="What the interviewer is really testing:"] > strong:first-child,
-.markdown-content .coach-paragraph[data-coach-label="Interviewer-ready phrasing:"] > strong:first-child {
+.markdown-content .coach-paragraph[data-coach-label="What the interviewer is really testing:"] > strong:first-child {
   background: rgba(80, 41, 255, 0.12);
   color: #5029ff;
-}
-.markdown-content .coach-paragraph[data-coach-label="Interviewer-ready phrasing:"] {
-  border-color: rgba(80, 41, 255, 0.18);
-  background:
-    linear-gradient(135deg, rgba(80, 41, 255, 0.1), rgba(255, 255, 255, 0.96)),
-    #fff;
 }
 .markdown-content .coach-paragraph[data-coach-label="Common mistake:"] {
   border-color: rgba(245, 158, 11, 0.2);
@@ -235,7 +241,6 @@
   background: rgba(245, 158, 11, 0.14);
   color: #b45309;
 }
-.markdown-content .coach-paragraph[data-coach-label="Self-check:"],
 .markdown-content .coach-paragraph[data-coach-label="Tradeoff / scaling caveat:"],
 .markdown-content .coach-paragraph[data-coach-label="Invariant note:"] {
   border-color: rgba(16, 185, 129, 0.18);
@@ -243,7 +248,6 @@
     linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(255, 255, 255, 0.96)),
     #fff;
 }
-.markdown-content .coach-paragraph[data-coach-label="Self-check:"] > strong:first-child,
 .markdown-content .coach-paragraph[data-coach-label="Tradeoff / scaling caveat:"] > strong:first-child,
 .markdown-content .coach-paragraph[data-coach-label="Invariant note:"] > strong:first-child {
   background: rgba(16, 185, 129, 0.14);
@@ -251,16 +255,19 @@
 }
 .markdown-content ul,
 .markdown-content ol {
-  @apply mb-3 pl-6;
+  @apply mb-4 pl-6;
 }
 .markdown-content li {
-  @apply mb-1 leading-relaxed;
+  @apply mb-1.5 leading-relaxed;
 }
 .markdown-content ul li {
   @apply list-disc;
 }
 .markdown-content ol li {
   @apply list-decimal;
+}
+.markdown-content li > p {
+  @apply mb-1;
 }
 .markdown-content strong {
   @apply font-bold text-udemy-text;
@@ -270,6 +277,9 @@
 }
 .markdown-content code {
   @apply bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-udemy-purple;
+}
+.markdown-content hr {
+  @apply border-0 border-t border-udemy-border my-5;
 }
 .markdown-content pre {
   @apply bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto mb-4;
@@ -336,19 +346,25 @@
   @apply text-xs text-udemy-text-muted;
 }
 .markdown-content blockquote {
-  @apply border-l-4 border-udemy-purple pl-4 italic text-udemy-text-muted mb-3;
+  @apply border border-udemy-border rounded-r-xl pl-4 pr-4 py-3 mb-4 text-udemy-text-muted bg-udemy-bg/80;
+  border-left-width: 4px;
+  border-left-color: #5029ff;
 }
 .markdown-table-wrap {
   @apply w-full overflow-x-auto mb-4;
 }
 .markdown-content table {
-  @apply w-full min-w-[520px] border-collapse;
+  @apply w-full min-w-[520px] border-collapse rounded-xl overflow-hidden bg-white;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 }
 .markdown-content th {
-  @apply border border-udemy-border bg-udemy-bg px-3 py-2 text-left font-semibold;
+  @apply border border-udemy-border bg-udemy-bg px-3 py-2 text-left font-semibold align-top;
 }
 .markdown-content td {
-  @apply border border-udemy-border px-3 py-2;
+  @apply border border-udemy-border px-3 py-2 align-top;
+}
+.markdown-content tbody tr:nth-child(even) {
+  background: rgba(248, 250, 252, 0.9);
 }
 .markdown-content a {
   @apply text-udemy-purple underline hover:text-udemy-purple-dark;
@@ -363,8 +379,14 @@
 .markdown-content-compact h3 {
   @apply text-sm mt-2 mb-1;
 }
+.markdown-content-compact h4 {
+  @apply text-sm mt-2 mb-1;
+}
 .markdown-content-compact .coach-section-heading {
   @apply px-3 py-2.5 mt-4 mb-2 text-sm;
+}
+.markdown-content-compact .markdown-heading-2 {
+  @apply pb-1.5;
 }
 .markdown-content-compact p,
 .markdown-content-compact ul,

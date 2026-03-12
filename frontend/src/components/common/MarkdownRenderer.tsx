@@ -14,9 +14,7 @@ interface MarkdownRendererProps {
 const COACH_PARAGRAPH_LABELS = new Set([
   "Answer:",
   "Why it's right:",
-  "Interviewer-ready phrasing:",
   "Common mistake:",
-  "Self-check:",
   "What the interviewer is really testing:",
   "Short answer:",
   "How to think about it:",
@@ -148,11 +146,16 @@ function coachSectionKey(heading: string): string | null {
 
 function getMarkdownComponents(compact: boolean): Components {
   return {
+    h2: ({ node: _node, className, children, ...props }) => (
+      <h2 className={`${className || ""} markdown-heading markdown-heading-2`.trim()} {...props}>
+        {children}
+      </h2>
+    ),
     h3: ({ node: _node, className, children, ...props }) => {
       const sectionKey = coachSectionKey(childrenToText(children));
       return (
         <h3
-          className={`${className || ""}${sectionKey ? " coach-section-heading" : ""}`.trim()}
+          className={`${className || ""}${sectionKey ? " coach-section-heading" : " markdown-heading markdown-heading-3"}`.trim()}
           data-coach-section={sectionKey || undefined}
           {...props}
         >
@@ -160,6 +163,11 @@ function getMarkdownComponents(compact: boolean): Components {
         </h3>
       );
     },
+    h4: ({ node: _node, className, children, ...props }) => (
+      <h4 className={`${className || ""} markdown-heading markdown-heading-4`.trim()} {...props}>
+        {children}
+      </h4>
+    ),
     p: ({ node: _node, className, children, ...props }) => {
       const coachLabel = extractCoachParagraphLabel(children);
       return (

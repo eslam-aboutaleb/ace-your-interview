@@ -260,7 +260,7 @@ export default function QuizMode() {
         if (!entry) continue;
         const [id, detail] = entry;
         nextTopicAiById[id] = {
-          responseDetail: detail.response_detail || "concise",
+          responseDetail: detail.response_detail || "very_detailed",
           preferredLanguage: detail.selected_language || "",
           requiresProgramming: !!detail.requires_programming,
         };
@@ -758,7 +758,7 @@ export default function QuizMode() {
                       normalizeEscapedSingleLineText(currentTopic?.title || current.topic_id)
                     }
                     floatingTriggerPrompt="Explain this quiz concept in an organized way and include practical tradeoffs."
-                    responseDetail={currentTopicAi?.responseDetail || "concise"}
+                    responseDetail={currentTopicAi?.responseDetail || "very_detailed"}
                     preferredLanguage={currentTopicAi?.preferredLanguage || ""}
                     requiresProgramming={!!currentTopicAi?.requiresProgramming}
                     selectionTargetSelector='[data-word-chat-target="true"]'
@@ -1070,7 +1070,7 @@ export default function QuizMode() {
                         }
                         topicTrack={reviewTopic?.track || ""}
                         mode="quiz"
-                        responseDetail={reviewTopicAi?.responseDetail || "concise"}
+                        responseDetail={reviewTopicAi?.responseDetail || "very_detailed"}
                         preferredLanguage={reviewTopicAi?.preferredLanguage || ""}
                         requiresProgramming={!!reviewTopicAi?.requiresProgramming}
                         selectionTargetSelector='[data-word-chat-target="true"]'
