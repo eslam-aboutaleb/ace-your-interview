@@ -726,13 +726,14 @@ export default function TopicStudy() {
           question: q.question,
           answer: q.answer,
           difficulty: q.difficulty,
-          learning_objective: "Understand the concept and apply it in context.",
+          learning_objective:
+            "After this question, the learner should be able to explain the concept and apply it in context.",
           source_section: activeS.heading || "Topic",
           source_quote: "Legacy mode response did not include source quote.",
           misconception_trap:
-            "Confusing terms without checking documentation context.",
+            "A weak answer confuses terms without checking the documentation context.",
           reasoning_summary:
-            "Review the answer and compare with your own reasoning.",
+            "Review the core constraint first, then compare it with your own reasoning.",
         }));
 
       const topUpMissingQuestions = async (

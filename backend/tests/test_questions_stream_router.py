@@ -17,11 +17,14 @@ def _question_payload(question: str) -> list[dict]:
         {
             "question": question,
             "answer": (
-                "This answer describes the concept, the implementation constraints, and practical "
-                "tradeoffs expected in a strong interview response."
+                f"**Answer:** {question} is best explained by starting with the real constraint and the practical takeaway.\n\n"
+                "**Why it's right:** In plain language, a strong answer connects the concept to the implementation detail that actually controls the tradeoff.\n\n"
+                "**Interviewer-ready phrasing:** \"I would start with the constraint, then explain how it shapes the implementation choice.\"\n\n"
+                "**Common mistake:** A weak answer repeats terminology without tying it to the real engineering decision.\n\n"
+                "**Self-check:** If the main constraint changed, what part of the explanation would you revisit first?"
             ),
             "difficulty": "medium",
-            "learning_objective": "Understand practical tradeoffs from the docs.",
+            "learning_objective": "After this question, the learner should be able to understand practical tradeoffs from the docs.",
             "source_section": "JVM Fundamentals",
             "source_quote": "JVM memory behavior shapes concurrency and performance choices.",
             "misconception_trap": "Assuming GC removes all concurrency considerations.",
@@ -37,15 +40,25 @@ def _problem_solving_payload(question: str) -> list[dict]:
             "question": question,
             "answer": """### Problem
 
-Understand the input-output contract before choosing the data structure.
+**What the interviewer is really testing:** Can you identify the invariant before coding and use it to justify the data structure?
 
 ### Solution Walkthrough
 
-Use a hash map so every number can check whether its complement has already appeared in O(1). That keeps the solution single-pass and avoids reusing the same element twice.
+**Short answer:** Use a hash map so every number can check whether its complement has already appeared in O(1).
+
+**How to think about it:** Turn the prompt into a complement lookup problem and reject the nested-loop version once the invariant is clear.
+
+**Why it works:** The map preserves exactly the state the next step needs, so the scan stays single-pass and never reuses the same element twice.
+
+**Interviewer-ready phrasing:** "I would state the complement invariant first, then use a hash map to preserve that invariant while scanning once from left to right."
+
+**Common mistake:** A weak answer starts coding the brute-force version before explaining why the invariant supports a one-pass lookup.
 
 ### Complexity
 
-The algorithm runs in O(n) time with O(n) extra space for the hash map.
+**Time and space:** The algorithm runs in O(n) time with O(n) extra space for the hash map.
+
+**Tradeoff / scaling caveat:** The extra memory is the cost of removing repeated work and keeping the explanation clean.
 
 ### Code
 
@@ -65,9 +78,11 @@ def two_sum(nums, target):
 
     # Return an empty answer when the input does not contain a valid pair.
     return []
-```""",
+```
+
+**Invariant note:** Checking the complement before storing the current value preserves the rule that every match must come from a previously seen element.""",
             "difficulty": "medium",
-            "learning_objective": "Turn a complement invariant into a one-pass solution.",
+            "learning_objective": "After this question, the learner should be able to turn a complement invariant into a one-pass solution.",
             "source_section": "Junior: Hash maps and frequency counting",
             "source_quote": "Use a hash map when the current value needs a previously seen complement.",
             "misconception_trap": "Keeping nested loops even after a constant-time lookup structure is available.",
@@ -233,6 +248,8 @@ Static topic body.
         self.assertEqual(status, 200)
         question_event = next(event for event in events if event["type"] == "question")
         answer = question_event["question"]["answer"]
+        self.assertIn("**What the interviewer is really testing:**", answer)
+        self.assertIn("**Invariant note:**", answer)
         self.assertIn("### Problem", answer)
         self.assertIn("### Solution Walkthrough", answer)
         self.assertIn("### Complexity", answer)

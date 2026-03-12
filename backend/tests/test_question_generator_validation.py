@@ -6,6 +6,7 @@ from app.services.question_generator import (
     _build_fallback_question_items,
     _build_prompt,
     _build_quiz_prompt,
+    _build_retry_prompt,
     _collect_with_retries,
     _parse_questions_json,
     _validate_question_item,
@@ -13,18 +14,38 @@ from app.services.question_generator import (
 )
 
 
+def _conceptual_answer(topic: str = "this service") -> str:
+    return (
+        f"**Answer:** {topic.title()} works by handling the core request path directly and enforcing the important constraints.\n\n"
+        f"**Why it's right:** In plain language, {topic} stays reliable when the system validates inputs, preserves invariants, and checks the failure cases that matter.\n\n"
+        f"**Interviewer-ready phrasing:** \"I would explain {topic} by starting with the request flow, then I would connect the implementation to the constraints and failure modes.\"\n\n"
+        f"**Common mistake:** A weak answer about {topic} names the components but never explains why they fit the requirements.\n\n"
+        f"**Self-check:** If the main constraint changed tomorrow, what part of your explanation would you revisit first?"
+    )
+
+
 def _problem_solving_answer(language: str = "python") -> str:
     return f"""### Problem
 
-Understand the input, output, and the invariant before writing code.
+**What the interviewer is really testing:** Can you name the invariant before coding and use it to justify the data structure?
 
 ### Solution Walkthrough
 
-Use a hash map so each complement lookup stays O(1) during a single left-to-right pass.
+**Short answer:** Use a hash map so each complement lookup stays O(1) during a single left-to-right pass.
+
+**How to think about it:** Translate the prompt into a complement lookup problem and reject the nested-loop version once the invariant is clear.
+
+**Why it works:** Each number only needs to know whether its complement has already appeared, so the map preserves exactly the state the next step needs.
+
+**Interviewer-ready phrasing:** "I would state the complement invariant first, then use a hash map to preserve that invariant while scanning once from left to right."
+
+**Common mistake:** A weak answer starts coding the O(n^2) scan before explaining why the invariant allows a one-pass lookup.
 
 ### Complexity
 
-The solution runs in O(n) time with O(n) extra space.
+**Time and space:** The solution runs in O(n) time with O(n) extra space.
+
+**Tradeoff / scaling caveat:** The extra memory is worth it because it removes repeated work and keeps the explanation interview-friendly.
 
 ### Code
 
@@ -45,6 +66,8 @@ def two_sum(nums, target):
     # Return an empty answer when no pair exists.
     return []
 ```
+
+**Invariant note:** Checking the complement before storing the current value preserves the rule that every match must come from a previously seen element.
 """
 
 
@@ -52,9 +75,9 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
     def test_question_item_requires_grounding_fields(self):
         item = {
             "question": "What does this service do?",
-            "answer": "It handles user sessions and validates signed cookies for auth.",
+            "answer": _conceptual_answer("the auth service"),
             "difficulty": "medium",
-            "learning_objective": "Understand auth session responsibilities.",
+            "learning_objective": "After this question, the learner should be able to explain auth session responsibilities.",
             "source_section": "Auth",
             "source_quote": "Validate the session cookie and return user payload.",
             "misconception_trap": "Assuming session validation is done in frontend.",
@@ -111,7 +134,7 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
     def test_question_level_and_difficulty_are_coerced_for_reliability(self):
         item = {
             "question": "How would you design retries for this API?",
-            "answer": "Use bounded retries with backoff and jitter while keeping idempotency guarantees and observability metrics.",
+            "answer": _conceptual_answer("retry-safe APIs"),
             "difficulty": "hard",
             "target_level": "senior",
         }
@@ -119,10 +142,14 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
         self.assertTrue(valid, issue)
         self.assertEqual(item["difficulty"], "medium")
         self.assertEqual(item["target_level"], "junior")
-        self.assertTrue(item["learning_objective"])
+        self.assertTrue(
+            item["learning_objective"].startswith(
+                "After this question, the learner should be able to",
+            ),
+        )
         self.assertTrue(item["source_section"])
         self.assertTrue(item["source_quote"])
-        self.assertTrue(item["misconception_trap"])
+        self.assertIn("weak answer", item["misconception_trap"].lower())
         self.assertTrue(item["reasoning_summary"])
 
     def test_collect_with_retries_respects_existing_questions_seed(self):
@@ -136,9 +163,9 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
                     payload = [
                         {
                             "question": "How would you design retries for this API?",
-                            "answer": "Use bounded retries with backoff and jitter while keeping idempotency guarantees and observability metrics.",
+                            "answer": _conceptual_answer("retry-safe APIs"),
                             "difficulty": "medium",
-                            "learning_objective": "Evaluate reliability reasoning.",
+                            "learning_objective": "After this question, the learner should be able to evaluate reliability reasoning.",
                             "source_section": "Retries",
                             "source_quote": "Retries must be bounded to avoid overload.",
                             "misconception_trap": "Assuming retries are always safe.",
@@ -150,9 +177,9 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
                     payload = [
                         {
                             "question": "When should idempotency keys be required?",
-                            "answer": "Require idempotency keys for externally retried write operations to prevent duplicate side effects and support safe retries under network uncertainty.",
+                            "answer": _conceptual_answer("idempotency keys"),
                             "difficulty": "medium",
-                            "learning_objective": "Identify safe retry boundaries.",
+                            "learning_objective": "After this question, the learner should be able to identify safe retry boundaries.",
                             "source_section": "Reliability",
                             "source_quote": "Idempotency prevents duplicate mutation effects.",
                             "misconception_trap": "Assuming retries are harmless without idempotency.",
@@ -203,12 +230,12 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
                     payload = [
                         {
                             "question": "How do you design retry-safe API endpoints?",
-                            "answer": "Use idempotency and bounded retries with backoff.",
+                            "answer": _conceptual_answer("retry-safe API endpoints"),
                             "difficulty": "medium",
                         },
                         {
                             "question": "How would you design API endpoints that are safe for retries?",
-                            "answer": "Enforce idempotency keys and avoid duplicate side effects.",
+                            "answer": _conceptual_answer("safe retry APIs"),
                             "difficulty": "medium",
                         },
                     ]
@@ -216,7 +243,7 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
                     payload = [
                         {
                             "question": "When should idempotency keys be mandatory for writes?",
-                            "answer": "They should be required for externally retried mutations to avoid duplicate effects.",
+                            "answer": _conceptual_answer("mandatory idempotency keys"),
                             "difficulty": "medium",
                         }
                     ]
@@ -289,6 +316,16 @@ Answer 2: Pagination controls payload size, improves latency, and avoids memory 
             count=3,
             level="mid",
         )
+        self.assertIn("**Answer:**", prompt)
+        self.assertIn("**Why it's right:**", prompt)
+        self.assertIn("**Interviewer-ready phrasing:**", prompt)
+        self.assertIn("**Common mistake:**", prompt)
+        self.assertIn("**Self-check:**", prompt)
+        self.assertIn("Do not use meta-guideline phrasing", prompt)
+        self.assertIn(
+            "After this question, the learner should be able to",
+            prompt,
+        )
         self.assertIn("short readable paragraphs", prompt)
         self.assertIn("use bullets only when listing steps/checklists/categories", prompt)
         self.assertIn("valid GFM table syntax", prompt)
@@ -311,7 +348,15 @@ Answer 2: Pagination controls payload size, improves latency, and avoids memory 
         self.assertIn("### Solution Walkthrough", prompt)
         self.assertIn("### Complexity", prompt)
         self.assertIn("### Code", prompt)
+        self.assertIn("**What the interviewer is really testing:**", prompt)
+        self.assertIn("**Short answer:**", prompt)
+        self.assertIn("**How to think about it:**", prompt)
+        self.assertIn("**Why it works:**", prompt)
+        self.assertIn("**Tradeoff / scaling caveat:**", prompt)
+        self.assertIn("**Invariant note:**", prompt)
         self.assertIn('exactly one fenced "python"', prompt)
+        self.assertNotIn("Two Sum", prompt)
+        self.assertNotIn("complement-hash-map", prompt)
 
     def test_problem_solving_validation_rejects_missing_required_headings(self):
         item = {
@@ -399,8 +444,73 @@ Use a dictionary and a loop.""",
         self.assertIn("### Solution Walkthrough", items[0]["answer"])
         self.assertIn("### Complexity", items[0]["answer"])
         self.assertIn("### Code", items[0]["answer"])
+        self.assertIn("**What the interviewer is really testing:**", items[0]["answer"])
+        self.assertIn("**Short answer:**", items[0]["answer"])
+        self.assertIn("**How to think about it:**", items[0]["answer"])
+        self.assertIn("**Why it works:**", items[0]["answer"])
+        self.assertIn("**Tradeoff / scaling caveat:**", items[0]["answer"])
+        self.assertIn("**Invariant note:**", items[0]["answer"])
         self.assertIn("```python", items[0]["answer"])
+        self.assertTrue(
+            items[0]["learning_objective"].startswith(
+                "After this question, the learner should be able to",
+            ),
+        )
         self.assertTrue(items[0]["reasoning_summary"])
+
+    def test_conceptual_fallback_items_include_coach_sections(self):
+        items = _build_fallback_question_items(
+            topic_id="topic-api",
+            topic_title="API Design",
+            doc_content="Use pagination and stable ordering for list endpoints.",
+            count=1,
+            difficulty="medium",
+            level="mid",
+        )
+        self.assertEqual(len(items), 1)
+        self.assertIn("**Answer:**", items[0]["answer"])
+        self.assertIn("**Why it's right:**", items[0]["answer"])
+        self.assertIn("**Interviewer-ready phrasing:**", items[0]["answer"])
+        self.assertIn("**Common mistake:**", items[0]["answer"])
+        self.assertIn("**Self-check:**", items[0]["answer"])
+        self.assertTrue(
+            items[0]["learning_objective"].startswith(
+                "After this question, the learner should be able to",
+            ),
+        )
+        self.assertIn("weak answer", items[0]["misconception_trap"].lower())
+
+    def test_retry_prompt_reinforces_coach_style_recovery(self):
+        conceptual_retry = _build_retry_prompt(
+            base_prompt="Base prompt",
+            missing_count=1,
+            issues="json_parse_failed",
+            existing_questions=[],
+            recovery_guidance=(
+                "- Use `**Answer:**`.\n"
+                "- Use `**Why it's right:**`.\n"
+                "- Use `**Interviewer-ready phrasing:**`."
+            ),
+        )
+        self.assertIn("Recovery guidance:", conceptual_retry)
+        self.assertIn("**Answer:**", conceptual_retry)
+        self.assertIn("**Interviewer-ready phrasing:**", conceptual_retry)
+
+        problem_retry = _build_retry_prompt(
+            base_prompt="Base prompt",
+            missing_count=1,
+            issues="invalid_problem_solving_heading_sequence",
+            existing_questions=[],
+            hard_requirements=['Under `### Code`, include exactly one fenced `python` block.'],
+            recovery_guidance=(
+                "- Keep exactly these H3 headings in order: `### Problem`, `### Solution Walkthrough`, `### Complexity`, `### Code`.\n"
+                "- Include one practice twist.\n"
+                "- End with `**Invariant note:**`."
+            ),
+        )
+        self.assertIn("### Problem", problem_retry)
+        self.assertIn("practice twist", problem_retry)
+        self.assertIn("**Invariant note:**", problem_retry)
 
     def test_quiz_prompt_requires_adaptive_markdown_explanations(self):
         prompt = _build_quiz_prompt(
