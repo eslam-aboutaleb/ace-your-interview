@@ -84,7 +84,6 @@ def two_sum(nums, target):
                     "learning_objective": "After this question, the learner should be able to explain how to turn a complement invariant into a one-pass hash map solution.",
                     "source_section": "Junior: Two pointers",
                     "source_quote": "Understand constraints and sliding window tradeoffs.",
-                    "misconception_trap": "Writing nested loops before checking whether a faster lookup structure removes repeated work.",
                     "reasoning_summary": "Identify the invariant first: every value needs a previously seen complement. That immediately points to a one-pass hash map.",
                     "target_level": "mid",
                 }
@@ -102,7 +101,6 @@ def two_sum(nums, target):
                     "learning_objective": "After this question, the learner should be able to explain memory model fundamentals and interview tradeoffs.",
                     "source_section": "JVM Fundamentals",
                     "source_quote": "JVM memory behavior shapes concurrency and performance choices.",
-                    "misconception_trap": "Assuming GC removes the need for concurrency control.",
                     "reasoning_summary": "Map memory areas to correctness, then to performance decisions.",
                     "target_level": "mid",
                 }

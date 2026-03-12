@@ -730,8 +730,6 @@ export default function TopicStudy() {
             "After this question, the learner should be able to explain the concept and apply it in context.",
           source_section: activeS.heading || "Topic",
           source_quote: "Legacy mode response did not include source quote.",
-          misconception_trap:
-            "A weak answer confuses terms without checking the documentation context.",
           reasoning_summary:
             "Review the core constraint first, then compare it with your own reasoning.",
         }));
@@ -1704,7 +1702,7 @@ export default function TopicStudy() {
                                         </div>
                                       </div>
 
-                                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <div className="mt-3">
                                         <div className="bg-white border border-udemy-border rounded-lg p-3">
                                           <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
                                             Learning Objective
@@ -1712,16 +1710,6 @@ export default function TopicStudy() {
                                           <p className="text-sm">
                                             {normalizeEscapedSingleLineText(
                                               qa.learning_objective,
-                                            )}
-                                          </p>
-                                        </div>
-                                        <div className="bg-white border border-udemy-border rounded-lg p-3">
-                                          <h4 className="text-xs font-bold text-udemy-text-muted uppercase mb-1">
-                                            Misconception Trap
-                                          </h4>
-                                          <p className="text-sm">
-                                            {normalizeEscapedSingleLineText(
-                                              qa.misconception_trap,
                                             )}
                                           </p>
                                         </div>
