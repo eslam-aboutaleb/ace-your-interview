@@ -41,15 +41,25 @@ class FakeLLM:
                     "question": "Given an integer array and a target, how would you solve two sum in python?",
                     "answer": """### Problem
 
-Read the prompt as an input-output mapping: return the two indices whose values add up to the target without reusing the same element.
+**What the interviewer is really testing:** Can you identify the invariant before coding and use it to justify the data structure?
 
 ### Solution Walkthrough
 
-The expert move is to reject the O(n^2) brute-force scan once you notice every number only needs a previously seen complement. A hash map stores each seen value with its index, so every step can compute the complement, check for it in O(1), and then store the current value after the check.
+**Short answer:** Reject the O(n^2) brute-force scan and use a hash map to preserve the complement invariant in one pass.
+
+**How to think about it:** Read the prompt as an input-output mapping: return the two indices whose values add up to the target without reusing the same element.
+
+**Why it works:** Every number only needs a previously seen complement. The hash map stores each seen value with its index, so every step can compute the complement, check for it in O(1), and then store the current value after the check.
+
+**Interviewer-ready phrasing:** "I would state the complement invariant first, then explain why a hash map preserves that invariant while keeping the scan linear."
+
+**Common mistake:** A weak answer writes nested loops before proving why the invariant allows a one-pass lookup.
 
 ### Complexity
 
-The loop visits each element once, so the time complexity is O(n). The hash map stores up to n values, so the extra space complexity is O(n).
+**Time and space:** The loop visits each element once, so the time complexity is O(n). The hash map stores up to n values, so the extra space complexity is O(n).
+
+**Tradeoff / scaling caveat:** The extra memory is the cost of removing repeated work and keeping the reasoning clean.
 
 ### Code
 
@@ -69,9 +79,11 @@ def two_sum(nums, target):
 
     # Return an empty answer when the input does not contain a valid pair.
     return []
-```""",
+```
+
+**Invariant note:** Checking the complement before storing the current value preserves the rule that every match must come from a previously seen element.""",
                     "difficulty": "medium",
-                    "learning_objective": "Explain how to turn a complement invariant into a one-pass hash map solution.",
+                    "learning_objective": "After this question, the learner should be able to explain how to turn a complement invariant into a one-pass hash map solution.",
                     "source_section": "Junior: Two pointers",
                     "source_quote": "Understand constraints and sliding window tradeoffs.",
                     "misconception_trap": "Writing nested loops before checking whether a faster lookup structure removes repeated work.",
@@ -84,12 +96,14 @@ def two_sum(nums, target):
                 {
                     "question": "How would you explain the JVM memory model tradeoffs in an interview?",
                     "answer": (
-                        "Start with stack vs heap responsibilities, then explain GC-managed lifecycles, "
-                        "visibility guarantees, and why synchronization primitives prevent race conditions. "
-                        "Connect this to real-world latency and throughput tradeoffs in production systems."
+                        "**Answer:** The JVM memory model tradeoffs are easiest to explain by starting with stack vs heap responsibilities, then tying that to visibility, synchronization, and runtime cost.\n\n"
+                        "**Why it's right:** In plain language, memory layout affects correctness first and performance second. If you explain where data lives, who can see it, and what coordination it needs, the tradeoffs become concrete.\n\n"
+                        "**Interviewer-ready phrasing:** \"I would explain the memory areas first, then connect them to visibility guarantees, synchronization needs, and the latency or throughput tradeoffs they create.\"\n\n"
+                        "**Common mistake:** A weak answer assumes garbage collection removes the need to reason about concurrency or visibility.\n\n"
+                        "**Self-check:** If a race condition appeared in production, which part of this explanation would help you diagnose it first?"
                     ),
                     "difficulty": "medium",
-                    "learning_objective": "Explain memory model fundamentals and interview tradeoffs.",
+                    "learning_objective": "After this question, the learner should be able to explain memory model fundamentals and interview tradeoffs.",
                     "source_section": "JVM Fundamentals",
                     "source_quote": "JVM memory behavior shapes concurrency and performance choices.",
                     "misconception_trap": "Assuming GC removes the need for concurrency control.",
