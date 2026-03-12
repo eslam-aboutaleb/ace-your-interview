@@ -13,12 +13,11 @@ interface MarkdownRendererProps {
 
 const COACH_PARAGRAPH_LABELS = new Set([
   "Answer:",
-  "Why it's right:",
+  "Detailed explanation:",
   "Common mistake:",
-  "What the interviewer is really testing:",
-  "Short answer:",
-  "How to think about it:",
-  "Why it works:",
+  "What the problem is asking:",
+  "Direct answer:",
+  "Why this works:",
   "Time and space:",
   "Tradeoff / scaling caveat:",
   "Invariant note:",

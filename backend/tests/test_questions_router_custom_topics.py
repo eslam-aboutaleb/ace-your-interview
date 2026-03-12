@@ -35,21 +35,21 @@ class FakeLLM:
                     "target_level": "mid",
                 }
             ]
-        elif "expert algorithm interview coach and problem-solving educator" in prompt_l:
+        elif "expert algorithm interviewer and problem-solving educator" in prompt_l:
             payload = [
                 {
                     "question": "Given an integer array and a target, how would you solve two sum in python?",
                     "answer": """### Problem
 
-**What the interviewer is really testing:** Can you identify the invariant before coding and use it to justify the data structure?
+**What the problem is asking:** Return the two indices whose values add up to the target without reusing the same element or doing repeated work.
 
 ### Solution Walkthrough
 
-**Short answer:** Reject the O(n^2) brute-force scan and use a hash map to preserve the complement invariant in one pass.
+**Direct answer:** Reject the O(n^2) brute-force scan and use a hash map to preserve the complement invariant in one pass.
 
-**How to think about it:** Read the prompt as an input-output mapping: return the two indices whose values add up to the target without reusing the same element.
+**Detailed explanation:** Each value only needs one thing from earlier in the scan: whether the complement has already appeared. That makes a hash map the right structure because it stores seen values with their indices and answers that lookup in O(1).
 
-**Why it works:** Every number only needs a previously seen complement. The hash map stores each seen value with its index, so every step can compute the complement, check for it in O(1), and then store the current value after the check.
+**Why this works:** Every number only needs a previously seen complement. The hash map stores each seen value with its index, so every step can compute the complement, check for it in O(1), and then store the current value after the check.
 
 **Common mistake:** A weak answer writes nested loops before proving why the invariant allows a one-pass lookup.
 
@@ -95,7 +95,7 @@ def two_sum(nums, target):
                     "question": "How would you explain the JVM memory model tradeoffs in an interview?",
                     "answer": (
                         "**Answer:** The JVM memory model tradeoffs are easiest to explain by starting with stack vs heap responsibilities, then tying that to visibility, synchronization, and runtime cost.\n\n"
-                        "**Why it's right:** In plain language, memory layout affects correctness first and performance second. If you explain where data lives, who can see it, and what coordination it needs, the tradeoffs become concrete.\n\n"
+                        "**Detailed explanation:** In plain language, memory layout affects correctness first and performance second. If you explain where data lives, who can see it, and what coordination it needs, the tradeoffs become concrete.\n\n"
                         "**Common mistake:** A weak answer assumes garbage collection removes the need to reason about concurrency or visibility."
                     ),
                     "difficulty": "medium",

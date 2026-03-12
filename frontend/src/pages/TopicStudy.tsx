@@ -1687,7 +1687,7 @@ export default function TopicStudy() {
                                           qa.reasoning_summary && (
                                             <div className="mb-3 rounded-lg border border-udemy-purple/20 bg-white px-3 py-2">
                                               <p className="text-[11px] font-bold uppercase tracking-wide text-udemy-purple mb-1">
-                                                How to think about it
+                                                Key reasoning takeaway
                                               </p>
                                               <p className="text-sm text-udemy-text whitespace-pre-line">
                                                 {normalizeEscapedMultilineText(

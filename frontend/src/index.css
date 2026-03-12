@@ -210,24 +210,22 @@
     #fff;
 }
 .markdown-content .coach-paragraph[data-coach-label="Answer:"] > strong:first-child,
-.markdown-content .coach-paragraph[data-coach-label="Short answer:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="Direct answer:"] > strong:first-child,
 .markdown-content .coach-paragraph[data-coach-label="Time and space:"] > strong:first-child {
   background: rgba(37, 99, 235, 0.12);
   color: #1d4ed8;
 }
-.markdown-content .coach-paragraph[data-coach-label="Why it's right:"],
-.markdown-content .coach-paragraph[data-coach-label="Why it works:"],
-.markdown-content .coach-paragraph[data-coach-label="How to think about it:"],
-.markdown-content .coach-paragraph[data-coach-label="What the interviewer is really testing:"] {
+.markdown-content .coach-paragraph[data-coach-label="Detailed explanation:"],
+.markdown-content .coach-paragraph[data-coach-label="Why this works:"],
+.markdown-content .coach-paragraph[data-coach-label="What the problem is asking:"] {
   border-color: rgba(80, 41, 255, 0.14);
   background:
     linear-gradient(135deg, rgba(80, 41, 255, 0.06), rgba(255, 255, 255, 0.96)),
     #fff;
 }
-.markdown-content .coach-paragraph[data-coach-label="Why it's right:"] > strong:first-child,
-.markdown-content .coach-paragraph[data-coach-label="Why it works:"] > strong:first-child,
-.markdown-content .coach-paragraph[data-coach-label="How to think about it:"] > strong:first-child,
-.markdown-content .coach-paragraph[data-coach-label="What the interviewer is really testing:"] > strong:first-child {
+.markdown-content .coach-paragraph[data-coach-label="Detailed explanation:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="Why this works:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="What the problem is asking:"] > strong:first-child {
   background: rgba(80, 41, 255, 0.12);
   color: #5029ff;
 }

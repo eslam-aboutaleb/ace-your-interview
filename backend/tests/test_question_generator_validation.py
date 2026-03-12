@@ -17,7 +17,7 @@ from app.services.question_generator import (
 def _conceptual_answer(topic: str = "this service") -> str:
     return (
         f"**Answer:** {topic.title()} works by handling the core request path directly and enforcing the important constraints.\n\n"
-        f"**Why it's right:** In plain language, {topic} stays reliable when the system validates inputs, preserves invariants, and checks the failure cases that matter.\n\n"
+        f"**Detailed explanation:** In plain language, {topic} stays reliable when the system validates inputs, preserves invariants, and checks the failure cases that matter.\n\n"
         f"**Common mistake:** A weak answer about {topic} names the components but never explains why they fit the requirements."
     )
 
@@ -25,15 +25,15 @@ def _conceptual_answer(topic: str = "this service") -> str:
 def _problem_solving_answer(language: str = "python") -> str:
     return f"""### Problem
 
-**What the interviewer is really testing:** Can you name the invariant before coding and use it to justify the data structure?
+**What the problem is asking:** Return the two indices whose values add up to the target while avoiding repeated work and reusing the same element.
 
 ### Solution Walkthrough
 
-**Short answer:** Use a hash map so each complement lookup stays O(1) during a single left-to-right pass.
+**Direct answer:** Use a hash map so each complement lookup stays O(1) during a single left-to-right pass.
 
-**How to think about it:** Translate the prompt into a complement lookup problem and reject the nested-loop version once the invariant is clear.
+**Detailed explanation:** For each number, compute the complement needed to reach the target. If that complement has already been seen, return the saved index and the current index. Otherwise, store the current value and continue scanning.
 
-**Why it works:** Each number only needs to know whether its complement has already appeared, so the map preserves exactly the state the next step needs.
+**Why this works:** Each number only needs to know whether its complement has already appeared, so the map preserves exactly the state the next step needs.
 
 **Common mistake:** A weak answer starts coding the O(n^2) scan before explaining why the invariant allows a one-pass lookup.
 
@@ -313,9 +313,9 @@ Answer 2: Pagination controls payload size, improves latency, and avoids memory 
             level="mid",
         )
         self.assertIn("**Answer:**", prompt)
-        self.assertIn("**Why it's right:**", prompt)
+        self.assertIn("**Detailed explanation:**", prompt)
         self.assertIn("**Common mistake:**", prompt)
-        self.assertIn("Do not use meta-guideline phrasing", prompt)
+        self.assertIn("Answer the actual question itself", prompt)
         self.assertIn(
             "After this question, the learner should be able to",
             prompt,
@@ -358,10 +358,10 @@ Answer 2: Pagination controls payload size, improves latency, and avoids memory 
         self.assertIn("### Solution Walkthrough", prompt)
         self.assertIn("### Complexity", prompt)
         self.assertIn("### Code", prompt)
-        self.assertIn("**What the interviewer is really testing:**", prompt)
-        self.assertIn("**Short answer:**", prompt)
-        self.assertIn("**How to think about it:**", prompt)
-        self.assertIn("**Why it works:**", prompt)
+        self.assertIn("**What the problem is asking:**", prompt)
+        self.assertIn("**Direct answer:**", prompt)
+        self.assertIn("**Detailed explanation:**", prompt)
+        self.assertIn("**Why this works:**", prompt)
         self.assertIn("**Common mistake:**", prompt)
         self.assertIn("**Tradeoff / scaling caveat:**", prompt)
         self.assertIn("**Invariant note:**", prompt)
@@ -469,14 +469,13 @@ Use a dictionary and a loop.""",
         self.assertIn("### Solution Walkthrough", items[0]["answer"])
         self.assertIn("### Complexity", items[0]["answer"])
         self.assertIn("### Code", items[0]["answer"])
-        self.assertIn("**What the interviewer is really testing:**", items[0]["answer"])
-        self.assertIn("**Short answer:**", items[0]["answer"])
-        self.assertIn("**How to think about it:**", items[0]["answer"])
-        self.assertIn("**Why it works:**", items[0]["answer"])
+        self.assertIn("**What the problem is asking:**", items[0]["answer"])
+        self.assertIn("**Direct answer:**", items[0]["answer"])
+        self.assertIn("**Detailed explanation:**", items[0]["answer"])
+        self.assertIn("**Why this works:**", items[0]["answer"])
         self.assertIn("**Tradeoff / scaling caveat:**", items[0]["answer"])
         self.assertIn("**Invariant note:**", items[0]["answer"])
         self.assertIn("| Approach |", items[0]["answer"])
-        self.assertIn("1. Clarify the input", items[0]["answer"])
         self.assertIn("```python", items[0]["answer"])
         self.assertTrue(
             items[0]["learning_objective"].startswith(
@@ -499,10 +498,9 @@ Use a dictionary and a loop.""",
             items[0]["question"].startswith(("How would you", "When would you", "If ")),
         )
         self.assertIn("**Answer:**", items[0]["answer"])
-        self.assertIn("**Why it's right:**", items[0]["answer"])
+        self.assertIn("**Detailed explanation:**", items[0]["answer"])
         self.assertIn("**Common mistake:**", items[0]["answer"])
-        self.assertIn("| Lens | Weak answer | Strong interview answer |", items[0]["answer"])
-        self.assertIn("1. Start with the concrete requirement", items[0]["answer"])
+        self.assertIn("| Concern | What matters for this topic |", items[0]["answer"])
         self.assertTrue(
             items[0]["learning_objective"].startswith(
                 "After this question, the learner should be able to",
@@ -518,7 +516,7 @@ Use a dictionary and a loop.""",
             existing_questions=[],
             recovery_guidance=(
                 "- Use `**Answer:**`.\n"
-                "- Use `**Why it's right:**`.\n"
+                "- Use `**Detailed explanation:**`.\n"
                 "- Use `**Common mistake:**`."
             ),
         )
@@ -534,12 +532,12 @@ Use a dictionary and a loop.""",
             hard_requirements=['Under `### Code`, include exactly one fenced `python` block.'],
             recovery_guidance=(
                 "- Keep exactly these H3 headings in order: `### Problem`, `### Solution Walkthrough`, `### Complexity`, `### Code`.\n"
-                "- Include one practice twist.\n"
+                "- Start with `**What the problem is asking:**`.\n"
                 "- End with `**Invariant note:**`."
             ),
         )
         self.assertIn("### Problem", problem_retry)
-        self.assertIn("practice twist", problem_retry)
+        self.assertIn("What the problem is asking", problem_retry)
         self.assertIn("**Invariant note:**", problem_retry)
 
     def test_quiz_prompt_requires_adaptive_markdown_explanations(self):

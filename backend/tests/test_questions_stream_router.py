@@ -17,8 +17,8 @@ def _question_payload(question: str) -> list[dict]:
         {
             "question": question,
             "answer": (
-                f"**Answer:** {question} is best explained by starting with the real constraint and the practical takeaway.\n\n"
-                "**Why it's right:** In plain language, a strong answer connects the concept to the implementation detail that actually controls the tradeoff.\n\n"
+                f"**Answer:** {question} is best explained by tying it to the real constraint and the practical takeaway.\n\n"
+                "**Detailed explanation:** In plain language, a strong answer connects the concept to the implementation detail that actually controls the tradeoff.\n\n"
                 "**Common mistake:** A weak answer repeats terminology without tying it to the real engineering decision."
             ),
             "difficulty": "medium",
@@ -38,15 +38,15 @@ def _problem_solving_payload(question: str) -> list[dict]:
             "question": question,
             "answer": """### Problem
 
-**What the interviewer is really testing:** Can you identify the invariant before coding and use it to justify the data structure?
+**What the problem is asking:** Return the indices whose values add up to the target without reusing the same element or doing repeated work.
 
 ### Solution Walkthrough
 
-**Short answer:** Use a hash map so every number can check whether its complement has already appeared in O(1).
+**Direct answer:** Use a hash map so every number can check whether its complement has already appeared in O(1).
 
-**How to think about it:** Turn the prompt into a complement lookup problem and reject the nested-loop version once the invariant is clear.
+**Detailed explanation:** For each number, compute the complement needed to reach the target. If that complement has already been seen, return the saved index and the current index. Otherwise, store the current value and continue scanning.
 
-**Why it works:** The map preserves exactly the state the next step needs, so the scan stays single-pass and never reuses the same element twice.
+**Why this works:** The map preserves exactly the state the next step needs, so the scan stays single-pass and never reuses the same element twice.
 
 **Common mistake:** A weak answer starts coding the brute-force version before explaining why the invariant supports a one-pass lookup.
 
@@ -105,7 +105,7 @@ class FakeLLM:
 
         self.calls += 1
         prompt_l = prompt.lower()
-        if "expert algorithm interview coach and problem-solving educator" in prompt_l:
+        if "expert algorithm interviewer and problem-solving educator" in prompt_l:
             payload = _problem_solving_payload(
                 f"Question {self.calls}: solve two sum in python."
             )
@@ -244,7 +244,7 @@ Static topic body.
         self.assertEqual(status, 200)
         question_event = next(event for event in events if event["type"] == "question")
         answer = question_event["question"]["answer"]
-        self.assertIn("**What the interviewer is really testing:**", answer)
+        self.assertIn("**What the problem is asking:**", answer)
         self.assertIn("**Invariant note:**", answer)
         self.assertIn("### Problem", answer)
         self.assertIn("### Solution Walkthrough", answer)
