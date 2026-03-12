@@ -38,11 +38,11 @@ export type TopicStudyQuestionCacheEntry = {
 };
 
 type TopicStudyQuestionCachePayload = {
-  version: 1;
+  version: 3;
   entries: TopicStudyQuestionCacheEntry[];
 };
 
-const STORAGE_PREFIX = "ace-your-interview:topic-question-cache:v1:";
+const STORAGE_PREFIX = "ace-your-interview:topic-question-cache:v3:";
 
 function isQuotaExceededError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -64,7 +64,7 @@ function buildPayloadFromEntries(
   const entries = Object.values(entriesByKey)
     .filter((entry) => entry.status === "ready" || entry.status === "error")
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  return { version: 1, entries };
+  return { version: 3, entries };
 }
 
 function normalizeProviderInfo(raw: unknown): TopicStudyProviderInfo {
@@ -110,7 +110,7 @@ function normalizeSignature(raw: unknown): TopicStudyQuestionSignature | null {
         ? maybe.level
         : "mid",
     responseDetail:
-      maybe.responseDetail === "very_detailed" ? "very_detailed" : "concise",
+      maybe.responseDetail === "concise" ? "concise" : "very_detailed",
     preferredLanguage:
       typeof maybe.preferredLanguage === "string" ? maybe.preferredLanguage : "",
     requiresProgramming: !!maybe.requiresProgramming,
@@ -169,6 +169,7 @@ export function loadTopicStudyQuestionCache(
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as TopicStudyQuestionCachePayload;
+    if (parsed?.version !== 3) return {};
     const entriesRaw = Array.isArray(parsed?.entries) ? parsed.entries : [];
     const out: Record<string, TopicStudyQuestionCacheEntry> = {};
     for (const item of entriesRaw) {
