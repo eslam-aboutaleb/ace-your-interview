@@ -25,6 +25,36 @@ import type {
   LearningTrack,
 } from "@/types";
 
+function interviewStartErrorMessage(error: unknown): string {
+  const detail = (error as {
+    response?: {
+      data?: {
+        detail?: unknown;
+      };
+    };
+    message?: string;
+  })?.response?.data?.detail;
+
+  if (typeof detail === "string" && detail.trim()) {
+    return detail.trim();
+  }
+  if (
+    typeof detail === "object"
+    && detail
+    && typeof (detail as { message?: unknown }).message === "string"
+    && (detail as { message: string }).message.trim()
+  ) {
+    return (detail as { message: string }).message.trim();
+  }
+
+  const message = (error as { message?: unknown })?.message;
+  if (typeof message === "string" && message.trim()) {
+    return message.trim();
+  }
+
+  return "Could not start mock interview.";
+}
+
 const TRACK_LABELS: Record<LearningTrack, string> = {
   backend: "Backend",
   frontend: "Frontend",
@@ -124,10 +154,8 @@ export default function InterviewSetup() {
       try {
         const fallback = await createInterviewSession(payload);
         navigate(`/interview/${fallback.session.session_id}`);
-      } catch {
-        setErrorMsg(
-          "Could not start mock interview. Check backend feature flag and LLM settings.",
-        );
+      } catch (fallbackErr) {
+        setErrorMsg(interviewStartErrorMessage(fallbackErr));
       }
     } finally {
       setStartProgress("");

@@ -1,7 +1,8 @@
-"""Parse owner-handbook markdown files into structured topics."""
+"""Load static curriculum topics from the app catalog or a markdown override."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -16,15 +17,29 @@ _DEFAULT_LEVELS = ["junior", "mid", "senior"]
 
 
 class DocParser:
-    """Reads and caches all owner-handbook .md files."""
+    """Read and cache static curriculum topics for the learning platform."""
 
-    def __init__(self, docs_path: Optional[str] = None):
-        configured = docs_path or get_settings().docs_path
-        self.docs_path = self._resolve_docs_path(configured)
+    def __init__(
+        self,
+        docs_path: Optional[str] = None,
+        curriculum_path: Optional[str] = None,
+    ):
         self._topics: dict[str, TopicDetail] = {}
-        self._load()
+        self.source_kind = "curriculum_json"
+        self.source_path = ""
 
-    # ── public API ──────────────────────────────────────────
+        if docs_path:
+            self.docs_path = self._resolve_markdown_path(docs_path)
+            self.source_kind = "markdown_override"
+            self.source_path = self.docs_path
+            self._load_from_markdown_dir()
+            return
+
+        configured = curriculum_path or get_settings().curriculum_path
+        self.curriculum_path = self._resolve_curriculum_path(configured)
+        self.source_path = self.curriculum_path
+        self._load_from_curriculum_json()
+
     def list_topics(
         self,
         track: Optional[str] = None,
@@ -59,31 +74,77 @@ class DocParser:
         return self._topics.get(topic_id)
 
     def get_topic_content(self, topic_id: str) -> str:
-        """Return raw markdown content for LLM prompt."""
         topic = self._topics.get(topic_id)
         return topic.raw_content if topic else ""
 
-    # ── internals ───────────────────────────────────────────
     @staticmethod
-    def _resolve_docs_path(configured_path: str) -> str:
-        """Resolve docs path robustly for local and container runtimes."""
+    def _resolve_markdown_path(configured_path: str) -> str:
         p = Path(configured_path)
         if p.is_absolute():
             return str(p)
 
-        # Prefer cwd-relative if it exists, otherwise backend-root relative.
         cwd_candidate = (Path.cwd() / p).resolve()
-        if cwd_candidate.is_dir():
+        if cwd_candidate.exists():
             return str(cwd_candidate)
 
         backend_root = Path(__file__).resolve().parents[2]
-        backend_candidate = (backend_root / p).resolve()
-        return str(backend_candidate)
+        return str((backend_root / p).resolve())
 
-    def _load(self):
+    @staticmethod
+    def _resolve_curriculum_path(configured_path: str) -> str:
+        p = Path(configured_path)
+        if p.is_absolute():
+            return str(p)
+
+        cwd_candidate = (Path.cwd() / p).resolve()
+        if cwd_candidate.is_file():
+            return str(cwd_candidate)
+
+        backend_root = Path(__file__).resolve().parents[2]
+        return str((backend_root / p).resolve())
+
+    def _load_from_curriculum_json(self) -> None:
+        curriculum_file = Path(self.curriculum_path)
+        if not curriculum_file.is_file():
+            return
+
+        payload = json.loads(curriculum_file.read_text(encoding="utf-8"))
+        raw_topics = payload.get("topics")
+        if not isinstance(raw_topics, list):
+            return
+
+        for item in raw_topics:
+            if not isinstance(item, dict):
+                continue
+            topic_id = str(item.get("id", "")).strip()
+            title = str(item.get("title", "")).strip()
+            if not topic_id or not title:
+                continue
+            description = str(item.get("description", "")).strip()
+            track = self._normalise_track(str(item.get("track", ""))) or self._infer_track(
+                topic_id,
+                title,
+            )
+            levels = self._normalise_levels(item.get("levels"))
+            sections = self._normalise_sections(item.get("sections"))
+            raw_content = str(item.get("raw_content", "")).strip() or self._render_raw_content(
+                title=title,
+                description=description,
+                sections=sections,
+            )
+            self._topics[topic_id] = TopicDetail(
+                id=topic_id,
+                title=title,
+                description=description,
+                track=track or "",
+                levels=levels,
+                sections=sections,
+                raw_content=raw_content,
+            )
+
+    def _load_from_markdown_dir(self) -> None:
         handbook_dir = os.path.join(self.docs_path, "owner-handbook")
         if not os.path.isdir(handbook_dir):
-            # Fallback: maybe docs_path IS the owner-handbook dir
             if os.path.isdir(self.docs_path):
                 handbook_dir = self.docs_path
             else:
@@ -102,7 +163,8 @@ class DocParser:
             description = self._extract_description(content)
             sections = self._extract_sections(content)
             track = self._normalise_track(metadata.get("track")) or self._infer_track(
-                topic_id, title
+                topic_id,
+                title,
             )
             levels = self._normalise_levels(metadata.get("levels"))
             self._topics[topic_id] = TopicDetail(
@@ -116,13 +178,39 @@ class DocParser:
             )
 
     @staticmethod
+    def _render_raw_content(
+        *,
+        title: str,
+        description: str,
+        sections: list[dict[str, str]],
+    ) -> str:
+        parts = [f"# {title.strip()}", "", description.strip()]
+        for section in sections:
+            parts.extend(["", f"## {section['heading'].strip()}", "", section["content"].strip()])
+        return "\n".join(parts).strip()
+
+    @staticmethod
+    def _normalise_sections(raw_sections: object) -> list[dict[str, str]]:
+        if not isinstance(raw_sections, list):
+            return []
+        sections: list[dict[str, str]] = []
+        for item in raw_sections:
+            if not isinstance(item, dict):
+                continue
+            heading = str(item.get("heading", "")).strip()
+            content = str(item.get("content", "")).strip()
+            if not heading or not content:
+                continue
+            sections.append({"heading": heading, "content": content})
+        return sections
+
+    @staticmethod
     def _read_file(path: str) -> str:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
 
     @staticmethod
     def _extract_frontmatter(content: str) -> tuple[dict[str, str | list[str]], str]:
-        """Parse simple YAML frontmatter if present."""
         if not content.startswith("---"):
             return {}, content
 
@@ -178,7 +266,6 @@ class DocParser:
 
     @staticmethod
     def _extract_description(content: str) -> str:
-        """First non-heading, non-empty paragraph after the title."""
         lines = content.split("\n")
         capture = False
         buf: list[str] = []
@@ -200,7 +287,6 @@ class DocParser:
         sections: list[dict[str, str]] = []
         parts = re.split(r"^(#{2,3})\s+(.+)$", content, flags=re.MULTILINE)
 
-        # parts = [pre, level, heading, body, level, heading, body, ...]
         i = 1
         while i < len(parts) - 2:
             heading = parts[i + 1].strip()

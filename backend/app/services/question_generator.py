@@ -181,18 +181,31 @@ def _problem_solving_language(preferred_language: str) -> str:
     return language or PROBLEM_SOLVING_DEFAULT_LANGUAGE
 
 
+def _study_code_language(
+    preferred_language: str,
+    *,
+    problem_solving_mode: bool,
+    requires_programming: bool,
+) -> str:
+    language = (preferred_language or "").strip().lower()
+    if problem_solving_mode:
+        return _problem_solving_language(language)
+    if language:
+        return language
+    if requires_programming:
+        return PROBLEM_SOLVING_DEFAULT_LANGUAGE
+    return ""
+
+
 _CONCEPTUAL_COACH_LABELS = (
     "**Answer:**",
     "**Why it's right:**",
-    "**Interviewer-ready phrasing:**",
     "**Common mistake:**",
-    "**Self-check:**",
 )
 _PROBLEM_SOLVING_WALKTHROUGH_LABELS = (
     "**Short answer:**",
     "**How to think about it:**",
     "**Why it works:**",
-    "**Interviewer-ready phrasing:**",
     "**Common mistake:**",
 )
 
@@ -209,7 +222,7 @@ def _question_tutoring_arc_rules(problem_solving_mode: bool, language: str = "")
                 "In `### Complexity`, include `**Time and space:**` followed by "
                 "`**Tradeoff / scaling caveat:**`."
             ),
-            "Keep the answer generic and topic-grounded; do not inject named canned techniques unless the docs naturally justify them.",
+            "Keep the answer generic and topic-grounded; do not inject named canned techniques unless the course content naturally justifies them.",
         ]
 
     coach_labels = ", ".join([f"`{label}`" for label in _CONCEPTUAL_COACH_LABELS])
@@ -219,11 +232,8 @@ def _question_tutoring_arc_rules(problem_solving_mode: bool, language: str = "")
         "Do not add `###` headings to non-problem-solving answers.",
         "The first sentence after `**Answer:**` must directly answer the question.",
         "Speak to the learner, not to the model.",
-        (
-            "Do not use meta-guideline phrasing such as `the candidate should`, `you should answer by`, "
-            "or `when discussing this in an interview` outside `**Interviewer-ready phrasing:**`."
-        ),
-        "Keep all five coach segments even when the answer is concise; `response_detail` only changes depth inside them.",
+        "Do not use meta-guideline phrasing such as `the candidate should`, `you should answer by`, or `when discussing this in an interview` anywhere in the answer.",
+        "Keep all required coach segments regardless of depth setting; `response_detail` only changes how much detail lives inside them.",
     ]
 
 
@@ -244,22 +254,126 @@ def _question_retry_guidance(problem_solving_mode: bool) -> str:
     if problem_solving_mode:
         return "\n".join(
             [
-                "- Regenerate each item as a fresh coach-style study answer for the learner.",
+                "- Regenerate each item as a fresh interview-grade study answer for the learner.",
                 "- Keep exactly these H3 headings in order: `### Problem`, `### Solution Walkthrough`, `### Complexity`, `### Code`.",
                 "- In `### Problem`, start with `**What the interviewer is really testing:**`.",
-                "- In `### Solution Walkthrough`, include final answer first, the mental model or invariant, interviewer-ready wording, one mistake to avoid, and one practice twist without adding new `###` headings.",
+                "- In `### Solution Walkthrough`, put the short answer first, then explain the mental model or invariant before deeper detail.",
+                "- Use numbered lists for decision flow, and use a compact comparison table when showing why the chosen approach beats a weaker alternative.",
                 "- In `### Complexity`, include `**Time and space:**` and `**Tradeoff / scaling caveat:**`.",
                 "- In `### Code`, include exactly one commented fenced code block in the selected language, then `**Invariant note:**`.",
+                "- Keep the answer specific enough that a learner could study from it without extra notes.",
             ]
         )
     return "\n".join(
         [
-            "- Regenerate each item as a fresh coach-style study answer for the learner.",
-            "- Use only bold lead-ins in this exact order: `**Answer:**`, `**Why it's right:**`, `**Interviewer-ready phrasing:**`, `**Common mistake:**`, `**Self-check:**`.",
+            "- Regenerate each item as a fresh interview-grade study answer for the learner.",
+            "- Use only bold lead-ins in this exact order: `**Answer:**`, `**Why it's right:**`, `**Common mistake:**`.",
             "- The first sentence after `**Answer:**` must directly answer the question.",
-            "- Speak to the learner, not to the model, and do not use meta-guideline phrasing outside `**Interviewer-ready phrasing:**`.",
+            "- Speak to the learner, not to the model, and do not use meta-guideline phrasing anywhere in the answer.",
+            "- Use numbered lists for steps or decision flow, bullet lists for pros/cons or failure modes, and a compact table when the answer is mainly comparing alternatives.",
+            "- Include the tradeoff, bottleneck, or failure mode that would matter in a real interview follow-up.",
         ]
     )
+
+
+def _common_interview_question_rules(problem_solving_mode: bool, *, topic_scope: str) -> list[str]:
+    if problem_solving_mode:
+        return [
+            f"Questions must sound like common coding interview questions for {topic_scope}, not obscure puzzle variants or textbook trivia.",
+            "Prefer high-frequency interviewer prompts first: clarify the problem, state constraints, choose the algorithm or data structure, justify tradeoffs, and reason about edge cases.",
+            "Start with the standard interview patterns for this topic before unusual twists unless the documentation makes the twist central.",
+        ]
+    return [
+        f"Questions must sound like common interview questions for {topic_scope}, not arbitrary trivia or internal prompt exercises.",
+        "Prefer the questions interviewers repeatedly ask for this topic: what it is, why it matters, how it works, when to use it, tradeoffs, failure modes, debugging, testing, and scaling.",
+        "Use the documentation to make those common interview questions concrete for the current topic instead of inventing niche hypotheticals.",
+    ]
+
+
+def _difficulty_generation_rules(problem_solving_mode: bool, difficulty: Optional[str]) -> list[str]:
+    diff = str(difficulty or "").strip().lower()
+    if diff == "easy":
+        return [
+            (
+                "Easy questions should stay foundational: prefer high-frequency interview questions, direct "
+                "tradeoff explanations, and the first practical implementation concern."
+            )
+        ]
+    if diff == "medium":
+        return [
+            (
+                "Medium questions should focus on common architecture or implementation scenarios, practical "
+                "tradeoffs, bottlenecks, and realistic follow-up reasoning."
+            )
+        ]
+    if diff == "hard":
+        if problem_solving_mode:
+            return [
+                (
+                    "Hard questions should probe tricky edge cases, follow-up twists, tighter constraints, or "
+                    "alternative designs that break simpler solutions."
+                )
+            ]
+        return [
+            (
+                "Hard questions should probe tricky edge cases, distributed-system anomalies, scaling bottlenecks, "
+                "failure modes, or multi-region consistency tradeoffs."
+            )
+        ]
+    if problem_solving_mode:
+        return [
+            (
+                "When difficulty is not fixed, keep the batch naturally progressive: start with common interview "
+                "problem shapes, then move toward tougher edge cases or follow-up twists later in the batch. "
+                "Do not enforce exact easy/medium/hard quotas."
+            )
+        ]
+    return [
+        (
+            "When difficulty is not fixed, keep the batch naturally progressive: lead with common interview "
+            "questions, then move toward harder tradeoffs, bottlenecks, failure modes, or scale problems later "
+            "in the batch. Do not enforce exact easy/medium/hard quotas."
+        )
+    ]
+
+
+def _study_markdown_rules(*, code_language: str, problem_solving_mode: bool) -> list[str]:
+    rules = [
+        "When the answer compares options, tradeoffs, or categories, use a compact GFM table instead of burying the comparison in prose.",
+        "If the question is mainly asking for a comparison, prefer a compact GFM table for the main side-by-side contrast.",
+        "If you use a table, output valid GFM table syntax.",
+        "one row per line.",
+        "include a separator row (e.g. `| --- | --- |`).",
+        "When the answer includes request flow, debugging flow, implementation sequence, or evaluation criteria, use numbered lists instead of dense prose.",
+        "Use bullet lists for components, pros/cons, bottlenecks, failure modes, or checklist-style explanations.",
+        "When the topic touches storage, caching, messaging, coordination, retries, replication, or multi-service flows, explicitly cover bottlenecks, scaling constraints, failure modes, and relevant consistency/CAP implications.",
+        "You may include fenced Mermaid diagrams or clear ASCII diagrams when architecture or data flow is genuinely easier to understand visually.",
+        "If you include fences, always use explicit language tags (for example: ```python, ```mermaid).",
+    ]
+    if problem_solving_mode:
+        rules.append("If you compare a brute-force approach with the chosen approach, summarize that tradeoff clearly, using a compact table when it improves clarity.")
+    else:
+        if code_language:
+            rules.append(
+                f'If code materially clarifies the concept, use a concise fenced "{code_language}" example; otherwise keep the answer conceptual.'
+            )
+        else:
+            rules.append("Use code examples only when they materially improve clarity.")
+    return rules
+
+
+def _fallback_difficulty_for_index(index: int, total: int, requested: Optional[str]) -> str:
+    diff = str(requested or "").strip().lower()
+    if diff in _VALID_DIFFICULTIES:
+        return diff
+    if total <= 1:
+        return "medium"
+    bucket = (max(0, index) * 3) // max(1, total)
+    if bucket <= 0:
+        return "easy"
+    if bucket == 1:
+        return "medium"
+    return "hard"
 
 
 def _default_learning_objective(problem_solving_mode: bool) -> str:
@@ -305,7 +419,7 @@ _PROBLEM_SOLVING_FALLBACK_SCENARIOS: tuple[dict[str, str], ...] = (
     {
         "id": "two_sum_hash_map",
         "question": (
-            "In {source_scope}, consider an array-based input tied to {focus}. Return the two indices "
+            "In {source_scope}, consider an array-based input. Return the two indices "
             "whose values satisfy a target-sum constraint. Explain your approach, complexity, and "
             "edge-case handling as you would in a live interview."
         ),
@@ -398,7 +512,7 @@ _PROBLEM_SOLVING_FALLBACK_SCENARIOS: tuple[dict[str, str], ...] = (
     {
         "id": "search_rotated_binary_search",
         "question": (
-            "In {source_scope}, you receive a rotated sorted array tied to {focus} and a target value. "
+            "In {source_scope}, you receive a rotated sorted array and a target value. "
             "Return the index or -1 if not found, and explain how you adapt binary search under rotation."
         ),
         "problem": (
@@ -637,10 +751,46 @@ def _build_conceptual_fallback_answer(
     focus: str,
     source_scope: str,
     angle: str,
+    difficulty: str,
+    code_language: str = "",
+    requires_programming: bool = False,
 ) -> tuple[str, str]:
     reasoning_summary = (
         f"Name the main constraint around {focus}, then justify the choice that best protects {angle}."
     )
+    interviewer_steps = "\n".join(
+        [
+            f"1. Start with the concrete requirement or bottleneck around {focus}.",
+            f"2. Explain why the chosen approach protects {angle} better than the simplest default.",
+            "3. Close with the tradeoff, failure mode, or scaling limit that would change the decision.",
+        ]
+    )
+    comparison_table = "\n".join(
+        [
+            "| Lens | Weak answer | Strong interview answer |",
+            "| --- | --- | --- |",
+            f"| Requirement | Mentions {focus} in general terms | Ties {focus} to the real requirement inside {source_scope} |",
+            f"| Tradeoff | Says a pattern is 'best practice' | Explains how the choice protects {angle} and what gets worse |",
+            "| Follow-up risk | Ignores edge cases and bottlenecks | Names the failure mode, scaling pressure, or operational caveat |",
+        ]
+    )
+    hard_follow_up = ""
+    if difficulty == "hard":
+        hard_follow_up = (
+            "\n\n- At harder interview levels, also call out the bottleneck you expect first under scale."
+            "\n- If consistency, retries, caching, or coordination are involved, mention the failure mode that changes the design."
+        )
+    code_example = ""
+    if requires_programming and code_language:
+        code_example = (
+            f"\n\n```{code_language}\n"
+            "# Sketch the guardrail that protects the main requirement first.\n"
+            "def evaluate_decision(requirement, tradeoff):\n"
+            "    if not requirement:\n"
+            '        return "clarify constraints first"\n'
+            '    return f"protect {requirement} while accepting {tradeoff}"\n'
+            "```"
+        )
     answer = "\n\n".join(
         [
             (
@@ -650,19 +800,15 @@ def _build_conceptual_fallback_answer(
             (
                 f"**Why it's right:** In plain language, {focus} matters because real systems need a choice that "
                 f"holds up under normal use, failure paths, and future growth. If you anchor the answer in the "
-                "requirements first, the tradeoffs become easier to explain."
-            ),
-            (
-                f"**Interviewer-ready phrasing:** \"I would frame {focus} around the actual constraints first, "
-                f"then explain why this design gives the best balance for {angle} and what I would validate next.\""
+                "requirements first, the tradeoffs become easier to explain.\n\n"
+                f"{interviewer_steps}\n\n"
+                f"{comparison_table}"
+                f"{hard_follow_up}"
+                f"{code_example}"
             ),
             (
                 f"**Common mistake:** A weak answer for {focus} jumps straight to a favorite pattern and never "
                 "shows why it fits the real constraints or what could go wrong."
-            ),
-            (
-                f"**Self-check:** If {angle} suddenly became the hardest constraint in {source_scope}, what part "
-                "of your reasoning would you revisit first and why?"
             ),
         ]
     ).strip()
@@ -819,6 +965,22 @@ def _build_problem_solving_fallback_answer(
     )
     short_answer, _remaining_walkthrough = _split_first_sentence(seed["walkthrough"])
     time_and_space, tradeoff = _split_last_sentence(seed["complexity"])
+    thinking_steps = "\n".join(
+        [
+            f"1. Clarify the input, output, and non-negotiable constraint for {focus}.",
+            "2. Ask what state the next step needs in order to stay correct.",
+            "3. Pick the structure that preserves that state without repeated work.",
+            "4. Walk one edge case before coding so the invariant is explicit.",
+        ]
+    )
+    approach_table = "\n".join(
+        [
+            "| Approach | Why interviewers move past it | Why the chosen approach wins |",
+            "| --- | --- | --- |",
+            "| Brute force | Repeats work and usually misses the core invariant | Useful only as a baseline for correctness reasoning |",
+            "| Chosen approach | Preserves the exact state the next step needs | Reduces repeated work while keeping the explanation easy to defend |",
+        ]
+    )
     answer = "\n\n".join(
         [
             "### Problem",
@@ -829,11 +991,13 @@ def _build_problem_solving_fallback_answer(
             ),
             "### Solution Walkthrough",
             f"**Short answer:** {short_answer}",
-            f"**How to think about it:** {seed['problem']}",
-            f"**Why it works:** {seed['walkthrough']}",
+            f"**How to think about it:**\n{thinking_steps}\n\n{seed['problem']}",
             (
-                f"**Interviewer-ready phrasing:** \"The key idea is {seed['reasoning_summary'].rstrip('.')}. "
-                "Once that is clear, I can justify the data structure, walk through the update rule, and then code it cleanly.\""
+                f"**Why it works:** {seed['walkthrough']}\n"
+                "- The invariant tells you what must stay true after every update.\n"
+                "- The chosen structure stores exactly the information the next step needs.\n"
+                "- The update order prevents invalid reuse or stale state.\n\n"
+                f"{approach_table}"
             ),
             (
                 f"**Common mistake:** A weak answer for {focus} starts coding the brute-force idea before "
@@ -986,7 +1150,7 @@ def _build_prompt(
     level: Optional[str] = None,
     section_title: Optional[str] = None,
     section_content: Optional[str] = None,
-    response_detail: str = "concise",
+    response_detail: str = "very_detailed",
     preferred_language: str = "",
     requires_programming: bool = False,
     requested_total_count: Optional[int] = None,
@@ -1007,23 +1171,32 @@ def _build_prompt(
     else:
         scope = f'"{topic_title}"'
         content = _clamp_content(doc_content)
+    common_interview_rules = _common_interview_question_rules(
+        problem_solving_mode,
+        topic_scope=scope,
+    )
 
     detail_clause = (
-        "Be concise and high-signal."
+        "Be detailed enough to help the learner pass the interview: explain the direct answer, reasoning, tradeoffs, edge cases, practical examples, and the follow-up points an interviewer is likely to probe. Do not be terse or vague."
         if response_detail != "very_detailed"
-        else "Be very detailed with layered explanation depth and concrete examples."
+        else "Be maximally detailed with layered explanation depth, concrete examples, edge cases, tradeoffs, and enough substance that the learner could study from the answer alone."
     )
     selected_language = (preferred_language or "").strip().lower()
-    problem_solving_language = _problem_solving_language(selected_language)
+    study_code_language = _study_code_language(
+        selected_language,
+        problem_solving_mode=problem_solving_mode,
+        requires_programming=requires_programming,
+    )
+    problem_solving_language = _problem_solving_language(study_code_language)
     code_clause = ""
     if problem_solving_mode:
         code_clause = (
             f'Under `### Code`, include exactly one fenced "{problem_solving_language}" example with comments '
             "that explain each key step or block."
         )
-    elif requires_programming and selected_language:
+    elif requires_programming and study_code_language:
         code_clause = (
-            f'Include one practical fenced code example in "{selected_language}" when code clarifies the answer.'
+            f'Include one practical fenced code example in "{study_code_language}" when code clarifies the answer.'
         )
     elif not requires_programming:
         code_clause = "Avoid code blocks unless code is explicitly required by the question."
@@ -1045,10 +1218,12 @@ def _build_prompt(
             "Do not copy canonical LeetCode wording; adapt each question to the current topic scope and source content.",
             "Across generated items, vary the kinds of constraints, data-structure choices, and solution shapes.",
             "Every answer must include commented code in the selected language.",
+            *common_interview_rules,
             *_question_tutoring_arc_rules(True, problem_solving_language),
         ]
         if problem_solving_mode
         else [
+            *common_interview_rules,
             "Questions must cover conceptual + practical angles.",
             *_question_tutoring_arc_rules(False),
         ]
@@ -1056,7 +1231,7 @@ def _build_prompt(
     answer_shape = (
         "Markdown with exactly ### Problem, ### Solution Walkthrough, ### Complexity, and ### Code; include the required bold coaching labels inside those sections and exactly one fenced code block"
         if problem_solving_mode
-        else "Markdown with bold sections **Answer:**, **Why it's right:**, **Interviewer-ready phrasing:**, **Common mistake:**, and **Self-check:**"
+        else "Markdown with bold sections **Answer:**, **Why it's right:**, and **Common mistake:**"
     )
     uniqueness_block = ""
     if existing_seed:
@@ -1079,38 +1254,37 @@ def _build_prompt(
             "Questions must be standalone and non-duplicative.",
             "Questions must be NEW relative to already generated checkpoint questions listed above.",
             *problem_scope_rules,
+            *_difficulty_generation_rules(problem_solving_mode, difficulty),
             *_question_auxiliary_field_rules(problem_solving_mode),
             "Answers must be grounded in the provided documentation.",
             detail_clause,
             "Format answers as markdown, but keep structure adaptive.",
             "long answers must be split into short readable paragraphs with blank lines.",
-            "use bullets only when listing steps/checklists/categories.",
+            "Do not compress complex topics into a few generic sentences; explain the mechanism, tradeoffs, edge cases, and the follow-up points a real interviewer would probe.",
+            *_study_markdown_rules(
+                code_language=study_code_language or PROBLEM_SOLVING_DEFAULT_LANGUAGE,
+                problem_solving_mode=problem_solving_mode,
+            ),
             (
                 "Use only the required headings for problem-solving answers."
                 if problem_solving_mode
                 else "Do not add extra headings to conceptual answers."
             ),
-            "use tables only for direct comparisons/category matrices.",
-            "If you use a table, output valid GFM table syntax.",
-            "one row per line.",
-            "include a separator row (e.g. `| --- | --- |`).",
             (
                 "Problem Solving answers must always include the required fenced code block."
                 if problem_solving_mode
                 else "You may include fenced code blocks when code clarifies an implementation detail."
             ),
             code_clause if code_clause else "Use code examples only when they materially improve clarity.",
-            "You may include fenced Mermaid diagrams when architecture or flows are better shown visually.",
-            "If you include fences, always use explicit language tags (for example: ```python, ```mermaid).",
             "Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.",
-            "source_quote must be factual text from provided docs.",
+            "source_quote must be factual text from the provided course content.",
             f'target_level must match "{target_level}" exactly.',
             "Do not wrap JSON with prose; return raw JSON only.",
             "Complexity must match target_level.",
             "junior: fundamentals, definitions, and straightforward tradeoffs.",
             "mid: implementation details, constraints, and moderate tradeoffs.",
             "senior: architecture, scaling, risk, and deep tradeoff decisions.",
-            "Keep markdown compact and practical.",
+            "Keep markdown practical and interview-usable, not terse.",
         ],
     )
     return f"""{role_clause}
@@ -1185,7 +1359,7 @@ def _build_quiz_prompt(
     "explanation": "2-4 sentence explanation",
     "difficulty": "easy|medium|hard",
     "topic_id": "one of provided topic ids",
-    "source_quote": "short direct quote from docs",
+    "source_quote": "short direct quote from course content",
     "reasoning_summary": "1-2 sentence why answer is correct",
     "target_level": "junior|mid|senior"
   }
@@ -1446,26 +1620,43 @@ def _build_fallback_question_items(
     existing_seed = _normalise_existing_questions(existing_questions)
     dedup: set[str] = {_normalise_question(q) for q in existing_seed}
     seen_questions: list[str] = [*existing_seed]
-    difficulty_value = (difficulty or "medium").strip().lower()
-    if difficulty_value not in _VALID_DIFFICULTIES:
-        difficulty_value = "medium"
-    selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else ""
+    selected_language = _study_code_language(
+        preferred_language,
+        problem_solving_mode=problem_solving_mode,
+        requires_programming=requires_programming,
+    )
     scenario_ids = (
         _problem_solving_scenario_ids_for_language(selected_language)
         if problem_solving_mode
         else []
     )
 
-    templates = [
-        "What are the key design considerations for {focus} in {topic} from a {angle} perspective?",
-        "How would you apply {focus} in a real implementation for {topic} while prioritizing {angle}?",
-        "What tradeoffs should be evaluated when working with {focus} in {topic} regarding {angle}?",
-        "How would you validate that {focus} is implemented correctly in {topic} with emphasis on {angle}?",
-        "A production issue appears around {focus} in {topic}. How would you diagnose and fix it with focus on {angle}?",
-        "How would you test and monitor {focus} in {topic} to maintain strong {angle} guarantees?",
-        "If {focus} must scale in {topic}, what architecture changes would you make for better {angle}?",
-        "When refactoring {focus} in {topic}, how would you reduce risk and preserve {angle} behavior?",
-    ]
+    templates_by_difficulty = {
+        "easy": [
+            "What is {focus} in {topic}, and why does it matter in practice?",
+            "How does {focus} work in {topic}, and what requirement is it protecting?",
+            "When would you use {focus} in {topic}, and what first tradeoff would you mention?",
+            "What problem does {focus} solve in {topic}, and what goes wrong when teams ignore it?",
+            "How would you explain {focus} to a new backend engineer working on {topic}?",
+            "What is the simplest correct way to reason about {focus} in {topic} before adding optimizations?",
+        ],
+        "medium": [
+            "How would you implement {focus} in {topic} while protecting {angle}?",
+            "If {focus} caused a production issue in {topic}, how would you debug it and what would you check first?",
+            "How would you test {focus} in {topic} so you can defend the design under follow-up questions?",
+            "What tradeoffs would you compare when choosing {focus} in {topic} with emphasis on {angle}?",
+            "How would you roll out or migrate {focus} in {topic} safely, and what signal would you watch first?",
+            "What bottleneck or edge case would you expect first when {focus} is used in {topic}, and how would you mitigate it?",
+        ],
+        "hard": [
+            "If {focus} needed to scale in {topic}, what would you change first and what tradeoff would get worse?",
+            "What failure modes or edge cases would you call out when discussing {focus} in {topic} with emphasis on {angle}?",
+            "How would you explain the consistency, coordination, or bottleneck risk around {focus} in {topic} when the load grows sharply?",
+            "If {focus} failed during a regional outage in {topic}, what recovery tradeoff would you make first?",
+            "How would you redesign {focus} in {topic} when latency, correctness, and cost are all in tension?",
+            "What interviewer follow-up would expose a weak answer about {focus} in {topic}, and how would you answer it at senior level?",
+        ],
+    }
     angles = [
         "correctness",
         "reliability",
@@ -1484,6 +1675,7 @@ def _build_fallback_question_items(
     while len(items) < remaining and idx < max_rounds:
         focus = fragments[idx % len(fragments)]
         angle = angles[(idx // max(1, len(fragments))) % len(angles)]
+        difficulty_value = _fallback_difficulty_for_index(len(items), remaining, difficulty)
         scenario_id = _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID
         if problem_solving_mode:
             scenario_id = scenario_ids[idx % len(scenario_ids)]
@@ -1493,6 +1685,10 @@ def _build_fallback_question_items(
                 scenario_id=scenario_id,
             )["question"]
         else:
+            templates = templates_by_difficulty.get(
+                difficulty_value,
+                templates_by_difficulty["medium"],
+            )
             template = templates[idx % len(templates)]
             question = template.format(
                 focus=focus,
@@ -1516,6 +1712,9 @@ def _build_fallback_question_items(
                 focus=focus,
                 source_scope=source_scope,
                 angle=angle,
+                difficulty=difficulty_value,
+                code_language=selected_language,
+                requires_programming=requires_programming,
             )
         item: dict[str, Any] = {
             "question": question,
@@ -2062,7 +2261,7 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
-        response_detail: str = "concise",
+        response_detail: str = "very_detailed",
         preferred_language: str = "",
         requires_programming: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
@@ -2440,7 +2639,7 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
-        response_detail: str = "concise",
+        response_detail: str = "very_detailed",
         preferred_language: str = "",
         requires_programming: bool = False,
     ) -> GenerateQuestionsResponse:
@@ -2545,7 +2744,7 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         section_title: Optional[str] = None,
         section_content: Optional[str] = None,
-        response_detail: str = "concise",
+        response_detail: str = "very_detailed",
         preferred_language: str = "",
         requires_programming: bool = False,
     ) -> GenerateQuestionsV2Response:

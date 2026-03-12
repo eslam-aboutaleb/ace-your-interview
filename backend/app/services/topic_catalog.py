@@ -38,8 +38,7 @@ def problem_solving_base_topic() -> dict:
         "requires_programming": True,
         "language_options": list(PROBLEM_SOLVING_LANGUAGE_OPTIONS),
         "selected_language": PROBLEM_SOLVING_DEFAULT_LANGUAGE,
-        "response_detail": "concise",
+        "response_detail": "very_detailed",
         "is_dynamic_topic": True,
         "content_ready": False,
     }
-
