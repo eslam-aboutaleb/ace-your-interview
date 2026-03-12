@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Children, isValidElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import CodePanel from "@/components/common/CodePanel";
@@ -10,6 +10,28 @@ interface MarkdownRendererProps {
   className?: string;
   compact?: boolean;
 }
+
+const COACH_PARAGRAPH_LABELS = new Set([
+  "Answer:",
+  "Why it's right:",
+  "Interviewer-ready phrasing:",
+  "Common mistake:",
+  "Self-check:",
+  "What the interviewer is really testing:",
+  "Short answer:",
+  "How to think about it:",
+  "Why it works:",
+  "Time and space:",
+  "Tradeoff / scaling caveat:",
+  "Invariant note:",
+]);
+
+const COACH_SECTION_HEADINGS = new Set([
+  "Problem",
+  "Solution Walkthrough",
+  "Complexity",
+  "Code",
+]);
 
 function isDividerRow(row: string): boolean {
   if (!row.startsWith("|") || !row.endsWith("|")) return false;
@@ -97,8 +119,59 @@ function childrenToText(children: ReactNode): string {
   return "";
 }
 
+function extractCoachParagraphLabel(children: ReactNode): string | null {
+  const nodes = Children.toArray(children);
+  if (!nodes.length) return null;
+  const firstNode = nodes.find((node) => {
+    if (typeof node === "string" || typeof node === "number") {
+      return String(node).trim().length > 0;
+    }
+    return node != null;
+  });
+  if (!firstNode) return null;
+  if (typeof firstNode === "string" || typeof firstNode === "number") {
+    const trimmed = String(firstNode).trim();
+    return COACH_PARAGRAPH_LABELS.has(trimmed) ? trimmed : null;
+  }
+  if (!isValidElement(firstNode)) return null;
+  const firstText = childrenToText(
+    (firstNode as { props?: { children?: ReactNode } }).props?.children,
+  ).trim();
+  return COACH_PARAGRAPH_LABELS.has(firstText) ? firstText : null;
+}
+
+function coachSectionKey(heading: string): string | null {
+  const normalized = heading.trim();
+  if (!COACH_SECTION_HEADINGS.has(normalized)) return null;
+  return normalized.toLowerCase().replace(/\s+/g, "-");
+}
+
 function getMarkdownComponents(compact: boolean): Components {
   return {
+    h3: ({ node: _node, className, children, ...props }) => {
+      const sectionKey = coachSectionKey(childrenToText(children));
+      return (
+        <h3
+          className={`${className || ""}${sectionKey ? " coach-section-heading" : ""}`.trim()}
+          data-coach-section={sectionKey || undefined}
+          {...props}
+        >
+          {children}
+        </h3>
+      );
+    },
+    p: ({ node: _node, className, children, ...props }) => {
+      const coachLabel = extractCoachParagraphLabel(children);
+      return (
+        <p
+          className={`${className || ""}${coachLabel ? " coach-paragraph" : ""}`.trim()}
+          data-coach-label={coachLabel || undefined}
+          {...props}
+        >
+          {children}
+        </p>
+      );
+    },
     table: ({ node: _node, ...props }) => (
       <div className="markdown-table-wrap">
         <table {...props} />

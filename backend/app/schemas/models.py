@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -527,10 +527,85 @@ class TopicMasteryResponse(BaseModel):
     topics: list[TopicMasteryItem]
 
 
+class LearnerProfile(BaseModel):
+    target_role: str = ""
+    target_date: str = ""
+    weekly_minutes: int = Field(default=240, ge=30, le=2400)
+    preferred_session_minutes: int = Field(default=30, ge=10, le=180)
+    current_level: LevelEnum = LevelEnum.MID
+    target_level: LevelEnum = LevelEnum.SENIOR
+    primary_track: TrackEnum = TrackEnum.BACKEND
+    focus_topic_ids: list[str] = Field(default_factory=list)
+    target_companies: list[str] = Field(default_factory=list)
+    preferred_modalities: list[str] = Field(default_factory=lambda: ["study", "quiz", "interview"])
+    confidence_by_track: dict[str, int] = Field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+    diagnostic_updated_at: str = ""
+
+
+class LearnerProfileUpdateRequest(BaseModel):
+    target_role: Optional[str] = Field(default=None, max_length=200)
+    target_date: Optional[str] = Field(default=None, max_length=10)
+    weekly_minutes: Optional[int] = Field(default=None, ge=30, le=2400)
+    preferred_session_minutes: Optional[int] = Field(default=None, ge=10, le=180)
+    current_level: Optional[LevelEnum] = None
+    target_level: Optional[LevelEnum] = None
+    primary_track: Optional[TrackEnum] = None
+    focus_topic_ids: Optional[list[str]] = Field(default=None, max_length=12)
+    target_companies: Optional[list[str]] = Field(default=None, max_length=12)
+    preferred_modalities: Optional[list[str]] = Field(default=None, max_length=4)
+    confidence_by_track: Optional[dict[str, int]] = None
+
+
+class CompetencyScore(BaseModel):
+    competency_id: str
+    competency_type: str
+    label: str
+    track: str = ""
+    score: float = Field(default=0.0, ge=0.0, le=100.0)
+    confidence_gap: float = Field(default=0.0, ge=0.0, le=100.0)
+    evidence_count: int = Field(default=0, ge=0)
+    priority: float = Field(default=0.0, ge=0.0, le=100.0)
+    source: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    updated_at: str = ""
+
+
+class ProfileDiagnosticResponse(BaseModel):
+    generated_at: str
+    profile: LearnerProfile
+    readiness_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    strongest_competencies: list[str] = Field(default_factory=list)
+    urgent_competencies: list[str] = Field(default_factory=list)
+    competencies: list[CompetencyScore] = Field(default_factory=list)
+
+
+class RecommendationItem(BaseModel):
+    recommendation_id: str
+    recommendation_type: str
+    topic_id: str = ""
+    title: str
+    reason: str
+    estimated_minutes: int = Field(default=20, ge=5, le=180)
+    cta_route: str
+    priority: float = Field(default=0.0, ge=0.0, le=100.0)
+    reason_codes: list[str] = Field(default_factory=list)
+    track: str = ""
+
+
+class RecommendationsResponse(BaseModel):
+    generated_at: str
+    profile: LearnerProfile
+    days_until_target: Optional[int] = None
+    items: list[RecommendationItem] = Field(default_factory=list)
+
+
 class StudyPlanTaskType(str, Enum):
     REVIEW = "review"
     TOPIC_STUDY = "topic_study"
     QUIZ = "quiz"
+    INTERVIEW = "interview"
 
 
 class StudyPlanTask(BaseModel):

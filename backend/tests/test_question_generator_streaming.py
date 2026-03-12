@@ -12,15 +12,18 @@ def _question_payload(question: str) -> dict:
     return {
         "question": question,
         "answer": (
-            "This answer explains the concept in practical terms, maps it to implementation "
-            "constraints, and clarifies tradeoffs for interview-ready reasoning."
+            f"**Answer:** {question} should be answered by starting with the real constraint and the direct takeaway.\n\n"
+            "**Why it's right:** In plain language, the best answer connects the concept to the implementation detail that actually controls correctness or tradeoffs.\n\n"
+            "**Interviewer-ready phrasing:** \"I would start with the constraint, explain the tradeoff it creates, and then tie that back to the implementation choice.\"\n\n"
+            "**Common mistake:** A weak answer repeats definitions without showing why the constraint changes the decision.\n\n"
+            "**Self-check:** If the main constraint changed, what part of the explanation would you revisit first?"
         ),
         "difficulty": "medium",
-        "learning_objective": "Understand and apply the documented concept.",
+        "learning_objective": "After this question, the learner should be able to understand and apply the documented concept.",
         "source_section": "Core Concepts",
         "source_quote": "Core concepts define behavior and tradeoffs.",
         "misconception_trap": "Assuming a default without validating constraints.",
-        "reasoning_summary": "Start from requirements, then evaluate tradeoffs.",
+        "reasoning_summary": "Start from the controlling constraint, then explain the tradeoff it creates.",
         "target_level": "mid",
     }
 
@@ -30,15 +33,21 @@ def _problem_solving_payload(question: str, code: str) -> dict:
         "question": question,
         "answer": (
             "### Problem\n"
-            "Clarify inputs, outputs, and constraints.\n\n"
+            "**What the interviewer is really testing:** Can you identify the invariant before you write code and use it to justify the data structure?\n\n"
             "### Solution Walkthrough\n"
-            "Explain the core invariant and why each step maintains it.\n\n"
+            "**Short answer:** Use the invariant to choose the data structure that removes repeated work.\n\n"
+            "**How to think about it:** Clarify inputs, outputs, and the state the next step needs.\n\n"
+            "**Why it works:** The chosen structure preserves the invariant after every update, so the scan never has to restart.\n\n"
+            "**Interviewer-ready phrasing:** \"I would state the invariant first, then explain how each update preserves it and why that gives the target complexity.\"\n\n"
+            "**Common mistake:** A weak answer starts coding before proving why the invariant supports the approach.\n\n"
             "### Complexity\n"
-            "Time complexity is derived from the primary loop/operations, and space reflects aux structures.\n\n"
-            f"### Code\n```python\n{code}\n```"
+            "**Time and space:** Time complexity is derived from the primary loop or operations, and space reflects the supporting data structures.\n\n"
+            "**Tradeoff / scaling caveat:** The structure improves speed, but it may cost extra memory or depend on a stronger invariant.\n\n"
+            f"### Code\n```python\n{code}\n```\n\n"
+            "**Invariant note:** The update inside the loop is the part that keeps the invariant true for the next iteration."
         ),
         "difficulty": "medium",
-        "learning_objective": "Practice interview-grade problem decomposition and implementation.",
+        "learning_objective": "After this question, the learner should be able to practice interview-grade problem decomposition and implementation.",
         "source_section": "Problem Solving",
         "source_quote": "Use constraints and invariants to choose an efficient strategy.",
         "misconception_trap": "Jumping to code before validating constraints and edge cases.",
@@ -172,6 +181,7 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
         self.assertEqual(len(result.questions), 5)
         self.assertTrue(all(q.question.strip() for q in result.questions))
         self.assertTrue(all(q.answer.strip() for q in result.questions))
+        self.assertTrue(all("**Answer:**" in q.answer for q in result.questions))
 
     def test_generate_v2_stream_fills_target_count_with_fallback_when_llm_unstructured(self):
         llm = FakeLLM(["unstructured output that is not json"])
@@ -194,6 +204,7 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
         self.assertEqual(done_event["type"], "done")
         self.assertEqual(done_event["generated_count"], 3)
         self.assertEqual(len(question_events), 3)
+        self.assertTrue(all("**Answer:**" in event["question"]["answer"] for event in question_events))
 
     def test_problem_solving_fallback_question_is_natural(self):
         llm = FakeLLM(["unstructured output that is not json"])
@@ -215,8 +226,11 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
 
         question_event = next(e for e in events if e.get("type") == "question")
         question = str(question_event["question"]["question"]).lower()
+        answer = str(question_event["question"]["answer"])
         self.assertNotIn("walk through how you would solve this using", question)
         self.assertNotIn("reasoning under interview pressure", question)
+        self.assertIn("**What the interviewer is really testing:**", answer)
+        self.assertIn("**Invariant note:**", answer)
 
     def test_problem_solving_fallback_rotates_problem_patterns(self):
         llm = FakeLLM(["unstructured output that is not json"])

@@ -41,6 +41,10 @@ import type {
   StudyPlanResponse,
   WeakAreasResponse,
   TopicMasteryResponse,
+  LearnerProfile,
+  LearnerProfileUpdateRequest,
+  ProfileDiagnosticResponse,
+  RecommendationsResponse,
   CreateInterviewSessionRequest,
   SubmitInterviewAnswerRequest,
   NextInterviewQuestionRequest,
@@ -907,6 +911,35 @@ export async function fetchTopicMastery(
   const { data } = await api.get<TopicMasteryResponse>("/learning/mastery", {
     params: { limit },
   });
+  return data;
+}
+
+export async function fetchLearnerProfile(): Promise<LearnerProfile> {
+  const { data } = await api.get<LearnerProfile>("/learning/profile");
+  return data;
+}
+
+export async function updateLearnerProfile(
+  payload: LearnerProfileUpdateRequest,
+): Promise<LearnerProfile> {
+  const { data } = await api.put<LearnerProfile>("/learning/profile", payload);
+  return data;
+}
+
+export async function runProfileDiagnostic(): Promise<ProfileDiagnosticResponse> {
+  const { data } = await api.post<ProfileDiagnosticResponse>(
+    "/learning/profile/diagnostic",
+  );
+  return data;
+}
+
+export async function fetchRecommendations(
+  limit = 8,
+): Promise<RecommendationsResponse> {
+  const { data } = await api.get<RecommendationsResponse>(
+    "/learning/recommendations",
+    { params: { limit } },
+  );
   return data;
 }
 

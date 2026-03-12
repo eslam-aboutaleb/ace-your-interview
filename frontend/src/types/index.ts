@@ -626,7 +626,92 @@ export interface TopicMasteryResponse {
   topics: TopicMasteryItem[];
 }
 
-export type StudyPlanTaskType = "review" | "topic_study" | "quiz";
+export interface LearnerProfile {
+  target_role: string;
+  target_date: string;
+  weekly_minutes: number;
+  preferred_session_minutes: number;
+  current_level: InterviewLevel;
+  target_level: InterviewLevel;
+  primary_track: LearningTrack;
+  focus_topic_ids: string[];
+  target_companies: string[];
+  preferred_modalities: Array<"study" | "quiz" | "interview" | "voice">;
+  confidence_by_track: Partial<Record<LearningTrack, number>>;
+  created_at: string;
+  updated_at: string;
+  diagnostic_updated_at: string;
+}
+
+export interface LearnerProfileUpdateRequest {
+  target_role?: string;
+  target_date?: string;
+  weekly_minutes?: number;
+  preferred_session_minutes?: number;
+  current_level?: InterviewLevel;
+  target_level?: InterviewLevel;
+  primary_track?: LearningTrack;
+  focus_topic_ids?: string[];
+  target_companies?: string[];
+  preferred_modalities?: Array<"study" | "quiz" | "interview" | "voice">;
+  confidence_by_track?: Partial<Record<LearningTrack, number>>;
+}
+
+export interface CompetencyScore {
+  competency_id: string;
+  competency_type: "topic" | "track" | "interview_dimension" | string;
+  label: string;
+  track: string;
+  score: number;
+  confidence_gap: number;
+  evidence_count: number;
+  priority: number;
+  source: string;
+  metadata: Record<string, unknown>;
+  updated_at: string;
+}
+
+export interface ProfileDiagnosticResponse {
+  generated_at: string;
+  profile: LearnerProfile;
+  readiness_score: number;
+  strongest_competencies: string[];
+  urgent_competencies: string[];
+  competencies: CompetencyScore[];
+}
+
+export type RecommendationType =
+  | "review"
+  | "study"
+  | "quiz"
+  | "interview"
+  | "voice";
+
+export interface RecommendationItem {
+  recommendation_id: string;
+  recommendation_type: RecommendationType;
+  topic_id: string;
+  title: string;
+  reason: string;
+  estimated_minutes: number;
+  cta_route: string;
+  priority: number;
+  reason_codes: string[];
+  track: string;
+}
+
+export interface RecommendationsResponse {
+  generated_at: string;
+  profile: LearnerProfile;
+  days_until_target: number | null;
+  items: RecommendationItem[];
+}
+
+export type StudyPlanTaskType =
+  | "review"
+  | "topic_study"
+  | "quiz"
+  | "interview";
 
 export interface StudyPlanTask {
   task_type: StudyPlanTaskType;

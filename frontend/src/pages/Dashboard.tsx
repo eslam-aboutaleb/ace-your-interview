@@ -8,6 +8,7 @@ import {
   Sparkles,
   ChevronRight,
   MessageSquare,
+  Target,
 } from "lucide-react";
 import {
   containerVariants,
@@ -16,15 +17,18 @@ import {
   pageTransition,
 } from "@/utils/animations";
 import {
+  fetchLearnerProfile,
+  fetchRecommendations,
   fetchInterviewStats,
   fetchTopicMastery,
   fetchTopics,
 } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
+import { useAuthStore } from "@/store/authStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
-import type { TopicSummary } from "@/types";
+import type { LearnerProfile, RecommendationItem, TopicSummary } from "@/types";
 
 const TOPIC_ICONS: Record<string, string> = {
   "01-backend-fundamentals-and-http": "🌐",
@@ -64,6 +68,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [customTopic, setCustomTopic] = useState("");
   const [customError, setCustomError] = useState("");
+  const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
+  const [profile, setProfile] = useState<LearnerProfile | null>(null);
   const [interviewStats, setInterviewStats] = useState({
     total_sessions: 0,
     completed_sessions: 0,
@@ -80,6 +86,7 @@ export default function Dashboard() {
   const dismissCurriculumNotice = useProgressStore(
     (s) => s.dismissCurriculumNotice,
   );
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   const loadTopics = useCallback(async () => {
     setLoading(true);
@@ -108,7 +115,22 @@ export default function Dashboard() {
       .catch(() => {
         // ignore mock interview stats failures (feature flag may be off)
       });
-  }, [loadTopics, setMastery]);
+    if (!isAuthenticated) {
+      setProfile(null);
+      setRecommendations([]);
+      return;
+    }
+    fetchLearnerProfile()
+      .then(setProfile)
+      .catch(() => {
+        setProfile(null);
+      });
+    fetchRecommendations(3)
+      .then((res) => setRecommendations(res.items || []))
+      .catch(() => {
+        setRecommendations([]);
+      });
+  }, [isAuthenticated, loadTopics, setMastery]);
 
   const handleCreateCustomTopic = () => {
     const topic = customTopic.trim();
@@ -234,6 +256,100 @@ export default function Dashboard() {
           <span className="text-sm font-bold text-udemy-purple">
             {progress}%
           </span>
+        </div>
+      </div>
+
+      <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-6">
+        <div className="grid grid-cols-1 xl:grid-cols-[1.05fr,0.95fr] gap-4">
+          <div className="udemy-card p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold mb-1 flex items-center gap-2">
+                  <Target className="w-4 h-4 text-udemy-purple" />
+                  Goal Snapshot
+                </h2>
+                <p className="text-xs text-udemy-text-muted">
+                  The recommendation engine now uses your learner profile and deadline.
+                </p>
+              </div>
+              <Link to="/study-plan" className="btn-secondary text-sm inline-flex">
+                Open plan
+              </Link>
+            </div>
+
+            {!isAuthenticated ? (
+              <p className="text-sm text-udemy-text-muted mt-4">
+                Sign in to save a target role, deadline, and personalized recommendation stack.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+                <MiniStat
+                  label="Target role"
+                  value={profile?.target_role || "Unset"}
+                />
+                <MiniStat
+                  label="Track"
+                  value={
+                    profile?.primary_track
+                      ? TRACK_LABELS[profile.primary_track] || profile.primary_track
+                      : "Unset"
+                  }
+                />
+                <MiniStat
+                  label="Weekly budget"
+                  value={profile ? `${profile.weekly_minutes} min` : "Unset"}
+                />
+                <MiniStat
+                  label="Deadline"
+                  value={profile?.target_date || "Unset"}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="udemy-card p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold mb-1">Next Best Actions</h2>
+                <p className="text-xs text-udemy-text-muted">
+                  Highest-priority actions from your study planner.
+                </p>
+              </div>
+              <Link to="/study-plan" className="text-sm text-udemy-purple font-medium">
+                See all
+              </Link>
+            </div>
+
+            <div className="space-y-3 mt-4">
+              {!isAuthenticated ? (
+                <p className="text-sm text-udemy-text-muted">
+                  Sign in to unlock ranked next-step recommendations.
+                </p>
+              ) : recommendations.length === 0 ? (
+                <p className="text-sm text-udemy-text-muted">
+                  Save your learner profile in Study Plan to unlock recommendations.
+                </p>
+              ) : (
+                recommendations.map((item) => (
+                  <Link
+                    key={item.recommendation_id}
+                    to={item.cta_route}
+                    className="block rounded-lg border border-udemy-border bg-white p-3 hover:bg-gray-50 transition-colors"
+                  >
+                    <p className="text-sm font-semibold">
+                      {normalizeEscapedSingleLineText(item.title)}
+                    </p>
+                    <p className="text-xs text-udemy-text-muted mt-1">
+                      {item.topic_id
+                        ? topicMapLabel(topics, item.topic_id)
+                        : TRACK_LABELS[(item.track as keyof typeof TRACK_LABELS)] || "Interview"}{" "}
+                      · priority {Math.round(item.priority)} · ~{item.estimated_minutes} min
+                    </p>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -372,4 +488,18 @@ function Stat({
       </div>
     </div>
   );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-udemy-border px-3 py-2 bg-white">
+      <p className="text-xs text-udemy-text-muted">{label}</p>
+      <p className="text-sm font-bold line-clamp-2">{value}</p>
+    </div>
+  );
+}
+
+function topicMapLabel(topics: TopicSummary[], topicId: string): string {
+  const found = topics.find((topic) => topic.id === topicId);
+  return found ? normalizeEscapedSingleLineText(found.title) : normalizeEscapedSingleLineText(topicId);
 }

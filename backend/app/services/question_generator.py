@@ -181,6 +181,113 @@ def _problem_solving_language(preferred_language: str) -> str:
     return language or PROBLEM_SOLVING_DEFAULT_LANGUAGE
 
 
+_CONCEPTUAL_COACH_LABELS = (
+    "**Answer:**",
+    "**Why it's right:**",
+    "**Interviewer-ready phrasing:**",
+    "**Common mistake:**",
+    "**Self-check:**",
+)
+_PROBLEM_SOLVING_WALKTHROUGH_LABELS = (
+    "**Short answer:**",
+    "**How to think about it:**",
+    "**Why it works:**",
+    "**Interviewer-ready phrasing:**",
+    "**Common mistake:**",
+)
+
+
+def _question_tutoring_arc_rules(problem_solving_mode: bool, language: str = "") -> list[str]:
+    if problem_solving_mode:
+        walkthrough_labels = ", ".join([f"`{label}`" for label in _PROBLEM_SOLVING_WALKTHROUGH_LABELS])
+        return [
+            "Write each answer as coach-style study help for the learner, not as internal answer-writing guidance.",
+            *_problem_solving_required_markdown(language),
+            "In `### Problem`, begin with `**What the interviewer is really testing:**`.",
+            f"In `### Solution Walkthrough`, include these bold labels in this order: {walkthrough_labels}.",
+            (
+                "In `### Complexity`, include `**Time and space:**` followed by "
+                "`**Tradeoff / scaling caveat:**`."
+            ),
+            "Keep the answer generic and topic-grounded; do not inject named canned techniques unless the docs naturally justify them.",
+        ]
+
+    coach_labels = ", ".join([f"`{label}`" for label in _CONCEPTUAL_COACH_LABELS])
+    return [
+        "Write each answer as coach-style study help for the learner, not as internal answer-writing guidance.",
+        f"For non-problem-solving answers, use these bold lead-ins in this exact order: {coach_labels}.",
+        "Do not add `###` headings to non-problem-solving answers.",
+        "The first sentence after `**Answer:**` must directly answer the question.",
+        "Speak to the learner, not to the model.",
+        (
+            "Do not use meta-guideline phrasing such as `the candidate should`, `you should answer by`, "
+            "or `when discussing this in an interview` outside `**Interviewer-ready phrasing:**`."
+        ),
+        "Keep all five coach segments even when the answer is concise; `response_detail` only changes depth inside them.",
+    ]
+
+
+def _question_auxiliary_field_rules(problem_solving_mode: bool) -> list[str]:
+    reasoning_rule = (
+        "Set `reasoning_summary` to a short mental model or invariant that explains how to choose the approach before coding."
+        if problem_solving_mode
+        else "Set `reasoning_summary` to a short mental-model takeaway, not answer-writing advice."
+    )
+    return [
+        "Set `learning_objective` to a sentence that starts with `After this question, the learner should be able to...`.",
+        "Set `misconception_trap` to a concrete wrong instinct or weak interview answer.",
+        reasoning_rule,
+    ]
+
+
+def _question_retry_guidance(problem_solving_mode: bool) -> str:
+    if problem_solving_mode:
+        return "\n".join(
+            [
+                "- Regenerate each item as a fresh coach-style study answer for the learner.",
+                "- Keep exactly these H3 headings in order: `### Problem`, `### Solution Walkthrough`, `### Complexity`, `### Code`.",
+                "- In `### Problem`, start with `**What the interviewer is really testing:**`.",
+                "- In `### Solution Walkthrough`, include final answer first, the mental model or invariant, interviewer-ready wording, one mistake to avoid, and one practice twist without adding new `###` headings.",
+                "- In `### Complexity`, include `**Time and space:**` and `**Tradeoff / scaling caveat:**`.",
+                "- In `### Code`, include exactly one commented fenced code block in the selected language, then `**Invariant note:**`.",
+            ]
+        )
+    return "\n".join(
+        [
+            "- Regenerate each item as a fresh coach-style study answer for the learner.",
+            "- Use only bold lead-ins in this exact order: `**Answer:**`, `**Why it's right:**`, `**Interviewer-ready phrasing:**`, `**Common mistake:**`, `**Self-check:**`.",
+            "- The first sentence after `**Answer:**` must directly answer the question.",
+            "- Speak to the learner, not to the model, and do not use meta-guideline phrasing outside `**Interviewer-ready phrasing:**`.",
+        ]
+    )
+
+
+def _default_learning_objective(problem_solving_mode: bool) -> str:
+    if problem_solving_mode:
+        return (
+            "After this question, the learner should be able to explain the core invariant and map it to a working implementation."
+        )
+    return (
+        "After this question, the learner should be able to explain the current checkpoint and justify its practical tradeoffs."
+    )
+
+
+def _default_misconception_trap(problem_solving_mode: bool) -> str:
+    if problem_solving_mode:
+        return (
+            "A weak interview answer starts coding before naming the invariant, the constraints, and the edge cases that drive the approach."
+        )
+    return (
+        "A weak answer jumps to a preferred pattern before checking the actual requirements, tradeoffs, and failure modes."
+    )
+
+
+def _default_reasoning_summary(problem_solving_mode: bool) -> str:
+    if problem_solving_mode:
+        return "State the invariant first, then choose the structure that preserves it with the least extra work."
+    return "Start from the core constraint, then connect it to the tradeoff that makes the answer correct."
+
+
 def _problem_solving_required_markdown(language: str) -> list[str]:
     headings = ", ".join([f"`### {heading}`" for heading in _PROBLEM_SOLVING_SECTION_HEADINGS])
     return [
@@ -189,7 +296,7 @@ def _problem_solving_required_markdown(language: str) -> list[str]:
         f'Under `### Code`, include exactly one fenced `{language}` block.',
         "The code block must contain practical code, not pseudocode.",
         "Add comments that explain each key step or block in the code.",
-        "Keep `reasoning_summary` to 1-2 sentences that explain how an expert chooses the approach.",
+        "After the code block, add `**Invariant note:**` describing what part of the code preserves the core invariant.",
     ]
 
 
@@ -481,6 +588,87 @@ def _problem_solving_question_seed(
     }
 
 
+def _split_first_sentence(text: str) -> tuple[str, str]:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return "", ""
+    parts = re.split(r"(?<=[.!?])\s+", cleaned, maxsplit=1)
+    first = parts[0].strip()
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    return first, rest
+
+
+def _split_last_sentence(text: str) -> tuple[str, str]:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return "", ""
+    parts = re.split(r"(?<=[.!?])\s+", cleaned)
+    if len(parts) == 1:
+        return cleaned, cleaned
+    return " ".join(parts[:-1]).strip(), parts[-1].strip()
+
+
+def _fallback_learning_objective(*, focus: str, source_scope: str, problem_solving_mode: bool) -> str:
+    if problem_solving_mode:
+        return (
+            f"After this question, the learner should be able to explain the invariant behind {focus} "
+            f"and turn it into a working solution in {source_scope}."
+        )
+    return (
+        f"After this question, the learner should be able to explain {focus} in {source_scope} "
+        "and justify the practical tradeoff behind the answer."
+    )
+
+
+def _fallback_misconception_trap(*, focus: str, problem_solving_mode: bool) -> str:
+    if problem_solving_mode:
+        return (
+            f"A weak interview answer for {focus} jumps into code before stating the invariant, "
+            "constraints, and failure cases."
+        )
+    return (
+        f"A weak answer for {focus} names a pattern but never connects it to the actual constraints, "
+        "tradeoffs, or failure modes."
+    )
+
+
+def _build_conceptual_fallback_answer(
+    *,
+    focus: str,
+    source_scope: str,
+    angle: str,
+) -> tuple[str, str]:
+    reasoning_summary = (
+        f"Name the main constraint around {focus}, then justify the choice that best protects {angle}."
+    )
+    answer = "\n\n".join(
+        [
+            (
+                f"**Answer:** The right way to reason about {focus} in {source_scope} is to start from the "
+                f"requirements, choose the approach that best protects {angle}, and then verify the edge cases."
+            ),
+            (
+                f"**Why it's right:** In plain language, {focus} matters because real systems need a choice that "
+                f"holds up under normal use, failure paths, and future growth. If you anchor the answer in the "
+                "requirements first, the tradeoffs become easier to explain."
+            ),
+            (
+                f"**Interviewer-ready phrasing:** \"I would frame {focus} around the actual constraints first, "
+                f"then explain why this design gives the best balance for {angle} and what I would validate next.\""
+            ),
+            (
+                f"**Common mistake:** A weak answer for {focus} jumps straight to a favorite pattern and never "
+                "shows why it fits the real constraints or what could go wrong."
+            ),
+            (
+                f"**Self-check:** If {angle} suddenly became the hardest constraint in {source_scope}, what part "
+                "of your reasoning would you revisit first and why?"
+            ),
+        ]
+    ).strip()
+    return answer, reasoning_summary
+
+
 def _problem_solving_code_template(
     language: str,
     *,
@@ -629,16 +817,37 @@ def _build_problem_solving_fallback_answer(
         language,
         scenario_id=scenario_id,
     )
+    short_answer, _remaining_walkthrough = _split_first_sentence(seed["walkthrough"])
+    time_and_space, tradeoff = _split_last_sentence(seed["complexity"])
     answer = "\n\n".join(
         [
             "### Problem",
-            seed["problem"],
+            (
+                f"**What the interviewer is really testing:** Can you translate {focus} into inputs, "
+                "constraints, and the invariant before you write code? "
+                f"{seed['problem']}"
+            ),
             "### Solution Walkthrough",
-            seed["walkthrough"],
+            f"**Short answer:** {short_answer}",
+            f"**How to think about it:** {seed['problem']}",
+            f"**Why it works:** {seed['walkthrough']}",
+            (
+                f"**Interviewer-ready phrasing:** \"The key idea is {seed['reasoning_summary'].rstrip('.')}. "
+                "Once that is clear, I can justify the data structure, walk through the update rule, and then code it cleanly.\""
+            ),
+            (
+                f"**Common mistake:** A weak answer for {focus} starts coding the brute-force idea before "
+                "stating the invariant and why the chosen structure fits the constraint."
+            ),
             "### Complexity",
-            seed["complexity"],
+            f"**Time and space:** {time_and_space}",
+            f"**Tradeoff / scaling caveat:** {tradeoff}",
             "### Code",
             f"```{language}\n{code}\n```",
+            (
+                "**Invariant note:** The state update inside the main scan is what preserves the core invariant, "
+                "so each step keeps the partial solution valid before the next iteration."
+            ),
         ]
     ).strip()
     return answer, seed["reasoning_summary"]
@@ -834,16 +1043,20 @@ def _build_prompt(
             "Questions must be true problem-solving prompts (algorithmic/coding style), not generic theory prompts.",
             "Use a template-driven question structure: concrete input/output, explicit constraints, and interview-style reasoning expectations.",
             "Do not copy canonical LeetCode wording; adapt each question to the current topic scope and source content.",
-            "Across generated items, vary algorithm families and avoid repeating the same canonical pattern.",
-            "Avoid overusing Two Sum or complement-hash-map variants unless explicitly required by the docs.",
-            "Answers should explain problem understanding and constraints.",
-            "Answers should explain solution strategy and why it works.",
-            "Answers should explain complexity analysis and tradeoffs.",
+            "Across generated items, vary the kinds of constraints, data-structure choices, and solution shapes.",
             "Every answer must include commented code in the selected language.",
-            *_problem_solving_required_markdown(problem_solving_language),
+            *_question_tutoring_arc_rules(True, problem_solving_language),
         ]
         if problem_solving_mode
-        else ["Questions must cover conceptual + practical angles."]
+        else [
+            "Questions must cover conceptual + practical angles.",
+            *_question_tutoring_arc_rules(False),
+        ]
+    )
+    answer_shape = (
+        "Markdown with exactly ### Problem, ### Solution Walkthrough, ### Complexity, and ### Code; include the required bold coaching labels inside those sections and exactly one fenced code block"
+        if problem_solving_mode
+        else "Markdown with bold sections **Answer:**, **Why it's right:**, **Interviewer-ready phrasing:**, **Common mistake:**, and **Self-check:**"
     )
     uniqueness_block = ""
     if existing_seed:
@@ -857,7 +1070,7 @@ def _build_prompt(
         schema_block=f"""[
   {{
     "question": "Question text",
-    "answer": "{'Markdown that starts with ### Problem, then ### Solution Walkthrough, then ### Complexity, then ### Code with one fenced code block' if problem_solving_mode else '3-8 sentence educational answer'}",
+    "answer": "{answer_shape}",
     "difficulty": "easy|medium|hard"
   }}
 ]""",
@@ -866,12 +1079,17 @@ def _build_prompt(
             "Questions must be standalone and non-duplicative.",
             "Questions must be NEW relative to already generated checkpoint questions listed above.",
             *problem_scope_rules,
+            *_question_auxiliary_field_rules(problem_solving_mode),
             "Answers must be grounded in the provided documentation.",
             detail_clause,
             "Format answers as markdown, but keep structure adaptive.",
             "long answers must be split into short readable paragraphs with blank lines.",
             "use bullets only when listing steps/checklists/categories.",
-            "use headings only when the answer naturally has sections.",
+            (
+                "Use only the required headings for problem-solving answers."
+                if problem_solving_mode
+                else "Do not add extra headings to conceptual answers."
+            ),
             "use tables only for direct comparisons/category matrices.",
             "If you use a table, output valid GFM table syntax.",
             "one row per line.",
@@ -893,16 +1111,11 @@ def _build_prompt(
             "mid: implementation details, constraints, and moderate tradeoffs.",
             "senior: architecture, scaling, risk, and deep tradeoff decisions.",
             "Keep markdown compact and practical.",
-            (
-                "Set `reasoning_summary` to a short expert-thinking summary that explains how to choose the approach before coding."
-                if problem_solving_mode
-                else ""
-            ),
         ],
     )
     return f"""{role_clause}
 
-Given documentation about {scope}, generate exactly {count} interview-style questions with detailed educational answers.{diff_clause}
+Given documentation about {scope}, generate exactly {count} interview-style questions with coach-style educational answers.{diff_clause}
 Target candidate level: "{target_level}".
 User requested total questions for this checkpoint: {requested_total}.
 This call is generating {count} new questions to fill remaining slots.
@@ -1028,6 +1241,7 @@ def _build_retry_prompt(
     issues: str,
     existing_questions: list[str],
     hard_requirements: Optional[list[str]] = None,
+    recovery_guidance: str = "",
 ) -> str:
     existing_blob = "\n".join([f"- {q}" for q in existing_questions[:50]])
     hard_requirements_block = ""
@@ -1035,6 +1249,9 @@ def _build_retry_prompt(
         hard_requirements_block = "Hard format requirements:\n" + "\n".join(
             [f"- {item}" for item in hard_requirements]
         )
+    recovery_guidance_block = ""
+    if recovery_guidance.strip():
+        recovery_guidance_block = f"Recovery guidance:\n{recovery_guidance.strip()}\n"
     return f"""Your previous output did not satisfy the schema or quality constraints.
 
 Missing items needed: {missing_count}
@@ -1042,6 +1259,7 @@ Validation issues:
 {issues}
 
 {hard_requirements_block}
+{recovery_guidance_block}
 
 Do not repeat any of these existing questions:
 {existing_blob if existing_blob else "- (none)"}
@@ -1294,54 +1512,26 @@ def _build_fallback_question_items(
                 scenario_id=scenario_id,
             )
         else:
-            # Rotate through multiple tutoring-style answer templates so
-            # fallback answers actually educate the student about the concept.
-            _answer_templates = [
-                (
-                    f"**{focus}** is a key concept within {source_scope}. "
-                    f"At its core, it addresses how systems handle the specific challenge described by {focus}. "
-                    f"When working with this in practice, the most important considerations are correctness, "
-                    f"edge-case handling, and understanding the failure modes. A common mistake is to overlook "
-                    f"boundary conditions - always validate inputs and expected behaviour before scaling up. "
-                    f"In interviews, demonstrate that you understand *why* this matters, not just *how* to implement it."
-                ),
-                (
-                    f"To understand **{focus}** in the context of {source_scope}, start with the fundamental "
-                    f"problem it solves. This concept exists because real systems need a reliable way to handle "
-                    f"{focus.lower()}. The recommended approach involves: (1) clarifying requirements and constraints, "
-                    f"(2) choosing an appropriate strategy based on the scale and reliability needs, and "
-                    f"(3) validating through testing and monitoring. When discussing this in an interview, "
-                    f"show awareness of tradeoffs - there is rarely a single 'correct' answer."
-                ),
-                (
-                    f"**{focus}** in {source_scope} involves understanding both the theoretical foundations "
-                    f"and the practical implementation details. A strong practitioner knows the main patterns, "
-                    f"can identify when each is appropriate, and understands the cost/benefit tradeoffs. "
-                    f"Common pitfalls include over-engineering simple cases and under-engineering complex ones. "
-                    f"Focus on building a mental model of how {focus.lower()} behaves under different conditions - "
-                    f"this is what separates surface-level knowledge from true understanding."
-                ),
-                (
-                    f"When working with **{focus}** in {source_scope}, the key is to approach it systematically. "
-                    f"First, understand what problem it solves and why alternative approaches fall short. "
-                    f"Then, learn the standard implementation patterns and their performance characteristics. "
-                    f"Finally, practice debugging common issues - knowing how things break is just as "
-                    f"important as knowing how they work. For interviews, prepare concrete examples that "
-                    f"demonstrate your hands-on experience with {focus.lower()}."
-                ),
-            ]
-            answer = _answer_templates[idx % len(_answer_templates)]
-            reasoning_summary = (
-                "Clarify requirements first, then compare options and justify a decision."
+            answer, reasoning_summary = _build_conceptual_fallback_answer(
+                focus=focus,
+                source_scope=source_scope,
+                angle=angle,
             )
         item: dict[str, Any] = {
             "question": question,
             "answer": answer,
             "difficulty": difficulty_value,
-            "learning_objective": f"Assess practical understanding of {focus}.",
+            "learning_objective": _fallback_learning_objective(
+                focus=focus,
+                source_scope=source_scope,
+                problem_solving_mode=problem_solving_mode,
+            ),
             "source_section": source_scope,
             "source_quote": focus,
-            "misconception_trap": "Choosing an approach without validating constraints and tradeoffs.",
+            "misconception_trap": _fallback_misconception_trap(
+                focus=focus,
+                problem_solving_mode=problem_solving_mode,
+            ),
             "reasoning_summary": reasoning_summary,
             "target_level": _normalise_level(level),
             "topic_id": topic_id,
@@ -1385,11 +1575,12 @@ def _validate_question_item(
         diff = "medium"
 
     target_level = _normalise_level(level)
+    problem_solving_mode = is_problem_solving_topic(topic_id)
     item["question"] = question
     item["answer"] = answer
     item["learning_objective"] = (
         str(item.get("learning_objective", "")).strip()
-        or "Assess understanding of the current checkpoint and practical tradeoffs."
+        or _default_learning_objective(problem_solving_mode)
     )
     item["source_section"] = str(item.get("source_section", "")).strip() or "Topic section"
     item["source_quote"] = (
@@ -1398,16 +1589,16 @@ def _validate_question_item(
     )
     item["misconception_trap"] = (
         str(item.get("misconception_trap", "")).strip()
-        or "Overlooking requirements and constraints from the topic context."
+        or _default_misconception_trap(problem_solving_mode)
     )
     item["reasoning_summary"] = (
         str(item.get("reasoning_summary", "")).strip()
-        or "Start from requirements, then evaluate tradeoffs before finalizing an answer."
+        or _default_reasoning_summary(problem_solving_mode)
     )
     item["target_level"] = target_level
     item["topic_id"] = topic_id
     item["difficulty"] = diff
-    if is_problem_solving_topic(topic_id):
+    if problem_solving_mode:
         valid_answer, issue = _validate_problem_solving_answer(
             answer,
             preferred_language,
@@ -1625,6 +1816,7 @@ async def _collect_with_retries(
     validator: Callable[[dict[str, Any]], tuple[bool, str]],
     existing_questions: Optional[list[str]] = None,
     hard_requirements: Optional[list[str]] = None,
+    retry_guidance: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     existing_seed = _normalise_existing_questions(existing_questions)
     dedup: set[str] = {_normalise_question(q) for q in existing_seed}
@@ -1654,6 +1846,7 @@ async def _collect_with_retries(
                 issues=f"transport_or_provider_error: {last_error}",
                 existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
                 hard_requirements=hard_requirements,
+                recovery_guidance=retry_guidance,
             )
             continue
 
@@ -1667,6 +1860,7 @@ async def _collect_with_retries(
                 issues="json_parse_failed",
                 existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
                 hard_requirements=hard_requirements,
+                recovery_guidance=retry_guidance,
             )
             continue
 
@@ -1705,6 +1899,7 @@ async def _collect_with_retries(
             issues=top_issues,
             existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
             hard_requirements=hard_requirements,
+            recovery_guidance=retry_guidance,
         )
 
     if len(valid_items) < target_count:
@@ -1719,6 +1914,7 @@ async def _collect_with_retries(
                 issues="final_recovery_fill_missing_items",
                 existing_questions=[*existing_seed, *[x.get("question", "") for x in valid_items]],
                 hard_requirements=hard_requirements,
+                recovery_guidance=retry_guidance,
             )
             result = await llm.completion(
                 single_prompt,
@@ -1880,6 +2076,7 @@ class QuestionGenerator:
         hard_requirements = (
             _problem_solving_required_markdown(selected_language) if problem_solving_mode else None
         )
+        retry_guidance = _question_retry_guidance(problem_solving_mode)
         mcp_context = await self._mcp_context_for_flow(
             flow="questions",
             query=f"{topic_title} {section_title or ''} interview questions and practical examples",
@@ -1939,6 +2136,7 @@ class QuestionGenerator:
                             issues=f"transport_or_provider_error: {last_error}",
                             existing_questions=generated_question_texts,
                             hard_requirements=hard_requirements,
+                            recovery_guidance=retry_guidance,
                         )
                         continue
 
@@ -1953,6 +2151,7 @@ class QuestionGenerator:
                             issues="json_parse_failed",
                             existing_questions=generated_question_texts,
                             hard_requirements=hard_requirements,
+                            recovery_guidance=retry_guidance,
                         )
                         continue
 
@@ -2027,6 +2226,7 @@ class QuestionGenerator:
                         issues=top_issues,
                         existing_questions=generated_question_texts,
                         hard_requirements=hard_requirements,
+                        recovery_guidance=retry_guidance,
                     )
 
                 if issue_counter:
@@ -2354,6 +2554,7 @@ class QuestionGenerator:
         selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
             (preferred_language or "").strip().lower()
         )
+        retry_guidance = _question_retry_guidance(problem_solving_mode)
         mcp_context = await self._mcp_context_for_flow(
             flow="questions",
             query=f"{topic_title} {section_title or ''} interview questions and practical examples",
@@ -2450,6 +2651,7 @@ class QuestionGenerator:
                     if problem_solving_mode
                     else None
                 ),
+                retry_guidance=retry_guidance,
             )
             retries_used += int(pass_stats.get("retries_used", 0))
             malformed_items_dropped += int(pass_stats.get("malformed_items_dropped", 0))

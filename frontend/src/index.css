@@ -152,8 +152,102 @@
 .markdown-content h3 {
   @apply text-lg font-semibold mt-4 mb-2;
 }
+.markdown-content .coach-section-heading {
+  @apply rounded-xl border px-4 py-3 mt-5 mb-3 text-base font-bold tracking-tight;
+  border-color: rgba(80, 41, 255, 0.14);
+  background:
+    linear-gradient(135deg, rgba(80, 41, 255, 0.08), rgba(255, 255, 255, 0.92)),
+    #fff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+}
+.markdown-content .coach-section-heading[data-coach-section="problem"] {
+  border-color: rgba(59, 130, 246, 0.16);
+  background:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(255, 255, 255, 0.94)),
+    #fff;
+}
+.markdown-content .coach-section-heading[data-coach-section="complexity"] {
+  border-color: rgba(16, 185, 129, 0.16);
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(255, 255, 255, 0.94)),
+    #fff;
+}
+.markdown-content .coach-section-heading[data-coach-section="code"] {
+  border-color: rgba(15, 23, 42, 0.12);
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.08), rgba(255, 255, 255, 0.94)),
+    #fff;
+}
 .markdown-content p {
   @apply mb-3 leading-relaxed;
+}
+.markdown-content .coach-paragraph {
+  @apply rounded-xl border px-4 py-3 mb-3;
+  border-color: rgba(15, 23, 42, 0.08);
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+.markdown-content .coach-paragraph > strong:first-child {
+  @apply inline-flex items-center rounded-full px-2.5 py-1 mb-2 mr-2 text-[11px] font-bold uppercase tracking-[0.14em];
+}
+.markdown-content .coach-paragraph[data-coach-label="Answer:"] {
+  border-color: rgba(59, 130, 246, 0.16);
+  background:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.96)),
+    #fff;
+}
+.markdown-content .coach-paragraph[data-coach-label="Answer:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="Short answer:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="Time and space:"] > strong:first-child {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+.markdown-content .coach-paragraph[data-coach-label="Why it's right:"],
+.markdown-content .coach-paragraph[data-coach-label="Why it works:"],
+.markdown-content .coach-paragraph[data-coach-label="How to think about it:"],
+.markdown-content .coach-paragraph[data-coach-label="What the interviewer is really testing:"] {
+  border-color: rgba(80, 41, 255, 0.14);
+  background:
+    linear-gradient(135deg, rgba(80, 41, 255, 0.06), rgba(255, 255, 255, 0.96)),
+    #fff;
+}
+.markdown-content .coach-paragraph[data-coach-label="Why it's right:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="Why it works:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="How to think about it:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="What the interviewer is really testing:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="Interviewer-ready phrasing:"] > strong:first-child {
+  background: rgba(80, 41, 255, 0.12);
+  color: #5029ff;
+}
+.markdown-content .coach-paragraph[data-coach-label="Interviewer-ready phrasing:"] {
+  border-color: rgba(80, 41, 255, 0.18);
+  background:
+    linear-gradient(135deg, rgba(80, 41, 255, 0.1), rgba(255, 255, 255, 0.96)),
+    #fff;
+}
+.markdown-content .coach-paragraph[data-coach-label="Common mistake:"] {
+  border-color: rgba(245, 158, 11, 0.2);
+  background:
+    linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(255, 255, 255, 0.96)),
+    #fff;
+}
+.markdown-content .coach-paragraph[data-coach-label="Common mistake:"] > strong:first-child {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+.markdown-content .coach-paragraph[data-coach-label="Self-check:"],
+.markdown-content .coach-paragraph[data-coach-label="Tradeoff / scaling caveat:"],
+.markdown-content .coach-paragraph[data-coach-label="Invariant note:"] {
+  border-color: rgba(16, 185, 129, 0.18);
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(255, 255, 255, 0.96)),
+    #fff;
+}
+.markdown-content .coach-paragraph[data-coach-label="Self-check:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="Tradeoff / scaling caveat:"] > strong:first-child,
+.markdown-content .coach-paragraph[data-coach-label="Invariant note:"] > strong:first-child {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
 }
 .markdown-content ul,
 .markdown-content ol {
@@ -269,10 +363,19 @@
 .markdown-content-compact h3 {
   @apply text-sm mt-2 mb-1;
 }
+.markdown-content-compact .coach-section-heading {
+  @apply px-3 py-2.5 mt-4 mb-2 text-sm;
+}
 .markdown-content-compact p,
 .markdown-content-compact ul,
 .markdown-content-compact ol {
   @apply mb-2;
+}
+.markdown-content-compact .coach-paragraph {
+  @apply px-3 py-2.5 mb-2;
+}
+.markdown-content-compact .coach-paragraph > strong:first-child {
+  @apply text-[10px] px-2 py-0.5 mb-1.5;
 }
 .markdown-content-compact table {
   @apply min-w-[380px] text-xs;

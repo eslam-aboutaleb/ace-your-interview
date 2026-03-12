@@ -11,6 +11,7 @@ import {
 import {
   createInterviewSession,
   createInterviewSessionStream,
+  fetchLearnerProfile,
   fetchInterviewSessions,
   isInterviewStreamError,
 } from "@/services/api";
@@ -57,6 +58,18 @@ export default function InterviewSetup() {
       .then((res) => setRecent(res.sessions))
       .catch(() => setRecent([]))
       .finally(() => setLoadingRecent(false));
+  }, []);
+
+  useEffect(() => {
+    fetchLearnerProfile()
+      .then((profile) => {
+        if (profile.primary_track) setTrack(profile.primary_track);
+        if (profile.current_level) setLevel(profile.current_level);
+        if (profile.target_role) setTargetRole((prev) => prev || profile.target_role);
+      })
+      .catch(() => {
+        // learner profile is optional here
+      });
   }, []);
 
   const focusAreas = focusAreasRaw

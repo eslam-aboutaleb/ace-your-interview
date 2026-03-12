@@ -34,6 +34,7 @@ from app.services.llm_policy import (
     policy_error_detail,
 )
 from app.services.llm_service_access import LLMServiceAccess
+from app.services.learning_planner import LearningPlannerStore
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
 from app.services.mcp_gateway import MCPGateway
@@ -45,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 _llm_client: LLMClient | None = None
 _learning_store: LearningStore | None = None
+_learning_planner: LearningPlannerStore | None = None
 _user_settings_store: UserSettingsStore | None = None
 _llm_service_access: LLMServiceAccess | None = None
 _llm_assignments_store: LLMAssignmentsStore | None = None
@@ -103,7 +105,7 @@ _load_dotenv()
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle."""
-    global _llm_client, _learning_store, _user_settings_store, _llm_service_access, _llm_assignments_store, _mcp_gateway
+    global _llm_client, _learning_store, _learning_planner, _user_settings_store, _llm_service_access, _llm_assignments_store, _mcp_gateway
 
     settings = get_settings()
     logging.basicConfig(level=logging.INFO)
@@ -121,6 +123,7 @@ async def lifespan(application: FastAPI):
     _llm_client = LLMClient(user_settings_store=_user_settings_store)
     _mcp_gateway = MCPGateway(settings)
     _learning_store = LearningStore(settings.learning_db_path)
+    _learning_planner = LearningPlannerStore(settings.learning_db_path)
     parser = DocParser(settings.docs_path)
 
     # Wire routers to shared instances
@@ -131,7 +134,7 @@ async def lifespan(application: FastAPI):
     auth.init_llm_service_access(_llm_service_access)
     auth.init_llm_assignments_store(_llm_assignments_store)
     chat.init(_llm_client, parser, _learning_store, _mcp_gateway)
-    learning.init(_learning_store)
+    learning.init(_learning_store, _learning_planner)
     interview_sessions.init(
         _llm_client,
         parser,
