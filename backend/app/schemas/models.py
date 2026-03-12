@@ -136,7 +136,6 @@ class QuestionAnswerV2(BaseModel):
     learning_objective: str = ""
     source_section: str = ""
     source_quote: str = ""
-    misconception_trap: str = ""
     reasoning_summary: str = ""
 
 

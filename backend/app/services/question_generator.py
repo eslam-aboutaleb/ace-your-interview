@@ -92,6 +92,32 @@ _QUESTION_STOPWORDS = {
     "would",
     "you",
 }
+_GROUNDING_GENERIC_TOKENS = {
+    "algorithm",
+    "application",
+    "approach",
+    "architecture",
+    "backend",
+    "concept",
+    "data",
+    "design",
+    "engineer",
+    "engineering",
+    "implementation",
+    "interview",
+    "pattern",
+    "problem",
+    "programming",
+    "service",
+    "software",
+    "solution",
+    "solving",
+    "structure",
+    "system",
+    "technical",
+    "topic",
+    "tradeoff",
+}
 
 
 def _question_id(topic_id: str, question: str) -> str:
@@ -111,10 +137,16 @@ def _question_tokens(text: str) -> set[str]:
             continue
         if word.endswith("ies") and len(word) > 4:
             word = f"{word[:-3]}y"
-        elif word.endswith("s") and len(word) > 4:
+        elif word.endswith("s") and len(word) > 3 and not word.endswith(("ss", "us", "is")):
             word = word[:-1]
         normalized.add(word)
     return normalized
+
+
+def _grounding_tokens(text: str) -> set[str]:
+    tokens = _question_tokens(text)
+    filtered = {token for token in tokens if token not in _GROUNDING_GENERIC_TOKENS}
+    return filtered or tokens
 
 
 def _is_near_duplicate_question(candidate: str, seen_questions: list[str]) -> bool:
@@ -248,7 +280,6 @@ def _question_auxiliary_field_rules(problem_solving_mode: bool) -> list[str]:
     )
     return [
         "Set `learning_objective` to a sentence that starts with `After this question, the learner should be able to...`.",
-        "Set `misconception_trap` to a concrete wrong instinct or weak interview answer.",
         reasoning_rule,
     ]
 
@@ -366,6 +397,87 @@ def _study_markdown_rules(*, code_language: str, problem_solving_mode: bool) -> 
     return rules
 
 
+def _grounding_anchor_phrases(
+    *,
+    topic_title: str,
+    section_title: Optional[str],
+    content: str,
+    limit: int = 10,
+) -> list[str]:
+    candidates = [str(section_title or "").strip(), str(topic_title or "").strip()]
+    candidates.extend(_extract_content_fragments(content, limit=max(limit * 3, 18)))
+
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        text = re.sub(r"\s+", " ", str(raw or "").strip())
+        if len(text) < 4:
+            continue
+        if len(text) > 90:
+            text = text[:90].rsplit(" ", 1)[0].strip() or text[:90]
+        norm = _normalise_question(text)
+        if not norm or norm in seen:
+            continue
+        if not _question_tokens(text):
+            continue
+        seen.add(norm)
+        anchors.append(text)
+        if len(anchors) >= limit:
+            break
+    return anchors
+
+
+def _render_grounding_anchors_block(anchors: list[str]) -> str:
+    if not anchors:
+        return ""
+    return "\nGrounding anchors from the topic content. Each generated question must clearly target one of these:\n" + "\n".join(
+        [f"- {anchor}" for anchor in anchors]
+    )
+
+
+def _question_is_grounded_to_anchors(
+    question: str,
+    *,
+    topic_title: str,
+    anchors: list[str],
+    problem_solving_mode: bool,
+) -> bool:
+    question_tokens = _question_tokens(question)
+    if not question_tokens:
+        return False
+
+    topic_tokens = _grounding_tokens(topic_title)
+    if question_tokens & topic_tokens:
+        return True
+
+    for anchor in anchors:
+        anchor_tokens = _grounding_tokens(anchor)
+        if not anchor_tokens:
+            continue
+        overlap = len(question_tokens & anchor_tokens)
+        if overlap >= 1:
+            return True
+    return False
+
+
+def _validate_topic_grounding(
+    item: dict[str, Any],
+    *,
+    topic_title: str,
+    anchors: list[str],
+    problem_solving_mode: bool,
+) -> tuple[bool, str]:
+    question = str(item.get("question", "")).strip()
+    if _question_is_grounded_to_anchors(
+        question,
+        topic_title=topic_title,
+        anchors=anchors,
+        problem_solving_mode=problem_solving_mode,
+    ):
+        return True, ""
+    return False, "question_not_grounded_to_topic"
+
+
 def _fallback_difficulty_for_index(index: int, total: int, requested: Optional[str]) -> str:
     diff = str(requested or "").strip().lower()
     if diff in _VALID_DIFFICULTIES:
@@ -387,16 +499,6 @@ def _default_learning_objective(problem_solving_mode: bool) -> str:
         )
     return (
         "After this question, the learner should be able to explain the current checkpoint and justify its practical tradeoffs."
-    )
-
-
-def _default_misconception_trap(problem_solving_mode: bool) -> str:
-    if problem_solving_mode:
-        return (
-            "A weak interview answer starts coding before naming the invariant, the constraints, and the edge cases that drive the approach."
-        )
-    return (
-        "A weak answer jumps to a preferred pattern before checking the actual requirements, tradeoffs, and failure modes."
     )
 
 
@@ -735,18 +837,6 @@ def _fallback_learning_objective(*, focus: str, source_scope: str, problem_solvi
     return (
         f"After this question, the learner should be able to explain {focus} in {source_scope} "
         "and justify the practical tradeoff behind the answer."
-    )
-
-
-def _fallback_misconception_trap(*, focus: str, problem_solving_mode: bool) -> str:
-    if problem_solving_mode:
-        return (
-            f"A weak interview answer for {focus} jumps into code before stating the invariant, "
-            "constraints, and failure cases."
-        )
-    return (
-        f"A weak answer for {focus} names a pattern but never connects it to the actual constraints, "
-        "tradeoffs, or failure modes."
     )
 
 
@@ -1156,6 +1246,12 @@ def _build_prompt(
     else:
         scope = f'"{topic_title}"'
         content = _clamp_content(doc_content)
+    grounding_anchors = _grounding_anchor_phrases(
+        topic_title=topic_title,
+        section_title=section_title,
+        content=section_content if (section_title and section_content) else doc_content,
+    )
+    grounding_block = _render_grounding_anchors_block(grounding_anchors)
     common_interview_rules = _common_interview_question_rules(
         problem_solving_mode,
         topic_scope=scope,
@@ -1238,6 +1334,9 @@ def _build_prompt(
             f"Return exactly {count} items; never return fewer.",
             "Questions must be standalone and non-duplicative.",
             "Questions must be NEW relative to already generated checkpoint questions listed above.",
+            "Each question must be explicitly grounded to the current topic, section, or one of the grounding anchors below.",
+            "Do not ask generic interview questions that could fit many unrelated topics with only minor wording changes.",
+            "The question itself should make the current topic recognizable before the learner reads the answer.",
             *problem_scope_rules,
             *_difficulty_generation_rules(problem_solving_mode, difficulty),
             *_question_auxiliary_field_rules(problem_solving_mode),
@@ -1264,6 +1363,7 @@ def _build_prompt(
             code_clause if code_clause else "Use code examples only when they materially improve clarity.",
             "Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.",
             "source_quote must be factual text from the provided course content.",
+            "question, source_quote, and answer must stay aligned to the same topic concept; do not mix unrelated concepts.",
             f'target_level must match "{target_level}" exactly.',
             "Do not wrap JSON with prose; return raw JSON only.",
             "Complexity must match target_level.",
@@ -1280,11 +1380,12 @@ Target candidate level: "{target_level}".
 User requested total questions for this checkpoint: {requested_total}.
 This call is generating {count} new questions to fill remaining slots.
 {uniqueness_block}
+{grounding_block}
 
 {prompt_contract}
 
 Optional fields (recommended when available): learning_objective, source_section, source_quote,
-misconception_trap, reasoning_summary, target_level.
+reasoning_summary, target_level.
 
 Documentation:
 {content}{mcp_block}"""
@@ -1602,6 +1703,11 @@ def _build_fallback_question_items(
     fragments = _extract_content_fragments(source_content, limit=64)
     if not fragments:
         fragments = [source_scope, topic_title or "core concepts", "practical implementation"]
+    grounding_anchors = _grounding_anchor_phrases(
+        topic_title=topic_title,
+        section_title=section_title,
+        content=source_content,
+    )
 
     existing_seed = _normalise_existing_questions(existing_questions)
     dedup: set[str] = {_normalise_question(q) for q in existing_seed}
@@ -1713,10 +1819,6 @@ def _build_fallback_question_items(
             ),
             "source_section": source_scope,
             "source_quote": focus,
-            "misconception_trap": _fallback_misconception_trap(
-                focus=focus,
-                problem_solving_mode=problem_solving_mode,
-            ),
             "reasoning_summary": reasoning_summary,
             "target_level": _normalise_level(level),
             "topic_id": topic_id,
@@ -1728,6 +1830,8 @@ def _build_fallback_question_items(
             level,
             preferred_language=selected_language,
             requires_programming=requires_programming,
+            topic_title=topic_title,
+            grounding_anchors=grounding_anchors,
         )
         if not valid:
             continue
@@ -1745,6 +1849,8 @@ def _validate_question_item(
     level: Optional[str],
     preferred_language: str = "",
     requires_programming: bool = False,
+    topic_title: str = "",
+    grounding_anchors: Optional[list[str]] = None,
 ) -> tuple[bool, str]:
     question = str(item.get("question", "")).strip()
     answer = str(item.get("answer", "")).strip()
@@ -1772,10 +1878,6 @@ def _validate_question_item(
         str(item.get("source_quote", "")).strip()
         or "Generated from the current topic content."
     )
-    item["misconception_trap"] = (
-        str(item.get("misconception_trap", "")).strip()
-        or _default_misconception_trap(problem_solving_mode)
-    )
     item["reasoning_summary"] = (
         str(item.get("reasoning_summary", "")).strip()
         or _default_reasoning_summary(problem_solving_mode)
@@ -1789,6 +1891,15 @@ def _validate_question_item(
             preferred_language,
         )
         if not valid_answer:
+            return False, issue
+    if (topic_title or grounding_anchors) and not problem_solving_mode:
+        valid_grounding, issue = _validate_topic_grounding(
+            item,
+            topic_title=topic_title,
+            anchors=grounding_anchors or [],
+            problem_solving_mode=problem_solving_mode,
+        )
+        if not valid_grounding:
             return False, issue
     return True, ""
 
@@ -2201,7 +2312,6 @@ class QuestionGenerator:
             learning_objective=item["learning_objective"].strip(),
             source_section=item["source_section"].strip(),
             source_quote=item["source_quote"].strip(),
-            misconception_trap=item["misconception_trap"].strip(),
             reasoning_summary=item["reasoning_summary"].strip(),
         )
 
@@ -2283,6 +2393,13 @@ class QuestionGenerator:
             metadata: dict[str, Any] = {}
             issue_counter: Counter[str] = Counter()
             last_error = ""
+            active_section_title = section_title if include_section else None
+            active_section_content = section_content if include_section else None
+            active_grounding_anchors = _grounding_anchor_phrases(
+                topic_title=topic_title,
+                section_title=active_section_title,
+                content=active_section_content or doc_content,
+            )
             base_prompt = _build_prompt(
                 topic_id=topic_id,
                 topic_title=topic_title,
@@ -2290,8 +2407,8 @@ class QuestionGenerator:
                 count=1,
                 difficulty=None if relaxed else difficulty,
                 level=level,
-                section_title=section_title if include_section else None,
-                section_content=section_content if include_section else None,
+                section_title=active_section_title,
+                section_content=active_section_content,
                 response_detail=response_detail,
                 preferred_language=selected_language if (problem_solving_mode or not relaxed) else "",
                 requires_programming=requires_programming if (problem_solving_mode or not relaxed) else False,
@@ -2354,6 +2471,8 @@ class QuestionGenerator:
                             level,
                             preferred_language=selected_language,
                             requires_programming=requires_programming,
+                            topic_title=topic_title,
+                            grounding_anchors=active_grounding_anchors,
                         )
                         if not valid:
                             malformed_dropped += 1
@@ -2746,14 +2865,6 @@ class QuestionGenerator:
             topic_id=topic_id,
             topic_title=topic_title,
         )
-        validator = lambda item: _validate_question_item(
-            item,
-            topic_id,
-            difficulty,
-            level,
-            preferred_language=selected_language,
-            requires_programming=requires_programming,
-        )
         provider_used = ""
         model_used = ""
         retries_used = 0
@@ -2807,6 +2918,21 @@ class QuestionGenerator:
                 *existing_seed,
                 *[str(item.get("question", "")) for item in raw_items],
             ]
+            grounding_anchors = _grounding_anchor_phrases(
+                topic_title=topic_title,
+                section_title=mode["section_title"],
+                content=mode["section_content"] or doc_content,
+            )
+            validator = lambda item, mode=mode, grounding_anchors=grounding_anchors: _validate_question_item(
+                item,
+                topic_id,
+                mode["difficulty"],
+                level,
+                preferred_language=str(mode["preferred_language"]),
+                requires_programming=bool(mode["requires_programming"]),
+                topic_title=topic_title,
+                grounding_anchors=grounding_anchors,
+            )
             prompt = _build_prompt(
                 topic_id=topic_id,
                 topic_title=topic_title,

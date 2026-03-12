@@ -240,7 +240,6 @@ export interface QuestionAnswerV2 {
   learning_objective: string;
   source_section: string;
   source_quote: string;
-  misconception_trap: string;
   reasoning_summary: string;
 }
 

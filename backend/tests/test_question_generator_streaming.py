@@ -20,7 +20,6 @@ def _question_payload(question: str) -> dict:
         "learning_objective": "After this question, the learner should be able to understand and apply the documented concept.",
         "source_section": "Core Concepts",
         "source_quote": "Core concepts define behavior and tradeoffs.",
-        "misconception_trap": "Assuming a default without validating constraints.",
         "reasoning_summary": "Start from the controlling constraint, then explain the tradeoff it creates.",
         "target_level": "mid",
     }
@@ -47,7 +46,6 @@ def _problem_solving_payload(question: str, code: str) -> dict:
         "learning_objective": "After this question, the learner should be able to practice interview-grade problem decomposition and implementation.",
         "source_section": "Problem Solving",
         "source_quote": "Use constraints and invariants to choose an efficient strategy.",
-        "misconception_trap": "Jumping to code before validating constraints and edge cases.",
         "reasoning_summary": "State invariant first, then map it to efficient data structures.",
         "target_level": "mid",
     }
@@ -122,7 +120,7 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
                 generator.generate_v2_stream(
                     topic_id="topic-api",
                     topic_title="API Design",
-                    doc_content="API docs content",
+                    doc_content="Use idempotency keys, retry-safe endpoints, and optimistic concurrency to keep APIs correct under retries.",
                     count=3,
                     level="mid",
                 )
@@ -146,7 +144,7 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
                 generator.generate_v2_stream(
                     topic_id="topic-consistency",
                     topic_title="Distributed Systems",
-                    doc_content="Distributed systems docs content",
+                    doc_content="Compare consistency models, quorum reads, and leader-only reads when tuning distributed databases.",
                     count=2,
                     level="mid",
                 )
@@ -159,6 +157,29 @@ class QuestionGeneratorStreamingTests(unittest.TestCase):
         self.assertEqual(len(question_events), 2)
         self.assertEqual(done_event["generated_count"], 2)
         self.assertGreater(done_event["retries_used"], 0)
+
+    def test_generate_v2_filters_off_topic_question_and_recovers_with_topic_specific_one(self):
+        llm = FakeLLM(
+            [
+                json.dumps([_question_payload("How would you design retries in a distributed system?")]),
+                json.dumps([_question_payload("Why do list endpoints need stable ordering with pagination?")]),
+            ]
+        )
+        generator = QuestionGenerator(llm)
+
+        result = asyncio.run(
+            generator.generate_v2(
+                topic_id="topic-api",
+                topic_title="API Design",
+                doc_content="Use pagination and stable ordering for list endpoints.",
+                count=1,
+                difficulty="medium",
+                level="mid",
+            )
+        )
+
+        self.assertEqual(len(result.questions), 1)
+        self.assertIn("pagination", result.questions[0].question.lower())
 
     def test_generate_v2_fills_target_count_with_fallback_when_llm_unstructured(self):
         llm = FakeLLM(["unstructured output that is not json"])
