@@ -25,7 +25,6 @@ def _question_payload(question: str) -> list[dict]:
             "learning_objective": "After this question, the learner should be able to understand practical tradeoffs from the docs.",
             "source_section": "JVM Fundamentals",
             "source_quote": "JVM memory behavior shapes concurrency and performance choices.",
-            "misconception_trap": "Assuming GC removes all concurrency considerations.",
             "reasoning_summary": "Map constraints first, then reason through options.",
             "target_level": "mid",
         }
@@ -81,7 +80,6 @@ def two_sum(nums, target):
             "learning_objective": "After this question, the learner should be able to turn a complement invariant into a one-pass solution.",
             "source_section": "Junior: Hash maps and frequency counting",
             "source_quote": "Use a hash map when the current value needs a previously seen complement.",
-            "misconception_trap": "Keeping nested loops even after a constant-time lookup structure is available.",
             "reasoning_summary": "Identify the invariant first, then choose the structure that preserves it in one pass.",
             "target_level": "mid",
         }

@@ -76,7 +76,6 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
             "learning_objective": "After this question, the learner should be able to explain auth session responsibilities.",
             "source_section": "Auth",
             "source_quote": "Validate the session cookie and return user payload.",
-            "misconception_trap": "Assuming session validation is done in frontend.",
             "reasoning_summary": "Auth must be enforced server-side per request.",
             "target_level": "mid",
         }
@@ -145,8 +144,33 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
         )
         self.assertTrue(item["source_section"])
         self.assertTrue(item["source_quote"])
-        self.assertIn("weak answer", item["misconception_trap"].lower())
         self.assertTrue(item["reasoning_summary"])
+
+    def test_question_item_rejects_generic_question_when_not_grounded_to_topic(self):
+        item = {
+            "question": "How would you design retries in a distributed system?",
+            "answer": _conceptual_answer("distributed retries"),
+            "difficulty": "medium",
+            "learning_objective": "After this question, the learner should be able to explain topic-specific engineering tradeoffs.",
+            "source_section": "Caching",
+            "source_quote": "Cache invalidation and TTL shape correctness.",
+            "reasoning_summary": "Tie the answer to the actual topic mechanism, not a generic pattern.",
+            "target_level": "mid",
+        }
+        valid, issue = _validate_question_item(
+            item,
+            "topic-caching",
+            "medium",
+            "mid",
+            topic_title="Caching",
+            grounding_anchors=[
+                "Cache invalidation",
+                "TTL expiration",
+                "Read-through caching",
+            ],
+        )
+        self.assertFalse(valid)
+        self.assertEqual(issue, "question_not_grounded_to_topic")
 
     def test_collect_with_retries_respects_existing_questions_seed(self):
         class FakeLLM:
@@ -164,7 +188,6 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
                             "learning_objective": "After this question, the learner should be able to evaluate reliability reasoning.",
                             "source_section": "Retries",
                             "source_quote": "Retries must be bounded to avoid overload.",
-                            "misconception_trap": "Assuming retries are always safe.",
                             "reasoning_summary": "Retries need limits and idempotency.",
                             "target_level": "mid",
                         }
@@ -178,7 +201,6 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
                             "learning_objective": "After this question, the learner should be able to identify safe retry boundaries.",
                             "source_section": "Reliability",
                             "source_quote": "Idempotency prevents duplicate mutation effects.",
-                            "misconception_trap": "Assuming retries are harmless without idempotency.",
                             "reasoning_summary": "Map retries to mutation safety guarantees.",
                             "target_level": "mid",
                         }
@@ -323,6 +345,10 @@ Answer 2: Pagination controls payload size, improves latency, and avoids memory 
         self.assertIn("common interview questions", prompt)
         self.assertIn("how it works, when to use it, tradeoffs", prompt)
         self.assertIn("keep the batch naturally progressive", prompt)
+        self.assertIn("Grounding anchors from the topic content", prompt)
+        self.assertIn("Each question must be explicitly grounded to the current topic", prompt)
+        self.assertIn("Do not ask generic interview questions that could fit many unrelated topics", prompt)
+        self.assertIn("current topic recognizable", prompt)
         self.assertIn("short readable paragraphs", prompt)
         self.assertIn("Do not compress complex topics into a few generic sentences", prompt)
         self.assertIn(
@@ -506,7 +532,6 @@ Use a dictionary and a loop.""",
                 "After this question, the learner should be able to",
             ),
         )
-        self.assertIn("weak answer", items[0]["misconception_trap"].lower())
 
     def test_retry_prompt_reinforces_coach_style_recovery(self):
         conceptual_retry = _build_retry_prompt(
