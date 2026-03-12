@@ -14,9 +14,7 @@ def _question_payload(question: str) -> dict:
         "answer": (
             f"**Answer:** {question} should be answered by starting with the real constraint and the direct takeaway.\n\n"
             "**Why it's right:** In plain language, the best answer connects the concept to the implementation detail that actually controls correctness or tradeoffs.\n\n"
-            "**Interviewer-ready phrasing:** \"I would start with the constraint, explain the tradeoff it creates, and then tie that back to the implementation choice.\"\n\n"
-            "**Common mistake:** A weak answer repeats definitions without showing why the constraint changes the decision.\n\n"
-            "**Self-check:** If the main constraint changed, what part of the explanation would you revisit first?"
+            "**Common mistake:** A weak answer repeats definitions without showing why the constraint changes the decision."
         ),
         "difficulty": "medium",
         "learning_objective": "After this question, the learner should be able to understand and apply the documented concept.",
@@ -38,7 +36,6 @@ def _problem_solving_payload(question: str, code: str) -> dict:
             "**Short answer:** Use the invariant to choose the data structure that removes repeated work.\n\n"
             "**How to think about it:** Clarify inputs, outputs, and the state the next step needs.\n\n"
             "**Why it works:** The chosen structure preserves the invariant after every update, so the scan never has to restart.\n\n"
-            "**Interviewer-ready phrasing:** \"I would state the invariant first, then explain how each update preserves it and why that gives the target complexity.\"\n\n"
             "**Common mistake:** A weak answer starts coding before proving why the invariant supports the approach.\n\n"
             "### Complexity\n"
             "**Time and space:** Time complexity is derived from the primary loop or operations, and space reflects the supporting data structures.\n\n"

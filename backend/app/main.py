@@ -124,7 +124,7 @@ async def lifespan(application: FastAPI):
     _mcp_gateway = MCPGateway(settings)
     _learning_store = LearningStore(settings.learning_db_path)
     _learning_planner = LearningPlannerStore(settings.learning_db_path)
-    parser = DocParser(settings.docs_path)
+    parser = DocParser(curriculum_path=settings.curriculum_path)
 
     # Wire routers to shared instances
     questions.init(_llm_client, parser, _learning_store, _mcp_gateway)
@@ -144,7 +144,7 @@ async def lifespan(application: FastAPI):
     )
     voice.init(_llm_client)
 
-    logger.info("Loaded %d topics from %s", len(parser.list_topics()), settings.docs_path)
+    logger.info("Loaded %d topics from curriculum %s", len(parser.list_topics()), parser.source_path)
 
     try:
         yield  # Application runs

@@ -1,4 +1,4 @@
-"""Topics router — static handbook topics plus user-defined custom topics."""
+"""Topics router — static curriculum topics plus user-defined custom topics."""
 
 from __future__ import annotations
 

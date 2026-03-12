@@ -19,9 +19,7 @@ def _question_payload(question: str) -> list[dict]:
             "answer": (
                 f"**Answer:** {question} is best explained by starting with the real constraint and the practical takeaway.\n\n"
                 "**Why it's right:** In plain language, a strong answer connects the concept to the implementation detail that actually controls the tradeoff.\n\n"
-                "**Interviewer-ready phrasing:** \"I would start with the constraint, then explain how it shapes the implementation choice.\"\n\n"
-                "**Common mistake:** A weak answer repeats terminology without tying it to the real engineering decision.\n\n"
-                "**Self-check:** If the main constraint changed, what part of the explanation would you revisit first?"
+                "**Common mistake:** A weak answer repeats terminology without tying it to the real engineering decision."
             ),
             "difficulty": "medium",
             "learning_objective": "After this question, the learner should be able to understand practical tradeoffs from the docs.",
@@ -49,8 +47,6 @@ def _problem_solving_payload(question: str) -> list[dict]:
 **How to think about it:** Turn the prompt into a complement lookup problem and reject the nested-loop version once the invariant is clear.
 
 **Why it works:** The map preserves exactly the state the next step needs, so the scan stays single-pass and never reuses the same element twice.
-
-**Interviewer-ready phrasing:** "I would state the complement invariant first, then use a hash map to preserve that invariant while scanning once from left to right."
 
 **Common mistake:** A weak answer starts coding the brute-force version before explaining why the invariant supports a one-pass lookup.
 

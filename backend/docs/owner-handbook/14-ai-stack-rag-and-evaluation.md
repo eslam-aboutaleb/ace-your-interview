@@ -5,212 +5,227 @@ levels: [junior, mid, senior]
 
 # AI Stack RAG and Evaluation
 
-RAG systems fail without retrieval quality controls and objective evaluation loops.
+This topic turns AI Stack RAG and Evaluation into a practical study guide covering Retrieval-Augmented Generation, Vector Databases, and Evaluation Metrics. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in prompt design, retrieval quality, tool orchestration, and monitoring. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Document Ingestion: Foundations 01
+## Retrieval-Augmented Generation
 
-This module expands document ingestion in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Retrieval-Augmented Generation ties together rag architecture overview, vector databases, embedding models, and chunking strategies inside AI Stack RAG and Evaluation and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- RAG architecture overview: study the definition, normal flow, edge cases, and production consequences.
+- Vector databases: study the definition, normal flow, edge cases, and production consequences.
+- Embedding models: study the definition, normal flow, edge cases, and production consequences.
+- Chunking strategies: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Chunking and Embeddings: Foundations 02
+### Retrieval-Augmented Generation: RAG architecture overview
 
-This module expands chunking and embeddings in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+RAG architecture overview is a concrete part of retrieval-augmented generation and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Retrieval Strategies: Foundations 03
+### Retrieval-Augmented Generation: Vector databases
 
-This module expands retrieval strategies in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Vector databases is a concrete part of retrieval-augmented generation and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Reranking: Foundations 04
+### Retrieval-Augmented Generation: Embedding models
 
-This module expands reranking in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Embedding models is a concrete part of retrieval-augmented generation and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Context Assembly: Foundations 05
+### Retrieval-Augmented Generation: Chunking strategies
 
-This module expands context assembly in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Chunking strategies is a concrete part of retrieval-augmented generation and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Grounded Generation: Foundations 06
+## Vector Databases
 
-This module expands grounded generation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Vector Databases ties together what are vector embeddings, similarity search, pinecone, weaviate, chroma overview, and indexing strategies inside AI Stack RAG and Evaluation and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- What are vector embeddings: study the definition, normal flow, edge cases, and production consequences.
+- Similarity search: study the definition, normal flow, edge cases, and production consequences.
+- Pinecone, Weaviate, Chroma overview: study the definition, normal flow, edge cases, and production consequences.
+- Indexing strategies: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Offline Evaluation: Foundations 07
+### Vector Databases: What are vector embeddings
 
-This module expands offline evaluation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+What are vector embeddings is a concrete part of vector databases and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Online Monitoring: Foundations 08
+### Vector Databases: Similarity search
 
-This module expands online monitoring in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Similarity search is a concrete part of vector databases and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Document Ingestion: Mental Model 09
+### Vector Databases: Pinecone, Weaviate, Chroma overview
 
-This module expands document ingestion in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Pinecone, Weaviate, Chroma overview is a concrete part of vector databases and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Chunking and Embeddings: Mental Model 10
+### Vector Databases: Indexing strategies
 
-This module expands chunking and embeddings in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Indexing strategies is a concrete part of vector databases and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Retrieval Strategies: Mental Model 11
+## Evaluation Metrics
 
-This module expands retrieval strategies in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Evaluation Metrics ties together rag evaluation, answer quality metrics, context relevance, and hallucination detection inside AI Stack RAG and Evaluation and shows how the concepts behave in real prompt design, retrieval quality, tool orchestration, and monitoring. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- RAG evaluation: focus on precision and recall and how those choices change system behavior.
+- Answer quality metrics: study the definition, normal flow, edge cases, and production consequences.
+- Context relevance: study the definition, normal flow, edge cases, and production consequences.
+- Hallucination detection: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Reranking: Mental Model 12
+### Evaluation Metrics: RAG evaluation
 
-This module expands reranking in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+RAG evaluation is a concrete part of evaluation metrics and directly affects how teams implement and operate AI Stack RAG and Evaluation. Key angles include precision and recall, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Context Assembly: Mental Model 13
+### Evaluation Metrics: Answer quality metrics
 
-This module expands context assembly in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Answer quality metrics is a concrete part of evaluation metrics and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Grounded Generation: Mental Model 14
+### Evaluation Metrics: Context relevance
 
-This module expands grounded generation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Context relevance is a concrete part of evaluation metrics and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Offline Evaluation: Mental Model 15
+### Evaluation Metrics: Hallucination detection
 
-This module expands offline evaluation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Hallucination detection is a concrete part of evaluation metrics and directly affects how teams implement and operate AI Stack RAG and Evaluation. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in prompt design, retrieval quality, tool orchestration, and monitoring.
 
-## Online Monitoring: Mental Model 16
+### Retrieval-Augmented Generation: Implementation Checklist
 
-This module expands online monitoring in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn retrieval-augmented generation into a build-and-review checklist centered on rag architecture overview, vector databases, and embedding models. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Document Ingestion: Architecture Pattern 17
+### Vector Databases: Common Pitfalls
 
-This module expands document ingestion in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat vector databases as only a definition instead of an operating concern. Tie the discussion back to what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Chunking and Embeddings: Architecture Pattern 18
+### Evaluation Metrics: Debugging Workflow
 
-This module expands chunking and embeddings in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use evaluation metrics as a troubleshooting path for failures involving rag evaluation, answer quality metrics, and context relevance. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Retrieval Strategies: Architecture Pattern 19
+### Retrieval-Augmented Generation: Design Review Questions
 
-This module expands retrieval strategies in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame retrieval-augmented generation as a design review conversation around rag architecture overview, vector databases, and embedding models. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Reranking: Architecture Pattern 20
+### Vector Databases: Failure Modes
 
-This module expands reranking in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how vector databases fails when what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Context Assembly: Architecture Pattern 21
+### Evaluation Metrics: Operational Signals
 
-This module expands context assembly in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect evaluation metrics to the signals operators need when rag evaluation, answer quality metrics, and context relevance changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Grounded Generation: Architecture Pattern 22
+### Retrieval-Augmented Generation: Tradeoff Analysis
 
-This module expands grounded generation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach retrieval-augmented generation, using rag architecture overview, vector databases, and embedding models as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Offline Evaluation: Architecture Pattern 23
+### Vector Databases: Practice Exercise
 
-This module expands offline evaluation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn vector databases into a practical exercise built around what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Online Monitoring: Architecture Pattern 24
+### Evaluation Metrics: Implementation Checklist
 
-This module expands online monitoring in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn evaluation metrics into a build-and-review checklist centered on rag evaluation, answer quality metrics, and context relevance. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Document Ingestion: Implementation Workflow 25
+### Retrieval-Augmented Generation: Common Pitfalls
 
-This module expands document ingestion in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat retrieval-augmented generation as only a definition instead of an operating concern. Tie the discussion back to rag architecture overview, vector databases, and embedding models and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Chunking and Embeddings: Implementation Workflow 26
+### Vector Databases: Debugging Workflow
 
-This module expands chunking and embeddings in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use vector databases as a troubleshooting path for failures involving what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Retrieval Strategies: Implementation Workflow 27
+### Evaluation Metrics: Design Review Questions
 
-This module expands retrieval strategies in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame evaluation metrics as a design review conversation around rag evaluation, answer quality metrics, and context relevance. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Reranking: Implementation Workflow 28
+### Retrieval-Augmented Generation: Failure Modes
 
-This module expands reranking in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how retrieval-augmented generation fails when rag architecture overview, vector databases, and embedding models is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Context Assembly: Implementation Workflow 29
+### Vector Databases: Operational Signals
 
-This module expands context assembly in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Connect vector databases to the signals operators need when what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Grounded Generation: Implementation Workflow 30
+### Evaluation Metrics: Tradeoff Analysis
 
-This module expands grounded generation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compare at least two ways to approach evaluation metrics, using rag evaluation, answer quality metrics, and context relevance as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Offline Evaluation: Implementation Workflow 31
+### Retrieval-Augmented Generation: Practice Exercise
 
-This module expands offline evaluation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn retrieval-augmented generation into a practical exercise built around rag architecture overview, vector databases, and embedding models. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Online Monitoring: Implementation Workflow 32
+### Vector Databases: Implementation Checklist
 
-This module expands online monitoring in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn vector databases into a build-and-review checklist centered on what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Document Ingestion: Design Decisions 33
+### Evaluation Metrics: Common Pitfalls
 
-This module expands document ingestion in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat evaluation metrics as only a definition instead of an operating concern. Tie the discussion back to rag evaluation, answer quality metrics, and context relevance and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Chunking and Embeddings: Design Decisions 34
+### Retrieval-Augmented Generation: Debugging Workflow
 
-This module expands chunking and embeddings in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use retrieval-augmented generation as a troubleshooting path for failures involving rag architecture overview, vector databases, and embedding models. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Retrieval Strategies: Design Decisions 35
+### Vector Databases: Design Review Questions
 
-This module expands retrieval strategies in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame vector databases as a design review conversation around what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Reranking: Design Decisions 36
+### Evaluation Metrics: Failure Modes
 
-This module expands reranking in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how evaluation metrics fails when rag evaluation, answer quality metrics, and context relevance is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Context Assembly: Design Decisions 37
+### Retrieval-Augmented Generation: Operational Signals
 
-This module expands context assembly in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect retrieval-augmented generation to the signals operators need when rag architecture overview, vector databases, and embedding models changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Grounded Generation: Design Decisions 38
+### Vector Databases: Tradeoff Analysis
 
-This module expands grounded generation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach vector databases, using what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Offline Evaluation: Design Decisions 39
+### Evaluation Metrics: Practice Exercise
 
-This module expands offline evaluation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn evaluation metrics into a practical exercise built around rag evaluation, answer quality metrics, and context relevance. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Online Monitoring: Design Decisions 40
+### Retrieval-Augmented Generation: Implementation Checklist 02
 
-This module expands online monitoring in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn retrieval-augmented generation into a build-and-review checklist centered on rag architecture overview, vector databases, and embedding models. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Document Ingestion: Failure Modes 41
+### Vector Databases: Common Pitfalls 02
 
-This module expands document ingestion in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat vector databases as only a definition instead of an operating concern. Tie the discussion back to what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Chunking and Embeddings: Failure Modes 42
+### Evaluation Metrics: Debugging Workflow 02
 
-This module expands chunking and embeddings in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use evaluation metrics as a troubleshooting path for failures involving rag evaluation, answer quality metrics, and context relevance. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Retrieval Strategies: Failure Modes 43
+### Retrieval-Augmented Generation: Design Review Questions 02
 
-This module expands retrieval strategies in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame retrieval-augmented generation as a design review conversation around rag architecture overview, vector databases, and embedding models. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Reranking: Failure Modes 44
+### Vector Databases: Failure Modes 02
 
-This module expands reranking in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how vector databases fails when what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Context Assembly: Failure Modes 45
+### Evaluation Metrics: Operational Signals 02
 
-This module expands context assembly in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect evaluation metrics to the signals operators need when rag evaluation, answer quality metrics, and context relevance changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## Grounded Generation: Failure Modes 46
+### Retrieval-Augmented Generation: Tradeoff Analysis 02
 
-This module expands grounded generation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach retrieval-augmented generation, using rag architecture overview, vector databases, and embedding models as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Offline Evaluation: Failure Modes 47
+### Vector Databases: Practice Exercise 02
 
-This module expands offline evaluation in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn vector databases into a practical exercise built around what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Online Monitoring: Failure Modes 48
+### Evaluation Metrics: Implementation Checklist 02
 
-This module expands online monitoring in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn evaluation metrics into a build-and-review checklist centered on rag evaluation, answer quality metrics, and context relevance. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Document Ingestion: Debugging Strategy 49
+### Retrieval-Augmented Generation: Common Pitfalls 02
 
-This module expands document ingestion in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat retrieval-augmented generation as only a definition instead of an operating concern. Tie the discussion back to rag architecture overview, vector databases, and embedding models and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Chunking and Embeddings: Debugging Strategy 50
+### Vector Databases: Debugging Workflow 02
 
-This module expands chunking and embeddings in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Use vector databases as a troubleshooting path for failures involving what are vector embeddings, similarity search, and pinecone, weaviate, chroma overview. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Retrieval Strategies: Debugging Strategy 51
+### Evaluation Metrics: Design Review Questions 02
 
-This module expands retrieval strategies in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Frame evaluation metrics as a design review conversation around rag evaluation, answer quality metrics, and context relevance. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Reranking: Debugging Strategy 52
+### Retrieval-Augmented Generation: Failure Modes 02
 
-This module expands reranking in AI Stack RAG and Evaluation so candidates can explain how the concept behaves in real AI products work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Study how retrieval-augmented generation fails when rag architecture overview, vector databases, and embedding models is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.

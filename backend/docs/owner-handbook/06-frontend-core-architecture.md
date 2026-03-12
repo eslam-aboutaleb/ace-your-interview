@@ -5,188 +5,216 @@ levels: [junior, mid, senior]
 
 # Frontend Core Architecture
 
-Frontend architecture determines whether product velocity increases or collapses as features grow.
+This topic turns Frontend Core Architecture into a practical study guide covering Rendering Pipeline, Component Architecture, and State Ownership, and related production concerns. Each section explains the underlying concepts, the implementation decisions they drive, and the failure cases that matter in rendering, state ownership, user experience, and accessibility. The aim is to move learners from surface-level definitions to durable reasoning they can use in interviews, design reviews, and production work.
 
-## Rendering Pipeline: Foundations 01
+## Rendering Pipeline
 
-This module expands rendering pipeline in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Rendering Pipeline ties together browser rendering steps, critical rendering path, react rendering process, and virtual dom explanation inside Frontend Core Architecture and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Browser rendering steps: focus on dom, cssom, render tree, and layout and how those choices change system behavior.
+- Critical rendering path: study the definition, normal flow, edge cases, and production consequences.
+- React rendering process: study the definition, normal flow, edge cases, and production consequences.
+- Virtual DOM explanation: study the definition, normal flow, edge cases, and production consequences.
+- Component lifecycle: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Component Architecture: Foundations 02
+### Rendering Pipeline: Browser rendering steps
 
-This module expands component architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Browser rendering steps is a concrete part of rendering pipeline and directly affects how teams implement and operate Frontend Core Architecture. Key angles include dom, cssom, render tree, and layout, because each one changes the design, the contract, or the operator workflow. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## State Ownership: Foundations 03
+### Rendering Pipeline: Critical rendering path
 
-This module expands state ownership in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Critical rendering path is a concrete part of rendering pipeline and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Routing and Navigation: Foundations 04
+### Rendering Pipeline: React rendering process
 
-This module expands routing and navigation in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+React rendering process is a concrete part of rendering pipeline and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Form Architecture: Foundations 05
+### Rendering Pipeline: Virtual DOM explanation
 
-This module expands form architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Virtual DOM explanation is a concrete part of rendering pipeline and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Design Tokens: Foundations 06
+### Rendering Pipeline: Component lifecycle
 
-This module expands design tokens in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Component lifecycle is a concrete part of rendering pipeline and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Accessibility Foundations: Foundations 07
+## Component Architecture
 
-This module expands accessibility foundations in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Component Architecture ties together presentational vs container components, compound components pattern, higher-order components, and custom hooks inside Frontend Core Architecture and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Presentational vs container components: study the definition, normal flow, edge cases, and production consequences.
+- Compound components pattern: study the definition, normal flow, edge cases, and production consequences.
+- Higher-order components: study the definition, normal flow, edge cases, and production consequences.
+- Custom hooks: study the definition, normal flow, edge cases, and production consequences.
+- Component composition: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Build Tooling: Foundations 08
+### Component Architecture: Presentational vs container components
 
-This module expands build tooling in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Presentational vs container components is a concrete part of component architecture and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Rendering Pipeline: Mental Model 09
+### Component Architecture: Compound components pattern
 
-This module expands rendering pipeline in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Compound components pattern is a concrete part of component architecture and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Component Architecture: Mental Model 10
+### Component Architecture: Higher-order components
 
-This module expands component architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Higher-order components is a concrete part of component architecture and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## State Ownership: Mental Model 11
+### Component Architecture: Custom hooks
 
-This module expands state ownership in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Custom hooks is a concrete part of component architecture and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Routing and Navigation: Mental Model 12
+### Component Architecture: Component composition
 
-This module expands routing and navigation in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Component composition is a concrete part of component architecture and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Form Architecture: Mental Model 13
+## State Ownership
 
-This module expands form architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+State Ownership ties together local component state, lifted state, context for shared state, and when to use each state type inside Frontend Core Architecture and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Local component state: study the definition, normal flow, edge cases, and production consequences.
+- Lifted state: study the definition, normal flow, edge cases, and production consequences.
+- Context for shared state: study the definition, normal flow, edge cases, and production consequences.
+- When to use each state type: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Design Tokens: Mental Model 14
+### State Ownership: Local component state
 
-This module expands design tokens in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Local component state is a concrete part of state ownership and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Accessibility Foundations: Mental Model 15
+### State Ownership: Lifted state
 
-This module expands accessibility foundations in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Lifted state is a concrete part of state ownership and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Build Tooling: Mental Model 16
+### State Ownership: Context for shared state
 
-This module expands build tooling in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Context for shared state is a concrete part of state ownership and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Rendering Pipeline: Architecture Pattern 17
+### State Ownership: When to use each state type
 
-This module expands rendering pipeline in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+When to use each state type is a concrete part of state ownership and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Component Architecture: Architecture Pattern 18
+## Accessibility
 
-This module expands component architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Accessibility ties together wcag guidelines overview, semantic html, aria labels and roles, and keyboard navigation inside Frontend Core Architecture and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- WCAG guidelines overview: study the definition, normal flow, edge cases, and production consequences.
+- Semantic HTML: study the definition, normal flow, edge cases, and production consequences.
+- ARIA labels and roles: study the definition, normal flow, edge cases, and production consequences.
+- Keyboard navigation: study the definition, normal flow, edge cases, and production consequences.
+- Screen reader compatibility: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## State Ownership: Architecture Pattern 19
+### Accessibility: WCAG guidelines overview
 
-This module expands state ownership in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+WCAG guidelines overview is a concrete part of accessibility and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Routing and Navigation: Architecture Pattern 20
+### Accessibility: Semantic HTML
 
-This module expands routing and navigation in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Semantic HTML is a concrete part of accessibility and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Form Architecture: Architecture Pattern 21
+### Accessibility: ARIA labels and roles
 
-This module expands form architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+ARIA labels and roles is a concrete part of accessibility and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Design Tokens: Architecture Pattern 22
+### Accessibility: Keyboard navigation
 
-This module expands design tokens in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Keyboard navigation is a concrete part of accessibility and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Accessibility Foundations: Architecture Pattern 23
+### Accessibility: Screen reader compatibility
 
-This module expands accessibility foundations in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Screen reader compatibility is a concrete part of accessibility and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Build Tooling: Architecture Pattern 24
+## Build Tooling
 
-This module expands build tooling in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Build Tooling ties together webpack, vite, esbuild overview, code splitting and lazy loading, tree shaking, and hot module replacement inside Frontend Core Architecture and shows how the concepts behave in real rendering, state ownership, user experience, and accessibility. Move through the section from definitions to implementation choices, then connect those choices to failure handling, testing, and observability. 
+- Webpack, Vite, esbuild overview: study the definition, normal flow, edge cases, and production consequences.
+- Code splitting and lazy loading: study the definition, normal flow, edge cases, and production consequences.
+- Tree shaking: study the definition, normal flow, edge cases, and production consequences.
+- Hot module replacement: study the definition, normal flow, edge cases, and production consequences.
+The subsections below turn each item into a deeper study unit so the learner can explain both the concept and the operational tradeoffs around it.
 
-## Rendering Pipeline: Implementation Workflow 25
+### Build Tooling: Webpack, Vite, esbuild overview
 
-This module expands rendering pipeline in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Webpack, Vite, esbuild overview is a concrete part of build tooling and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Component Architecture: Implementation Workflow 26
+### Build Tooling: Code splitting and lazy loading
 
-This module expands component architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Code splitting and lazy loading is a concrete part of build tooling and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## State Ownership: Implementation Workflow 27
+### Build Tooling: Tree shaking
 
-This module expands state ownership in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Tree shaking is a concrete part of build tooling and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Routing and Navigation: Implementation Workflow 28
+### Build Tooling: Hot module replacement
 
-This module expands routing and navigation in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Hot module replacement is a concrete part of build tooling and directly affects how teams implement and operate Frontend Core Architecture. Break the topic into the definition, the happy-path behavior, the important edge cases, and the production tradeoffs that appear as the system grows. Explain the happy path, what can go wrong when the choice is misapplied, and which tests or signals confirm the intended behavior in rendering, state ownership, user experience, and accessibility.
 
-## Form Architecture: Implementation Workflow 29
+### Rendering Pipeline: Implementation Checklist
 
-This module expands form architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn rendering pipeline into a build-and-review checklist centered on browser rendering steps, critical rendering path, and react rendering process. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Design Tokens: Implementation Workflow 30
+### Component Architecture: Common Pitfalls
 
-This module expands design tokens in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Review the mistakes teams make when they treat component architecture as only a definition instead of an operating concern. Tie the discussion back to presentational vs container components, compound components pattern, and higher-order components and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Accessibility Foundations: Implementation Workflow 31
+### State Ownership: Debugging Workflow
 
-This module expands accessibility foundations in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Use state ownership as a troubleshooting path for failures involving local component state, lifted state, and context for shared state. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Build Tooling: Implementation Workflow 32
+### Accessibility: Design Review Questions
 
-This module expands build tooling in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Frame accessibility as a design review conversation around wcag guidelines overview, semantic html, and aria labels and roles. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Rendering Pipeline: Design Decisions 33
+### Build Tooling: Failure Modes
 
-This module expands rendering pipeline in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Study how build tooling fails when webpack, vite, esbuild overview, code splitting and lazy loading, and tree shaking is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Component Architecture: Design Decisions 34
+### Rendering Pipeline: Operational Signals
 
-This module expands component architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Connect rendering pipeline to the signals operators need when browser rendering steps, critical rendering path, and react rendering process changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## State Ownership: Design Decisions 35
+### Component Architecture: Tradeoff Analysis
 
-This module expands state ownership in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Compare at least two ways to approach component architecture, using presentational vs container components, compound components pattern, and higher-order components as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Routing and Navigation: Design Decisions 36
+### State Ownership: Practice Exercise
 
-This module expands routing and navigation in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn state ownership into a practical exercise built around local component state, lifted state, and context for shared state. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Form Architecture: Design Decisions 37
+### Accessibility: Implementation Checklist
 
-This module expands form architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Turn accessibility into a build-and-review checklist centered on wcag guidelines overview, semantic html, and aria labels and roles. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Design Tokens: Design Decisions 38
+### Build Tooling: Common Pitfalls
 
-This module expands design tokens in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Review the mistakes teams make when they treat build tooling as only a definition instead of an operating concern. Tie the discussion back to webpack, vite, esbuild overview, code splitting and lazy loading, and tree shaking and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
 
-## Accessibility Foundations: Design Decisions 39
+### Rendering Pipeline: Debugging Workflow
 
-This module expands accessibility foundations in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Use rendering pipeline as a troubleshooting path for failures involving browser rendering steps, critical rendering path, and react rendering process. Start from the user-visible symptom, narrow the search with logs and metrics, and identify the checkpoints that separate client bugs, server bugs, and dependency failures. A strong debugging workflow leaves the engineer with a repeatable way to isolate the fault under time pressure.
 
-## Build Tooling: Design Decisions 40
+### Component Architecture: Design Review Questions
 
-This module expands build tooling in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Frame component architecture as a design review conversation around presentational vs container components, compound components pattern, and higher-order components. Ask what assumptions the design makes, where the boundaries are enforced, which edge cases deserve explicit handling, and what tradeoffs appear as traffic, data volume, or team size grows. These questions help the learner justify a choice instead of repeating framework defaults.
 
-## Rendering Pipeline: Failure Modes 41
+### State Ownership: Failure Modes
 
-This module expands rendering pipeline in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Include instrumentation signals, alert thresholds, and triage steps that keep troubleshooting fast under pressure. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Study how state ownership fails when local component state, lifted state, and context for shared state is missing, misconfigured, or overloaded. Explain the blast radius, the user impact, and which safeguards reduce duplicate work, stale data, downtime, or unsafe behavior. This lens turns the section into a concrete conversation about resilience rather than idealized happy-path flows.
 
-## Component Architecture: Failure Modes 42
+### Accessibility: Operational Signals
 
-This module expands component architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Explicitly describe the failure blast radius and how to reduce it with isolation, throttling, and safe defaults. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Connect accessibility to the signals operators need when wcag guidelines overview, semantic html, and aria labels and roles changes in production. Describe the logs, metrics, traces, dashboards, or alerts that show whether the system is healthy, degrading, or drifting from the intended contract. Operational visibility matters because teams cannot improve what they cannot observe or explain.
 
-## State Ownership: Failure Modes 43
+### Build Tooling: Tradeoff Analysis
 
-This module expands state ownership in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Capture the review checklist used in code review to prevent regressions before deployment. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Compare at least two ways to approach build tooling, using webpack, vite, esbuild overview, code splitting and lazy loading, and tree shaking as the anchor example. Discuss where the simpler option wins on delivery speed and where the more robust option wins on scale, correctness, or operability. Learners should leave this section able to defend a decision with constraints rather than preferences.
 
-## Routing and Navigation: Failure Modes 44
+### Rendering Pipeline: Practice Exercise
 
-This module expands routing and navigation in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Start from a concrete product requirement and map it to request, data, and dependency boundaries. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: mid: explain implementation constraints and tradeoffs.
+Turn rendering pipeline into a practical exercise built around browser rendering steps, critical rendering path, and react rendering process. The exercise should force the learner to define assumptions, choose an implementation, and then explain how they would test, monitor, and evolve it. Use the exercise to surface whether the learner understands both the core mechanism and the production consequences.
 
-## Form Architecture: Failure Modes 45
+### Component Architecture: Implementation Checklist
 
-This module expands form architecture in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Document expected behavior for success, degraded operation, and hard failure so behavior stays predictable. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: senior: justify architecture and operational risk decisions.
+Turn component architecture into a build-and-review checklist centered on presentational vs container components, compound components pattern, and higher-order components. Call out the invariant that must remain true, the configuration or contract decisions that support it, and the tests that catch regressions before release. This lens should help a learner translate theory into steps they can execute during implementation and code review.
 
-## Design Tokens: Failure Modes 46
+### State Ownership: Common Pitfalls
 
-This module expands design tokens in Frontend Core Architecture so candidates can explain how the concept behaves in real frontend applications work, not only definitions. Tie the concept to implementation details such as contracts, storage choices, retries, and rollback strategy. Discuss concrete tradeoffs across correctness, latency, cost, and maintainability, then show how the approach changes by scope and scale. Interview emphasis: junior: establish fundamentals and vocabulary.
+Review the mistakes teams make when they treat state ownership as only a definition instead of an operating concern. Tie the discussion back to local component state, lifted state, and context for shared state and explain how weak defaults, ambiguous contracts, or missing observability create reliability and maintenance problems. The goal is to recognize the anti-pattern quickly and replace it with a safer default.
