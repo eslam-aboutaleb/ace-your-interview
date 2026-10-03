@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
 
 // Node >= 22 exposes an experimental `localStorage` global that is
 // undefined unless --local-storage-file is passed, and in this
