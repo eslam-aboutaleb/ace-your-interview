@@ -625,6 +625,47 @@ export interface TopicMasteryResponse {
   topics: TopicMasteryItem[];
 }
 
+export interface ProgressQuestion {
+  question_id?: string;
+  question: string;
+  difficulty?: string;
+  revealed?: boolean;
+  is_correct?: boolean | null;
+  confidence?: number;
+}
+
+export interface SaveProgressPayload {
+  topic_title?: string;
+  questions: ProgressQuestion[];
+  sections?: string[];
+  preferred_language?: string;
+}
+
+export interface TopicProgressDocument {
+  user_id: string;
+  topic_id: string;
+  topic_title: string;
+  summary_text: string;
+  summary_status: "empty" | "pending" | "ready" | "failed" | string;
+  summary_error: string;
+  sections: string[];
+  attempt_stats: Record<string, unknown>;
+  preferred_language: string;
+  question_count: number;
+  revision: number;
+  provider_used: string;
+  model_used: string;
+  generation_source: string;
+  created_at: string;
+  updated_at: string;
+  questions_asked: string[];
+}
+
+export interface TopicProgressListResponse {
+  topics: TopicProgressDocument[];
+  total: number;
+}
+
 export interface LearnerProfile {
   target_role: string;
   target_date: string;
@@ -745,6 +786,7 @@ export interface InterviewRubricScore {
   completeness: number;
   confidence_signal: number;
   overall: number;
+  degraded?: boolean;
 }
 
 export interface InterviewRubricAverages {
@@ -785,6 +827,7 @@ export interface InterviewTurn {
   follow_up_note: string;
   response_time_ms: number;
   created_at: string;
+  degraded?: boolean;
 }
 
 export interface InterviewReport {
@@ -835,6 +878,7 @@ export interface InterviewTurnResponse {
   session: InterviewSession;
   turn: InterviewTurn;
   report_ready: boolean;
+  degraded?: boolean;
 }
 
 export interface InterviewQuestionResponse {
@@ -983,7 +1027,7 @@ export interface OllamaTestResponse {
 
 /* ── Voice Types ─────────────────────────────────────────── */
 
-export type VoiceTier = "browser" | "cloud" | "realtime";
+export type VoiceTier = "browser" | "cloud";
 
 export interface VoiceConfig {
   enabled: boolean;
@@ -1019,7 +1063,6 @@ export type VoiceClientMessage =
       tier: VoiceTier;
       session_type: VoiceSessionType;
       session_id?: string;
-      system_prompt?: string;
       llm_config?: { provider: string; model: string };
     }
   | { type: "audio"; data: string; mime: string }

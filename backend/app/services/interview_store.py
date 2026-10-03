@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -10,8 +11,20 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_INTERVIEWER_STYLE = "neutral"
 _DEFAULT_FEEDBACK_MODE = "concise"
+
+
+class TurnConflictError(Exception):
+    """A turn with this ``(session_id, turn_index)`` already exists.
+
+    Raised instead of a raw ``sqlite3.IntegrityError`` so the router can map a
+    double submission of the same answer onto HTTP 409 rather than a 500.
+    """
+
+    code = "turn_conflict"
 
 
 def _utc_now_iso() -> str:
@@ -26,7 +39,10 @@ class InterviewStore:
         db_dir = os.path.dirname(db_path)
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
-        self._lock = threading.Lock()
+        # Reentrant so read helpers can hold the lock and call each other. A
+        # single sqlite connection is not safe for concurrent use, and two
+        # concurrent answer submissions read the session while one writes.
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
@@ -110,6 +126,54 @@ class InterviewStore:
             for column, ddl in required_columns.items():
                 if column not in existing_columns:
                     self._conn.execute(f"ALTER TABLE interview_sessions ADD COLUMN {column} {ddl}")
+
+            self._migrate_interview_turns()
+
+    def _migrate_interview_turns(self) -> None:
+        """Add ``degraded`` and make ``(session_id, turn_index)`` unique.
+
+        Both steps are idempotent so an already-migrated database is a no-op.
+        The de-duplication must run before the unique index is created:
+        databases written before the constraint can already hold two turns with
+        the same index (concurrent submissions), and creating the index first
+        would fail outright.
+        """
+        turn_columns = {
+            str(row["name"])
+            for row in self._conn.execute("PRAGMA table_info(interview_turns)").fetchall()
+        }
+        if "degraded" not in turn_columns:
+            self._conn.execute(
+                "ALTER TABLE interview_turns ADD COLUMN degraded INTEGER NOT NULL DEFAULT 0"
+            )
+
+        existing_indexes = {
+            str(row["name"])
+            for row in self._conn.execute("PRAGMA index_list(interview_turns)").fetchall()
+        }
+        if "idx_interview_turns_unique_turn" in existing_indexes:
+            return
+
+        removed = self._conn.execute(
+            """
+            DELETE FROM interview_turns
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM interview_turns GROUP BY session_id, turn_index
+            )
+            """
+        ).rowcount
+        if removed and removed > 0:
+            logger.warning(
+                "Removed %s duplicate interview_turns row(s) while enforcing unique (session_id, turn_index)",
+                removed,
+            )
+
+        self._conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_turns_unique_turn
+            ON interview_turns(session_id, turn_index)
+            """
+        )
 
     @staticmethod
     def _loads_list(raw: str) -> list[str]:
@@ -252,37 +316,59 @@ class InterviewStore:
         return {"sessions": sessions, "total": total}
 
     def get_session(self, *, user_id: str, session_id: str) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            """
-            SELECT
-                s.*,
-                EXISTS(SELECT 1 FROM interview_reports r WHERE r.session_id = s.session_id) AS report_ready
-            FROM interview_sessions s
-            WHERE s.user_id = ? AND s.session_id = ?
-            """,
-            (user_id, session_id),
-        ).fetchone()
-        if not row:
-            return None
-        return self._session_row_to_dict(row)
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT
+                    s.*,
+                    EXISTS(SELECT 1 FROM interview_reports r WHERE r.session_id = s.session_id) AS report_ready
+                FROM interview_sessions s
+                WHERE s.user_id = ? AND s.session_id = ?
+                """,
+                (user_id, session_id),
+            ).fetchone()
+            if not row:
+                return None
+            return self._session_row_to_dict(row)
 
     def get_session_context(self, *, user_id: str, session_id: str) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            """
-            SELECT *
-            FROM interview_sessions
-            WHERE user_id = ? AND session_id = ?
-            """,
-            (user_id, session_id),
-        ).fetchone()
-        if not row:
-            return None
-        return {
-            **self._session_row_to_dict(row),
-            "job_description_text": row["job_description_text"],
-            "resume_summary_text": row["resume_summary_text"],
-            "asked_questions": self._loads_list(row["asked_questions_json"]),
-        }
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT *
+                FROM interview_sessions
+                WHERE user_id = ? AND session_id = ?
+                """,
+                (user_id, session_id),
+            ).fetchone()
+            if not row:
+                return None
+            session = self._session_row_to_dict(row)
+            # ``turn_index`` is allocated from this value, so it must be derived
+            # from the same rows the unique constraint covers rather than from a
+            # denormalised counter that can drift.
+            session["turns_completed"] = self._count_turns(
+                user_id=user_id,
+                session_id=session_id,
+            )
+            return {
+                **session,
+                "job_description_text": row["job_description_text"],
+                "resume_summary_text": row["resume_summary_text"],
+                "asked_questions": self._loads_list(row["asked_questions_json"]),
+            }
+
+    def _count_turns(self, *, user_id: str, session_id: str) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM interview_turns
+                WHERE user_id = ? AND session_id = ?
+                """,
+                (user_id, session_id),
+            ).fetchone()
+        return int(row["total"]) if row else 0
 
     def set_current_question(
         self,
@@ -331,6 +417,19 @@ class InterviewStore:
                 )
         return self.get_session(user_id=user_id, session_id=session_id)
 
+    def turn_exists(self, *, user_id: str, session_id: str, turn_index: int) -> bool:
+        """True when this turn index is already taken for the session."""
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT 1 FROM interview_turns
+                WHERE user_id = ? AND session_id = ? AND turn_index = ?
+                LIMIT 1
+                """,
+                (user_id, session_id, int(turn_index)),
+            ).fetchone()
+        return row is not None
+
     def record_turn(
         self,
         *,
@@ -344,53 +443,70 @@ class InterviewStore:
         improvements: list[str],
         follow_up_note: str,
         response_time_ms: int,
+        degraded: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         now = _utc_now_iso()
-        with self._lock:
-            with self._conn:
-                self._conn.execute(
-                    """
-                    INSERT INTO interview_turns(
-                        session_id, user_id, turn_index, question, user_answer,
-                        rubric_json, strengths_json, improvements_json,
-                        follow_up_note, response_time_ms, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        session_id,
-                        user_id,
-                        turn_index,
-                        question,
-                        user_answer,
-                        self._dumps(rubric),
-                        self._dumps(strengths),
-                        self._dumps(improvements),
-                        follow_up_note,
-                        max(0, int(response_time_ms)),
-                        now,
-                    ),
-                )
-
-                current = self._conn.execute(
-                    """
-                    SELECT turn_count, turns_completed
-                    FROM interview_sessions
-                    WHERE user_id = ? AND session_id = ?
-                    """,
-                    (user_id, session_id),
-                ).fetchone()
-                if current:
-                    turns_completed = int(current["turns_completed"]) + 1
-                    turn_count = int(current["turn_count"])
-                    status = "completed" if turns_completed >= turn_count else "active"
+        try:
+            with self._lock:
+                with self._conn:
                     self._conn.execute(
                         """
-                        UPDATE interview_sessions
-                        SET turns_completed = ?, status = ?, current_question = '', updated_at = ?
+                        INSERT INTO interview_turns(
+                            session_id, user_id, turn_index, question, user_answer,
+                            rubric_json, strengths_json, improvements_json,
+                            follow_up_note, response_time_ms, degraded, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            session_id,
+                            user_id,
+                            turn_index,
+                            question,
+                            user_answer,
+                            self._dumps(rubric),
+                            self._dumps(strengths),
+                            self._dumps(improvements),
+                            follow_up_note,
+                            max(0, int(response_time_ms)),
+                            1 if degraded else 0,
+                            now,
+                        ),
+                    )
+
+                    current = self._conn.execute(
+                        """
+                        SELECT turn_count, turns_completed
+                        FROM interview_sessions
                         WHERE user_id = ? AND session_id = ?
                         """,
-                        (turns_completed, status, now, user_id, session_id),
-                    )
+                        (user_id, session_id),
+                    ).fetchone()
+                    if current:
+                        turns_completed = int(current["turns_completed"]) + 1
+                        turn_count = int(current["turn_count"])
+                        status = "completed" if turns_completed >= turn_count else "active"
+                        self._conn.execute(
+                            """
+                            UPDATE interview_sessions
+                            SET turns_completed = ?, status = ?, current_question = '', updated_at = ?
+                            WHERE user_id = ? AND session_id = ?
+                            """,
+                            (turns_completed, status, now, user_id, session_id),
+                        )
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE" not in str(exc).upper():
+                raise
+            # Two concurrent submissions both allocated the same turn_index; the
+            # loser must not overwrite or double-count the winner's turn.
+            logger.warning(
+                "Turn conflict for session=%s turn_index=%s: %s",
+                session_id,
+                turn_index,
+                exc,
+            )
+            raise TurnConflictError(
+                f"turn {turn_index} already recorded for session {session_id}"
+            ) from exc
 
         turn = {
             "session_id": session_id,
@@ -402,23 +518,25 @@ class InterviewStore:
             "improvements": improvements,
             "follow_up_note": follow_up_note,
             "response_time_ms": max(0, int(response_time_ms)),
+            "degraded": bool(degraded),
             "created_at": now,
         }
         session = self.get_session(user_id=user_id, session_id=session_id)
         return turn, session
 
     def get_turns(self, *, user_id: str, session_id: str) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            """
-            SELECT session_id, turn_index, question, user_answer, rubric_json,
-                   strengths_json, improvements_json, follow_up_note,
-                   response_time_ms, created_at
-            FROM interview_turns
-            WHERE user_id = ? AND session_id = ?
-            ORDER BY turn_index ASC
-            """,
-            (user_id, session_id),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT session_id, turn_index, question, user_answer, rubric_json,
+                       strengths_json, improvements_json, follow_up_note,
+                       response_time_ms, degraded, created_at
+                FROM interview_turns
+                WHERE user_id = ? AND session_id = ?
+                ORDER BY turn_index ASC
+                """,
+                (user_id, session_id),
+            ).fetchall()
 
         turns: list[dict[str, Any]] = []
         for row in rows:
@@ -433,6 +551,7 @@ class InterviewStore:
                     "improvements": self._loads_list(row["improvements_json"]),
                     "follow_up_note": row["follow_up_note"],
                     "response_time_ms": int(row["response_time_ms"]),
+                    "degraded": bool(int(row["degraded"])) if "degraded" in row.keys() else False,
                     "created_at": row["created_at"],
                 }
             )

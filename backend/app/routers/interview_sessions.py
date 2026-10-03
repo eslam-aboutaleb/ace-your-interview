@@ -27,7 +27,7 @@ from app.schemas.models import (
 )
 from app.services.doc_parser import DocParser
 from app.services.interview_generator import InterviewGenerator
-from app.services.interview_store import InterviewStore
+from app.services.interview_store import InterviewStore, TurnConflictError
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
 from app.services.llm_policy import (
@@ -86,6 +86,20 @@ def _track_topic_id(track: str) -> str:
         return ""
     topics = _parser.list_topics(track=track)
     return topics[0].id if topics else ""
+
+
+def _turn_conflict_detail() -> dict[str, str]:
+    return {
+        "code": TurnConflictError.code,
+        "message": (
+            "This interview turn was already submitted. Refresh the session and answer the current question."
+        ),
+    }
+
+
+def _record_attempt_blocked(eval_payload: dict[str, Any]) -> bool:
+    """A degraded evaluation has no rubric, so it must not reach the SRS store."""
+    return bool(eval_payload.get("degraded"))
 
 
 async def _progress_events(
@@ -306,6 +320,10 @@ async def submit_answer(
         raise HTTPException(status_code=400, detail="No active question. Generate next question first.")
 
     turn_index = int(session["turns_completed"]) + 1
+    # Cheap pre-check: a turn index that is already taken is a duplicate
+    # submission, so reject it before spending an evaluation call.
+    if _store.turn_exists(user_id=user["user"], session_id=session_id, turn_index=turn_index):
+        raise HTTPException(status_code=409, detail=_turn_conflict_detail())
     eval_payload = await _generator.evaluate_answer(
         session=session,
         question=question,
@@ -314,19 +332,27 @@ async def submit_answer(
         llm_config=body.llm_config,
         user_identity=user,
     )
+    # Internal drift signal for the eval harness; never part of an API payload.
+    eval_payload.pop("follow_up_note_repaired", None)
+    degraded = _record_attempt_blocked(eval_payload)
 
-    turn_dict, updated_session = _store.record_turn(
-        user_id=user["user"],
-        session_id=session_id,
-        turn_index=turn_index,
-        question=question,
-        user_answer=body.user_answer,
-        rubric=eval_payload["rubric"],
-        strengths=eval_payload["strengths"],
-        improvements=eval_payload["improvements"],
-        follow_up_note=eval_payload["follow_up_note"],
-        response_time_ms=body.response_time_ms,
-    )
+    try:
+        turn_dict, updated_session = _store.record_turn(
+            user_id=user["user"],
+            session_id=session_id,
+            turn_index=turn_index,
+            question=question,
+            user_answer=body.user_answer,
+            rubric=eval_payload["rubric"],
+            strengths=eval_payload["strengths"],
+            improvements=eval_payload["improvements"],
+            follow_up_note=eval_payload["follow_up_note"],
+            response_time_ms=body.response_time_ms,
+            degraded=degraded,
+        )
+    except TurnConflictError as exc:
+        raise HTTPException(status_code=409, detail=_turn_conflict_detail()) from exc
+
     prior_memory = str(session.get("memory_summary", "")).strip()
     memory_update = (
         f"{prior_memory}\n"
@@ -341,7 +367,11 @@ async def submit_answer(
         summary=memory_update[:2400],
     )
 
-    if get_settings().enable_adaptive_learning and _learning_store is not None:
+    if (
+        get_settings().enable_adaptive_learning
+        and _learning_store is not None
+        and not degraded
+    ):
         topic_id = _track_topic_id(session["track"])
         if topic_id:
             rubric = eval_payload["rubric"]
@@ -381,8 +411,10 @@ async def submit_answer(
             follow_up_note=eval_payload["follow_up_note"],
             response_time_ms=max(0, body.response_time_ms),
             created_at=turn_dict["created_at"],
+            degraded=degraded,
         ),
         report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
+        degraded=degraded,
     )
 
 
@@ -405,6 +437,18 @@ async def submit_answer_stream(
     if not question:
         raise HTTPException(status_code=400, detail="No active question. Generate next question first.")
 
+    # A repeat submission of an already recorded turn can be rejected before the
+    # response body starts, so it gets a real HTTP status. The race that slips
+    # past this check is caught by record_turn and reported as a `turn_conflict`
+    # error event, because a streaming response can no longer change its status.
+    stream_turn_index = int(session["turns_completed"]) + 1
+    if _store.turn_exists(
+        user_id=user["user"],
+        session_id=session_id,
+        turn_index=stream_turn_index,
+    ):
+        raise HTTPException(status_code=409, detail=_turn_conflict_detail())
+
     async def _event_stream():
         yield json.dumps(
             {
@@ -415,7 +459,7 @@ async def submit_answer_stream(
             }
         ) + "\n"
         try:
-            turn_index = int(session["turns_completed"]) + 1
+            turn_index = stream_turn_index
             eval_task = asyncio.create_task(
                 _generator.evaluate_answer(
                     session=session,
@@ -433,19 +477,34 @@ async def submit_answer_stream(
             ):
                 yield json.dumps(progress) + "\n"
             eval_payload = await eval_task
+            # Internal drift signal for the eval harness; never part of the wire payload.
+            eval_payload.pop("follow_up_note_repaired", None)
+            degraded = _record_attempt_blocked(eval_payload)
 
-            turn_dict, updated_session = _store.record_turn(
-                user_id=user["user"],
-                session_id=session_id,
-                turn_index=turn_index,
-                question=question,
-                user_answer=body.user_answer,
-                rubric=eval_payload["rubric"],
-                strengths=eval_payload["strengths"],
-                improvements=eval_payload["improvements"],
-                follow_up_note=eval_payload["follow_up_note"],
-                response_time_ms=body.response_time_ms,
-            )
+            try:
+                turn_dict, updated_session = _store.record_turn(
+                    user_id=user["user"],
+                    session_id=session_id,
+                    turn_index=turn_index,
+                    question=question,
+                    user_answer=body.user_answer,
+                    rubric=eval_payload["rubric"],
+                    strengths=eval_payload["strengths"],
+                    improvements=eval_payload["improvements"],
+                    follow_up_note=eval_payload["follow_up_note"],
+                    response_time_ms=body.response_time_ms,
+                    degraded=degraded,
+                )
+            except TurnConflictError as exc:
+                yield json.dumps(
+                    {
+                        "type": "error",
+                        "code": TurnConflictError.code,
+                        "message": str(exc),
+                    }
+                ) + "\n"
+                return
+
             prior_memory = str(session.get("memory_summary", "")).strip()
             memory_update = (
                 f"{prior_memory}\n"
@@ -460,7 +519,11 @@ async def submit_answer_stream(
                 summary=memory_update[:2400],
             )
 
-            if get_settings().enable_adaptive_learning and _learning_store is not None:
+            if (
+                get_settings().enable_adaptive_learning
+                and _learning_store is not None
+                and not degraded
+            ):
                 topic_id = _track_topic_id(session["track"])
                 if topic_id:
                     rubric = eval_payload["rubric"]
@@ -500,8 +563,10 @@ async def submit_answer_stream(
                     follow_up_note=eval_payload["follow_up_note"],
                     response_time_ms=max(0, body.response_time_ms),
                     created_at=turn_dict["created_at"],
+                    degraded=degraded,
                 ),
                 report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
+                degraded=degraded,
             ).model_dump(mode="json")
             yield json.dumps({"type": "done", **payload}) + "\n"
         except (

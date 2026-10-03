@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     user_settings_file: str = "user_llm_settings.json"
     llm_service_users_file: str = "llm_service_users.json"
     llm_assignments_file: str = "llm_assignments.json"
+    allowed_users_file: str = "allowed_users.json"
     enable_rate_limiting: bool = True
     oauth_rate_limit_requests: int = 20
     oauth_rate_limit_window_seconds: int = 300
@@ -63,6 +64,18 @@ class Settings(BaseSettings):
     session_rate_limit_window_seconds: int = 60
     llm_rate_limit_requests: int = 30
     llm_rate_limit_window_seconds: int = 60
+    # Per-LLM-call budget: bounds provider calls per user identity, so one
+    # permitted HTTP request cannot fan out unbounded (0 disables the limit).
+    llm_user_call_budget: int = 120
+    llm_user_call_budget_window_seconds: int = 60
+    llm_user_max_concurrency: int = 4
+    # Trust X-Forwarded-For only when running behind a known proxy.
+    trusted_proxy_enabled: bool = False
+
+    # Interview memory (Stage 3.2)
+    memory_summary_max_chars: int = 3000
+    memory_verbatim_turns: int = 4
+    memory_answer_excerpt_chars: int = 320
 
     # MCP gateway
     enable_mcp_gateway: bool = False
@@ -92,13 +105,14 @@ class Settings(BaseSettings):
 
     # Voice agent
     enable_voice_agent: bool = False
-    voice_tiers_enabled: str = "browser"  # comma-separated: browser,cloud,realtime
+    voice_tiers_enabled: str = "browser"  # comma-separated: browser,cloud
     voice_default_tier: str = "browser"
     voice_stt_provider: str = "groq"       # groq or openai
     voice_stt_model: str = "whisper-large-v3"
     voice_tts_provider: str = "edge"       # edge (free) or openai
     voice_tts_voice: str = "en-US-AriaNeural"
-    voice_openai_realtime_model: str = "gpt-4o-realtime-preview"
+    # Per-connection LLM turn budget for the voice WebSocket.
+    voice_max_turns_per_connection: int = 40
 
     model_config = {"env_prefix": "STUDY_", "env_file": ".env", "extra": "ignore"}
 

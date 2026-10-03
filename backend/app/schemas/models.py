@@ -95,7 +95,9 @@ USER_SETTINGS_PROVIDER_WHITELIST = ["google", "openai", "anthropic", "groq"]
 class LLMConfigRequest(BaseModel):
     provider: LLMProviderEnum = LLMProviderEnum.DEFAULT
     model: str = ""
-    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    # ``None`` means "unset" so an explicit 0.0 and an absent value stay
+    # distinguishable; the client falls back to the per-flow default.
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int = Field(default=0, ge=0)
 
 
@@ -109,8 +111,8 @@ class GenerateQuestionsRequest(BaseModel):
     response_detail: Optional[ResponseDetailEnum] = None
     preferred_language: Optional[str] = Field(default=None, max_length=60)
     llm_config: Optional[LLMConfigRequest] = None
-    section_title: Optional[str] = None
-    section_content: Optional[str] = None
+    section_title: Optional[str] = Field(default=None, max_length=200)
+    section_content: Optional[str] = Field(default=None, max_length=12000)
 
 
 class QuestionAnswer(BaseModel):
@@ -299,7 +301,6 @@ class UserLLMSourceEnum(str, Enum):
 class VoiceTierEnum(str, Enum):
     BROWSER = "browser"
     CLOUD = "cloud"
-    REALTIME = "realtime"
 
 
 class UserPreferences(BaseModel):
@@ -375,11 +376,11 @@ class LLMMyAssignmentResponse(BaseModel):
 # ── Chat Follow-Up Models ────────────────────────────────────
 class ChatMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
-    content: str
+    content: str = Field(..., max_length=2000)
 
 
 class ChatFollowUpRequest(BaseModel):
-    word: str
+    word: str = Field(..., max_length=60)
     context_question: str = ""
     context_answer: str = ""
     topic_id: str = ""
@@ -390,8 +391,8 @@ class ChatFollowUpRequest(BaseModel):
     response_detail: Optional[ResponseDetailEnum] = None
     preferred_language: Optional[str] = Field(default=None, max_length=60)
     requires_programming: Optional[bool] = None
-    user_message: str
-    history: list[ChatMessage] = []
+    user_message: str = Field(..., max_length=4000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=50)
     conversation_id: str = ""
     use_memory: bool = True
     llm_config: Optional[LLMConfigRequest] = None
@@ -526,6 +527,47 @@ class TopicMasteryResponse(BaseModel):
     topics: list[TopicMasteryItem]
 
 
+class ProgressQuestion(BaseModel):
+    question_id: str = ""
+    question: str = Field(default="", max_length=4000)
+    difficulty: str = ""
+    revealed: bool = False
+    is_correct: Optional[bool] = None
+    confidence: int = Field(default=0, ge=0, le=5)
+
+
+class SaveProgressRequest(BaseModel):
+    topic_title: str = Field(default="", max_length=300)
+    questions: list[ProgressQuestion] = Field(default_factory=list, max_length=200)
+    sections: list[str] = Field(default_factory=list, max_length=200)
+    preferred_language: str = Field(default="", max_length=60)
+
+
+class TopicProgressDocument(BaseModel):
+    user_id: str
+    topic_id: str
+    topic_title: str
+    summary_text: str = ""
+    summary_status: str = "empty"
+    summary_error: str = ""
+    sections: list[str] = Field(default_factory=list)
+    attempt_stats: dict = Field(default_factory=dict)
+    preferred_language: str = ""
+    question_count: int = 0
+    revision: int = 0
+    provider_used: str = ""
+    model_used: str = ""
+    generation_source: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    questions_asked: list[str] = Field(default_factory=list)
+
+
+class TopicProgressListResponse(BaseModel):
+    topics: list[TopicProgressDocument] = Field(default_factory=list)
+    total: int = 0
+
+
 class LearnerProfile(BaseModel):
     target_role: str = ""
     target_date: str = ""
@@ -633,12 +675,15 @@ class StudyPlanResponse(BaseModel):
 
 # ── Mock Interview Models ────────────────────────────────────
 class RubricScore(BaseModel):
-    technical_accuracy: int = Field(default=3, ge=0, le=5)
-    reasoning_depth: int = Field(default=3, ge=0, le=5)
-    communication_clarity: int = Field(default=3, ge=0, le=5)
-    completeness: int = Field(default=3, ge=0, le=5)
-    confidence_signal: int = Field(default=3, ge=0, le=5)
-    overall: int = Field(default=60, ge=0, le=100)
+    """Rubric values are ``None`` when a turn was evaluated in degraded mode."""
+
+    technical_accuracy: Optional[int] = Field(default=3, ge=0, le=5)
+    reasoning_depth: Optional[int] = Field(default=3, ge=0, le=5)
+    communication_clarity: Optional[int] = Field(default=3, ge=0, le=5)
+    completeness: Optional[int] = Field(default=3, ge=0, le=5)
+    confidence_signal: Optional[int] = Field(default=3, ge=0, le=5)
+    overall: Optional[int] = Field(default=60, ge=0, le=100)
+    degraded: bool = False
 
 
 class RubricAverages(BaseModel):
@@ -679,6 +724,10 @@ class InterviewTurn(BaseModel):
     follow_up_note: str = ""
     response_time_ms: int = 0
     created_at: str
+    degraded: bool = False
+    #: True when the provider could not produce a usable evaluation. The answer
+    #: was still saved; the rubric carries no numbers.
+    degraded: bool = False
 
 
 class InterviewReport(BaseModel):
@@ -700,7 +749,7 @@ class CreateInterviewSessionRequest(BaseModel):
     track: TrackEnum
     level: LevelEnum = LevelEnum.MID
     interview_type: InterviewTypeEnum = InterviewTypeEnum.MIXED
-    turn_count: int = Field(default=5, ge=1, le=20)
+    turn_count: int = Field(default=5, ge=1, le=100)
     target_role: str = Field(default="", max_length=200)
     interviewer_style: InterviewerStyleEnum = InterviewerStyleEnum.NEUTRAL
     feedback_mode: FeedbackModeEnum = FeedbackModeEnum.CONCISE
@@ -729,6 +778,7 @@ class InterviewTurnResponse(BaseModel):
     session: InterviewSession
     turn: InterviewTurn
     report_ready: bool = False
+    degraded: bool = False
 
 
 class InterviewQuestionResponse(BaseModel):

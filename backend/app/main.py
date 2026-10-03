@@ -19,6 +19,7 @@ from app.routers import (
     interview_sessions,
     learning,
     llm_settings,
+    progress,
     questions,
     topics,
     user_settings,
@@ -38,6 +39,8 @@ from app.services.learning_planner import LearningPlannerStore
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
 from app.services.mcp_gateway import MCPGateway
+from app.services.progress_summarizer import ProgressSummarizer
+from app.services.progress_store import ProgressStore
 from app.services.rate_limit import InMemoryRateLimiter, classify_rate_limit_scope, request_ip
 from app.services.user_settings_store import UserSettingsStore, resolve_credentials_encryption_secret
 from app.services.auth import decode_jwt_token
@@ -51,6 +54,8 @@ _user_settings_store: UserSettingsStore | None = None
 _llm_service_access: LLMServiceAccess | None = None
 _llm_assignments_store: LLMAssignmentsStore | None = None
 _mcp_gateway: MCPGateway | None = None
+_progress_store: ProgressStore | None = None
+_progress_summarizer: ProgressSummarizer | None = None
 _rate_limiter = InMemoryRateLimiter()
 
 
@@ -105,7 +110,7 @@ _load_dotenv()
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle."""
-    global _llm_client, _learning_store, _learning_planner, _user_settings_store, _llm_service_access, _llm_assignments_store, _mcp_gateway
+    global _llm_client, _learning_store, _learning_planner, _user_settings_store, _llm_service_access, _llm_assignments_store, _mcp_gateway, _progress_store, _progress_summarizer
 
     settings = get_settings()
     logging.basicConfig(level=logging.INFO)
@@ -124,10 +129,13 @@ async def lifespan(application: FastAPI):
     _mcp_gateway = MCPGateway(settings)
     _learning_store = LearningStore(settings.learning_db_path)
     _learning_planner = LearningPlannerStore(settings.learning_db_path)
+    _progress_store = ProgressStore(settings.learning_db_path)
+    _progress_summarizer = ProgressSummarizer(_llm_client)
     parser = DocParser(curriculum_path=settings.curriculum_path)
 
     # Wire routers to shared instances
-    questions.init(_llm_client, parser, _learning_store, _mcp_gateway)
+    questions.init(_llm_client, parser, _learning_store, _mcp_gateway, _progress_store)
+    progress.init(_progress_store, _progress_summarizer, _llm_client)
     topics.init(parser, _llm_client, _learning_store, _mcp_gateway)
     llm_settings.init(_llm_client)
     user_settings.init(_user_settings_store)
@@ -177,6 +185,18 @@ def create_app() -> FastAPI:
 
     @application.middleware("http")
     async def _apply_rate_limits(request: Request, call_next):
+        """Per-scope sliding-window limiter.
+
+        Scope of this middleware, deliberately:
+          * It only runs for HTTP requests. Starlette's ``@app.middleware("http")``
+            wraps ``scope["type"] == "http"`` only, so the ``/api/voice/stream``
+            WebSocket never reaches it.
+          * ``classify_rate_limit_scope`` returns ``None`` for every ``/api/voice/*``
+            path. That is correct, not an oversight: the two HTTP voice routes
+            (``GET /config`` and the admin-only ``PUT /settings``) make no LLM
+            call, and the WebSocket is throttled per connection by a turn budget
+            inside ``routers/voice.py`` instead of per request here.
+        """
         settings = get_settings()
         if not settings.enable_rate_limiting:
             return await call_next(request)
@@ -221,6 +241,7 @@ def create_app() -> FastAPI:
     application.include_router(user_settings.router, dependencies=auth_dep)
     application.include_router(chat.router, dependencies=auth_dep)
     application.include_router(learning.router)
+    application.include_router(progress.router, dependencies=auth_dep)
     application.include_router(interview_sessions.router, dependencies=auth_dep)
     application.include_router(voice.router)  # WebSocket handles its own auth
 

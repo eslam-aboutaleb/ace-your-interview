@@ -12,11 +12,17 @@ services:
       - ./backend/app:/app/app
       - ./backend/docs:/app/docs:ro
       - ./backend/main.py:/app/main.py
+      - ./backend/data:/app/data
     env_file:
       - ./backend/.env
     environment:
       STUDY_DOCS_PATH: /app/docs
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      STUDY_LEARNING_DB_PATH: /app/data/study_hub_learning.db
+      STUDY_USER_SETTINGS_FILE: /app/data/user_llm_settings.json
+      STUDY_LLM_SERVICE_USERS_FILE: /app/data/llm_service_users.json
+      STUDY_LLM_ASSIGNMENTS_FILE: /app/data/llm_assignments.json
+      STUDY_ALLOWED_USERS_FILE: /app/data/allowed_users.json
     restart: unless-stopped
 
   frontend:

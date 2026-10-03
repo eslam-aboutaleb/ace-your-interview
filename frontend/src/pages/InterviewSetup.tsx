@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Loader2, MessageSquare, Sparkles, Clock, ArrowRight } from "lucide-react";
+import {
+  Loader2,
+  MessageSquare,
+  Sparkles,
+  Clock,
+  ArrowRight,
+} from "lucide-react";
 import {
   pageVariants,
   pageTransition,
@@ -26,23 +32,25 @@ import type {
 } from "@/types";
 
 function interviewStartErrorMessage(error: unknown): string {
-  const detail = (error as {
-    response?: {
-      data?: {
-        detail?: unknown;
+  const detail = (
+    error as {
+      response?: {
+        data?: {
+          detail?: unknown;
+        };
       };
-    };
-    message?: string;
-  })?.response?.data?.detail;
+      message?: string;
+    }
+  )?.response?.data?.detail;
 
   if (typeof detail === "string" && detail.trim()) {
     return detail.trim();
   }
   if (
-    typeof detail === "object"
-    && detail
-    && typeof (detail as { message?: unknown }).message === "string"
-    && (detail as { message: string }).message.trim()
+    typeof detail === "object" &&
+    detail &&
+    typeof (detail as { message?: unknown }).message === "string" &&
+    (detail as { message: string }).message.trim()
   ) {
     return (detail as { message: string }).message.trim();
   }
@@ -70,7 +78,8 @@ export default function InterviewSetup() {
   const [level, setLevel] = useState<InterviewLevel>("mid");
   const [interviewType, setInterviewType] = useState<InterviewType>("mixed");
   const [turnCount, setTurnCount] = useState(5);
-  const [interviewerStyle, setInterviewerStyle] = useState<InterviewerStyle>("neutral");
+  const [interviewerStyle, setInterviewerStyle] =
+    useState<InterviewerStyle>("neutral");
   const [feedbackMode, setFeedbackMode] = useState<FeedbackMode>("concise");
   const [targetRole, setTargetRole] = useState("");
   const [jobDescriptionText, setJobDescriptionText] = useState("");
@@ -95,7 +104,8 @@ export default function InterviewSetup() {
       .then((profile) => {
         if (profile.primary_track) setTrack(profile.primary_track);
         if (profile.current_level) setLevel(profile.current_level);
-        if (profile.target_role) setTargetRole((prev) => prev || profile.target_role);
+        if (profile.target_role)
+          setTargetRole((prev) => prev || profile.target_role);
       })
       .catch(() => {
         // learner profile is optional here
@@ -136,7 +146,9 @@ export default function InterviewSetup() {
           setStartProgress(event.message || "Creating interview session...");
         },
         onProgress: (event) => {
-          setStartProgress(event.message || "Generating first interview question...");
+          setStartProgress(
+            event.message || "Generating first interview question...",
+          );
         },
         onDone: () => {
           setStartProgress("Interview session ready.");
@@ -178,7 +190,8 @@ export default function InterviewSetup() {
             Mock Interview
           </h1>
           <p className="text-gray-400 mt-2">
-            Configure a personalized interview session and practice turn-by-turn.
+            Configure a personalized interview session and practice
+            turn-by-turn.
           </p>
         </div>
       </div>
@@ -200,7 +213,9 @@ export default function InterviewSetup() {
             <div className="udemy-card p-6 space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2">Track</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Track
+                  </label>
                   <select
                     value={track}
                     onChange={(e) => setTrack(e.target.value as LearningTrack)}
@@ -214,7 +229,9 @@ export default function InterviewSetup() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Level</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Level
+                  </label>
                   <select
                     value={level}
                     onChange={(e) => setLevel(e.target.value as InterviewLevel)}
@@ -227,10 +244,14 @@ export default function InterviewSetup() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Interview Type</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Interview Type
+                  </label>
                   <select
                     value={interviewType}
-                    onChange={(e) => setInterviewType(e.target.value as InterviewType)}
+                    onChange={(e) =>
+                      setInterviewType(e.target.value as InterviewType)
+                    }
                     className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
                   >
                     <option value="mixed">Mixed</option>
@@ -243,25 +264,35 @@ export default function InterviewSetup() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Turn Count</label>
-                  <select
+                  <label className="block text-sm font-medium mb-2">
+                    Turn Count
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
                     value={turnCount}
-                    onChange={(e) => setTurnCount(Number(e.target.value))}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      if (!Number.isFinite(next)) return;
+                      setTurnCount(
+                        Math.max(1, Math.min(100, Math.trunc(next))),
+                      );
+                    }}
                     className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
-                  >
-                    {[3, 5, 7, 10, 12].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Interviewer Style</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Interviewer Style
+                  </label>
                   <select
                     value={interviewerStyle}
-                    onChange={(e) => setInterviewerStyle(e.target.value as InterviewerStyle)}
+                    onChange={(e) =>
+                      setInterviewerStyle(e.target.value as InterviewerStyle)
+                    }
                     className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
                   >
                     <option value="supportive">Supportive</option>
@@ -271,10 +302,14 @@ export default function InterviewSetup() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Feedback Depth</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Feedback Depth
+                  </label>
                   <select
                     value={feedbackMode}
-                    onChange={(e) => setFeedbackMode(e.target.value as FeedbackMode)}
+                    onChange={(e) =>
+                      setFeedbackMode(e.target.value as FeedbackMode)
+                    }
                     className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
                   >
                     <option value="concise">Concise</option>
@@ -284,7 +319,9 @@ export default function InterviewSetup() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Target Role (optional)</label>
+                <label className="block text-sm font-medium mb-2">
+                  Target Role (optional)
+                </label>
                 <input
                   type="text"
                   value={targetRole}
@@ -308,7 +345,9 @@ export default function InterviewSetup() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Job Description Context (optional)</label>
+                <label className="block text-sm font-medium mb-2">
+                  Job Description Context (optional)
+                </label>
                 <textarea
                   value={jobDescriptionText}
                   onChange={(e) => setJobDescriptionText(e.target.value)}
@@ -319,7 +358,9 @@ export default function InterviewSetup() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Resume Summary Context (optional)</label>
+                <label className="block text-sm font-medium mb-2">
+                  Resume Summary Context (optional)
+                </label>
                 <textarea
                   value={resumeSummaryText}
                   onChange={(e) => setResumeSummaryText(e.target.value)}
@@ -357,7 +398,9 @@ export default function InterviewSetup() {
                   ))}
                 </div>
               ) : recent.length === 0 ? (
-                <p className="text-sm text-udemy-text-muted">No sessions yet.</p>
+                <p className="text-sm text-udemy-text-muted">
+                  No sessions yet.
+                </p>
               ) : (
                 <div className="space-y-2">
                   {recent.map((s) => (

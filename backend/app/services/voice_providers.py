@@ -1,9 +1,11 @@
 """Voice STT and TTS provider implementations.
 
-Three tiers:
+Two tiers:
   - browser:  No server-side audio processing; handled entirely in the browser.
-  - cloud:    Groq Whisper (STT) + Edge TTS (TTS) – near-zero cost.
-  - realtime: OpenAI Realtime API – bidirectional WebSocket audio proxy.
+  - cloud:    Groq/OpenAI Whisper (STT) + Edge or OpenAI TTS (TTS).
+
+There is no WebSocket-proxy tier: every tier funnels through the same
+STT → LLM → TTS turn orchestration in ``voice_session``.
 """
 
 from __future__ import annotations
@@ -177,6 +179,37 @@ class OpenAITTSProvider(TTSProvider):
                 resp.raise_for_status()
                 async for chunk in resp.aiter_bytes(4096):
                     yield chunk
+
+
+# ── Inert providers (browser tier) ──────────────────────────
+
+class NullSTTProvider(STTProvider):
+    """Placeholder for the browser tier, where transcription happens locally.
+
+    Raises if called so a browser-tier session cannot silently spend a
+    server-side STT request.
+    """
+
+    async def transcribe(self, audio_bytes: bytes, *, mime_type: str = "audio/webm") -> str:
+        raise RuntimeError(
+            "Server-side STT is not available on the browser tier; "
+            "transcription must happen in the browser."
+        )
+
+
+class NullTTSProvider(TTSProvider):
+    """Placeholder for the browser tier, where speech happens locally."""
+
+    async def synthesize(self, text: str) -> bytes:
+        raise RuntimeError(
+            "Server-side TTS is not available on the browser tier; "
+            "speech must be synthesized in the browser."
+        )
+
+    async def synthesize_stream(self, text: str) -> AsyncIterator[bytes]:
+        # Delegates so the raise happens on the first ``__anext__`` call, keeping
+        # this a well-formed async generator while still being inert.
+        yield await self.synthesize(text)
 
 
 # ── Factory ──────────────────────────────────────────────────

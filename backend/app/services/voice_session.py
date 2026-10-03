@@ -17,6 +17,8 @@ from app.config import get_settings
 from app.schemas.models import LLMConfigRequest
 from app.services.llm_client import LLMClient
 from app.services.voice_providers import (
+    NullSTTProvider,
+    NullTTSProvider,
     STTProvider,
     TTSProvider,
     create_stt_provider,
@@ -38,8 +40,8 @@ class VoiceSession:
         session_id: str = "",
         user_identity: dict | None = None,
         llm_config: LLMConfigRequest | None = None,
-        system_prompt: str = "",
         conversation_history: list[dict[str, str]] | None = None,
+        system_prompt: str | None = None,
     ):
         self.llm = llm_client
         self.stt = stt
@@ -48,6 +50,9 @@ class VoiceSession:
         self.session_id = session_id
         self.user_identity = user_identity or {}
         self.llm_config = llm_config
+        # The persona is server-owned. ``system_prompt`` exists for server-side
+        # callers only (it is never populated from a wire message); when omitted
+        # the session type's default persona is used.
         self.system_prompt = system_prompt or self._default_system_prompt()
         self.conversation_history: list[dict[str, str]] = conversation_history or []
         self.turn_index = 0
@@ -166,22 +171,22 @@ class VoiceSession:
 
     async def _call_llm(self, user_text: str) -> str:
         """Send conversation to LLM and get response."""
-        # Build messages with system prompt + history (keep last 10 turns)
-        messages = [{"role": "system", "content": self.system_prompt}]
-
-        # Add trimmed history
-        history_window = self.conversation_history[-20:]  # last 10 turns = 20 messages
-        messages.extend(history_window)
-
-        # Build prompt string for LLMClient
-        prompt = "\n".join(
-            f"{m['role'].upper()}: {m['content']}" for m in messages
-        )
+        # Build the user turn from the trimmed history (last 10 turns = 20
+        # messages). The persona is sent as a real system message, never
+        # flattened into the user text.
+        history_window = self.conversation_history[-20:]
+        parts = [f"{m['role'].upper()}: {m['content']}" for m in history_window]
+        if not parts:
+            parts.append(f"USER: {user_text}")
+        prompt = "\n".join(parts)
 
         result = await self.llm.completion(
             prompt=prompt,
             llm_config=self.llm_config,
             user_identity=self.user_identity,
+            system=self.system_prompt,
+            task="final",
+            max_tokens_cap=None,
         )
 
         if result.get("success") and result.get("analysis"):
@@ -199,6 +204,10 @@ class VoiceSession:
         self.turn_index = 0
 
 
+class UnsupportedVoiceTierError(ValueError):
+    """Raised when a voice tier is not one of the implemented tiers."""
+
+
 def create_voice_session(
     llm_client: LLMClient,
     tier: str,
@@ -206,24 +215,30 @@ def create_voice_session(
     session_id: str = "",
     user_identity: dict | None = None,
     llm_config: LLMConfigRequest | None = None,
-    system_prompt: str = "",
+    system_prompt: str | None = None,
 ) -> VoiceSession:
-    """Factory to create a VoiceSession with the right STT/TTS for the given tier."""
+    """Factory to create a VoiceSession with the right STT/TTS for the given tier.
+
+    ``system_prompt`` is a server-side-only override. The WebSocket router never
+    passes it, so a client cannot redefine the assistant's persona.
+    """
     settings = get_settings()
 
-    if tier == "realtime":
-        # For OpenAI Realtime, we still need fallback STT/TTS for the proxy gaps
-        stt = create_stt_provider("openai", api_key=os.getenv("OPENAI_API_KEY", ""))
-        tts = create_tts_provider("openai", voice="alloy", api_key=os.getenv("OPENAI_API_KEY", ""))
-    elif tier == "cloud":
+    if tier == "cloud":
+        # Mirror the STT key selection for TTS: only OpenAI TTS needs a key, and
+        # omitting it makes every cloud-tier synthesis fail at request time.
         stt_key = os.getenv("GROQ_API_KEY", "") if settings.voice_stt_provider == "groq" else os.getenv("OPENAI_API_KEY", "")
         stt = create_stt_provider(settings.voice_stt_provider, api_key=stt_key, model=settings.voice_stt_model)
-        tts = create_tts_provider(settings.voice_tts_provider, voice=settings.voice_tts_voice)
+        tts_key = os.getenv("OPENAI_API_KEY", "") if settings.voice_tts_provider == "openai" else ""
+        tts = create_tts_provider(settings.voice_tts_provider, voice=settings.voice_tts_voice, api_key=tts_key)
+    elif tier == "browser":
+        # Server-side STT/TTS are genuinely unused on this tier: the browser
+        # handles audio locally. Inert providers make an accidental server-side
+        # call fail loudly instead of quietly spending an STT/TTS request.
+        stt = NullSTTProvider()
+        tts = NullTTSProvider()
     else:
-        # Browser tier: server-side STT/TTS not used, but we create no-op providers
-        # that won't be called. The browser handles everything locally.
-        stt = create_stt_provider("groq", api_key=os.getenv("GROQ_API_KEY", ""))
-        tts = create_tts_provider("edge", voice=settings.voice_tts_voice)
+        raise UnsupportedVoiceTierError(f"Unknown voice tier: {tier!r}")
 
     return VoiceSession(
         llm_client=llm_client,

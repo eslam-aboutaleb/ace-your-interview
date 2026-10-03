@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
-import json
+import inspect
 import logging
 import math
 import re
 from typing import Any, AsyncIterator, Optional
 
 from app.schemas.models import LLMConfigRequest, TopicDetail
-from app.services.llm_client import LLMClient
+from app.services.llm_client import (
+    TERMINAL_ERROR_CODES,
+    LLMClient,
+    parse_json_object,
+)
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.mcp_gateway import MCPGateway
+from app.services.prompt_blocks import (
+    UNTRUSTED_CLAUSE,
+    render_contract,
+    untrusted_block,
+)
 from app.services.topic_catalog import (
     PROBLEM_SOLVING_DEFAULT_LANGUAGE,
     PROBLEM_SOLVING_DESCRIPTION,
@@ -29,35 +38,29 @@ _MAX_ATTEMPTS = 4
 _MIN_CONTENT_CHARS = 90
 _STREAM_BATCH_SIZE = 12
 _MAX_STREAM_HEADINGS_CONTEXT = 120
+_MAX_TOKENS_CAP = 1500
+_INSTRUCTOR_SYSTEM_PROMPT = (
+    "You are an expert programming interview instructor. You write language-specific "
+    "problem-solving curricula that move from beginner to advanced, and you always "
+    "respond with a single JSON object and never with prose."
+)
 
 
-def _parse_json_object(raw: str) -> dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
+def _supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
+    """Drop call options ``client.completion`` does not accept.
+
+    ``LLMClient`` takes the full Stage-2 option set, but the client is injected,
+    so a narrower implementation may be in use. Filter against the bound
+    signature rather than assuming one shape.
+    """
     try:
-        payload = json.loads(text)
-        return payload if isinstance(payload, dict) else {}
-    except json.JSONDecodeError:
-        pass
+        params = inspect.signature(client.completion).parameters
+    except (TypeError, ValueError):
+        return dict(options)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return options
+    return {key: value for key, value in options.items() if key in params}
 
-    fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-    if fenced:
-        try:
-            payload = json.loads(fenced.group(1))
-            return payload if isinstance(payload, dict) else {}
-        except json.JSONDecodeError:
-            pass
-
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            payload = json.loads(text[start : end + 1])
-            return payload if isinstance(payload, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
 
 
 def _normalise_language(language: str) -> str:
@@ -190,42 +193,6 @@ def _build_raw_content(title: str, description: str, sections: list[dict[str, st
     return "\n".join(lines).strip()
 
 
-def _build_prompt(language: str, target_sections: int, mcp_context: str = "") -> str:
-    mcp_block = (
-        f"\n\nExternal context (optional, use only if factual and useful):\n{mcp_context[:2500]}"
-        if mcp_context
-        else ""
-    )
-    return f"""You are an expert programming interview instructor.
-
-Create a complete problem-solving curriculum for language "{language}".
-Return ONLY valid JSON object:
-{{
-  "title": "Problem Solving and Algorithms ({language})",
-  "description": "One short paragraph",
-  "track": "backend",
-  "levels": ["junior", "mid", "senior"],
-  "sections": [
-    {{"heading": "section name", "content": "concise but useful explanation"}}
-  ]
-}}
-
-Rules:
-- Produce exactly {target_sections} sections.
-- Order sections from beginner (junior) to intermediate (mid) to advanced (senior).
-- Every heading must be concrete and interview-relevant (not generic).
-- Every content field should include:
-  - problem-reading strategy,
-  - algorithm approach intuition,
-  - complexity tradeoff guidance,
-  - common mistakes.
-- Keep each content concise and practical.
-- Use language-specific framing for {language} idioms and tradeoffs.
-- No markdown, no prose outside JSON.
-{mcp_block}
-"""
-
-
 def _build_stream_batch_prompt(
     *,
     language: str,
@@ -235,46 +202,48 @@ def _build_stream_batch_prompt(
     existing_headings: list[str],
     mcp_context: str = "",
 ) -> str:
+    """Build the user turn. The instructor persona lives in ``system`` (Stage 2.1).
+
+    The rules here carry the whole intent of the deleted non-streaming
+    ``_build_prompt``: exact batch size, level progression, interview-relevance
+    per heading, and the four content dimensions. The coverage mandate below is
+    the part the live prompt used to be missing.
+    """
     start_no = start_index + 1
     end_no = min(target_sections, start_index + batch_size)
     level_start = _level_for_index(start_index, target_sections)
     level_end = _level_for_index(max(start_index, end_no - 1), target_sections)
-    existing_blob = "\n".join([f"- {h}" for h in existing_headings[-_MAX_STREAM_HEADINGS_CONTEXT:]])
-    existing_block = existing_blob if existing_blob else "- (none yet)"
-    mcp_block = (
-        f"\n\nExternal context (optional, use only if factual and useful):\n{mcp_context[:2500]}"
-        if mcp_context
-        else ""
+    existing_blob = "\n".join(
+        [f"- {h}" for h in existing_headings[-_MAX_STREAM_HEADINGS_CONTEXT:]]
     )
-    return f"""You are an expert programming interview instructor.
-
-Generate ONLY the next batch of a language-specific problem-solving roadmap for "{language}".
-You are generating sections {start_no} to {end_no} of {target_sections}.
-Expected level progression for this batch: {level_start} -> {level_end}.
-
-Return ONLY valid JSON object:
-{{
-  "title": "Problem Solving and Algorithms ({language})",
-  "description": "One short paragraph",
+    existing_block = existing_blob if existing_blob else "- (none yet)"
+    mcp_block = untrusted_block("external_context", mcp_context, 2500)
+    contract = render_contract(
+        schema_label="Return ONLY valid JSON object with this exact schema",
+        schema_block="""{
+  "title": "string",
+  "description": "string",
   "sections": [
-    {{"heading": "section name", "content": "concise but useful explanation"}}
+    {"heading": "section name", "content": "concise but useful explanation"}
   ]
-}}
-
-Rules:
-- Return exactly {batch_size} sections.
-- Do NOT repeat or paraphrase these existing headings:
-{existing_block}
-- Every heading must be concrete and interview-relevant.
-- Every content field should include:
-  - problem-reading strategy,
-  - algorithm approach intuition,
-  - complexity tradeoff guidance,
-  - common mistakes.
-- Keep content concise and practical.
-- Use language-specific framing for {language} idioms and tradeoffs.
-- No markdown and no prose outside JSON.
-{mcp_block}
+}""",
+        rules=[
+            f"sections length must be exactly {batch_size}.",
+            f"These sections correspond to positions {start_no}..{end_no} of {target_sections}.",
+            f"Expected level progression in this batch: {level_start} -> {level_end}.",
+            "Do not repeat or paraphrase these existing headings:",
+            existing_block,
+            "Every heading must be concrete and interview-relevant, not a placeholder.",
+            f'Every heading must be genuinely specific to {language}.',
+            "Every content field must cover problem-reading strategy, algorithm approach intuition, complexity tradeoff guidance, and common mistakes.",
+            "Keep content concise and practical.",
+            f"Use {language}-specific framing for idioms and tradeoffs, not generic advice.",
+            "Across the whole roadmap the batches together must cover fundamentals, data structures, algorithmic patterns, and interview communication.",
+            "No markdown and no prose outside JSON.",
+            UNTRUSTED_CLAUSE,
+        ],
+    )
+    return f"""{contract}{mcp_block}
 """
 
 
@@ -286,11 +255,18 @@ def _normalise_batch_sections(
     start_index: int,
     batch_size: int,
     seen_headings: set[str],
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], set[str]]:
+    """Normalise a batch and report the headings it consumed.
+
+    The consumed headings are returned instead of being committed here so the
+    caller can commit them only once the batch is known good; a rejected
+    attempt must not poison the de-dup set for the next attempt.
+    """
     _ = language
     out: list[dict[str, str]] = []
+    consumed: set[str] = set()
     if not isinstance(sections, list):
-        return out
+        return out, consumed
 
     for item in sections:
         if len(out) >= batch_size:
@@ -306,9 +282,9 @@ def _normalise_batch_sections(
         key = heading.lower()
         if key in seen_headings:
             continue
-        seen_headings.add(key)
+        consumed.add(key)
         out.append({"heading": heading, "content": content[:3000]})
-    return out
+    return out, consumed
 
 
 def _fallback_batch_sections(
@@ -471,30 +447,60 @@ class ProblemSolvingGenerator:
                 mcp_context=mcp_context,
             )
             batch_sections: list[dict[str, str]] = []
+            accepted_headings: set[str] = set()
+            attempt_title = title
+            attempt_description = description
             for _ in range(_MAX_ATTEMPTS):
                 result = await self.llm.completion(
                     prompt,
                     llm_config,
                     user_identity=user_identity,
+                    **_supported_options(
+                        self.llm,
+                        {
+                            "task": "final",
+                            "system": _INSTRUCTOR_SYSTEM_PROMPT,
+                            "structured": True,
+                            "max_tokens_cap": _MAX_TOKENS_CAP,
+                        },
+                    ),
                 )
                 raise_if_policy_blocked_result(result)
                 if not result.get("success"):
+                    # A truncated response or an exhausted budget cannot be fixed
+                    # by re-sending the identical prompt.
+                    if str(result.get("error_code") or "") in TERMINAL_ERROR_CODES:
+                        break
                     continue
-                parsed = _parse_json_object(str(result.get("analysis", "")))
+                parsed = parse_json_object(str(result.get("analysis", "")))
                 if not parsed:
                     continue
-                title = str(parsed.get("title", "")).strip() or title
-                description = str(parsed.get("description", "")).strip() or description
-                batch_sections = _normalise_batch_sections(
+                attempt_title = str(parsed.get("title", "")).strip() or title
+                attempt_description = str(parsed.get("description", "")).strip() or description
+                # Each attempt de-dupes against its own copy so a rejected
+                # attempt leaves no trace in the shared heading set.
+                attempt_sections, attempt_headings = _normalise_batch_sections(
                     sections=parsed.get("sections"),
                     target_sections=target,
                     language=language,
                     start_index=start_index,
                     batch_size=batch_size,
-                    seen_headings=seen_headings,
+                    seen_headings=set(seen_headings),
                 )
-                if len(batch_sections) >= batch_size:
+                if len(attempt_sections) >= batch_size:
+                    batch_sections = attempt_sections
+                    accepted_headings = attempt_headings
                     break
+                # Keep the longest partial batch seen so far so a later failure
+                # does not discard work that already validated.
+                if len(attempt_sections) > len(batch_sections):
+                    batch_sections = attempt_sections
+                    accepted_headings = attempt_headings
+
+            if len(batch_sections) >= batch_size:
+                title = attempt_title
+                description = attempt_description
+                seen_headings.update(accepted_headings)
 
             if len(batch_sections) < batch_size:
                 logger.warning(

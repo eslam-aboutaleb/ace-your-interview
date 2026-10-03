@@ -2,7 +2,7 @@
  * useVoice hook — connects the Zustand store to the voice services.
  *
  * Provides a single `useVoice()` hook that components can call to control
- * voice interactions regardless of the active tier (browser / cloud / realtime).
+ * voice interactions regardless of the active tier (browser / cloud).
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -101,7 +101,6 @@ export function useVoice() {
       sessionType: VoiceSessionType,
       opts?: {
         sessionId?: string;
-        systemPrompt?: string;
         tier?: VoiceTier;
       },
     ) => {
@@ -118,7 +117,7 @@ export function useVoice() {
         return;
       }
 
-      // Cloud / Realtime tier uses WebSocket
+      // Cloud tier uses WebSocket
       const ws = getWsService();
       try {
         await ws.connect();
@@ -127,7 +126,6 @@ export function useVoice() {
           tier,
           sessionType,
           sessionId: opts?.sessionId,
-          systemPrompt: opts?.systemPrompt,
           llmConfig: { provider, model },
         });
       } catch (err: any) {
@@ -150,7 +148,7 @@ export function useVoice() {
       return;
     }
 
-    // Cloud/realtime: record audio then send when stopped
+    // Cloud: record audio then send when stopped
     try {
       micRef.current = new MicRecorder();
       await micRef.current.start();
@@ -174,7 +172,7 @@ export function useVoice() {
       return;
     }
 
-    // Cloud/realtime: stop mic, encode, send via WS
+    // Cloud: stop mic, encode, send via WS
     if (micRef.current) {
       const blob = await micRef.current.stop();
       store.setRecording(false);

@@ -13,13 +13,18 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from app.config import get_settings
-from app.dependencies import is_admin_identity, require_admin, require_auth
+from app.dependencies import (
+    is_admin_identity,
+    is_dev_auth_bypass_enabled,
+    require_admin,
+    require_auth,
+)
 from app.schemas.models import (
     LLMConfigRequest,
     VoiceConfigResponse,
     VoiceSettingsUpdateRequest,
-    VoiceTierEnum,
 )
+from app.services.auth import decode_jwt_token
 from app.services.llm_client import LLMClient
 from app.services.voice_session import VoiceSession, create_voice_session
 
@@ -28,6 +33,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
 _llm_client: LLMClient | None = None
+
+# Close code for a connection that exhausted its per-connection LLM turn budget.
+# Application-defined range (4000-4999), distinct from 4001 (unauthenticated).
+_TURN_BUDGET_CLOSE_CODE = 4429
 
 
 def init(llm_client: LLMClient):
@@ -93,19 +102,24 @@ async def update_voice_settings(
 
 
 async def _ws_authenticate(token: str) -> dict | None:
-    """Validate session token from WebSocket query params.
+    """Validate a session token presented as a WebSocket query parameter.
 
-    Re-uses the same JWT validation logic as require_auth but works
-    outside of the Depends() chain.
+    Uses the same ``decode_jwt_token`` helper as the HTTP dependency chain so
+    the WebSocket and HTTP auth paths cannot diverge.
     """
     if not token:
         return None
     try:
-        import jwt as pyjwt
-        settings = get_settings()
-        payload = pyjwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-        return {"user": payload.get("sub", ""), "provider": payload.get("provider", "")}
-    except Exception:
+        payload = decode_jwt_token(token)
+        return {"user": payload["sub"], "provider": payload["provider"]}
+    except Exception as exc:
+        # WARNING + traceback: a swallowed auth failure here means every voice
+        # WebSocket silently rejects every user, which must never be invisible.
+        logger.warning(
+            "Voice WebSocket token validation failed: %s",
+            exc,
+            exc_info=True,
+        )
         return None
 
 
@@ -115,6 +129,36 @@ async def _ws_authenticate_from_cookie(websocket: WebSocket) -> dict | None:
     if not token:
         return None
     return await _ws_authenticate(token)
+
+
+async def _consume_turn_budget(
+    websocket: WebSocket,
+    *,
+    turns_used: int,
+    max_turns: int,
+) -> bool:
+    """Return True when the connection may spend another LLM turn.
+
+    WebSockets bypass the HTTP rate-limit middleware, so this is the only thing
+    bounding LLM spend per connection. On exhaustion it emits an error frame and
+    closes with :data:`_TURN_BUDGET_CLOSE_CODE`, and returns False so the caller
+    stops reading from a closed socket.
+    """
+    if max_turns <= 0 or turns_used < max_turns:
+        return True
+
+    await websocket.send_json({
+        "type": "error",
+        "message": (
+            f"Turn budget exhausted: this connection has used its limit of "
+            f"{max_turns} LLM turns. Reconnect to start a new session."
+        ),
+    })
+    await websocket.close(
+        code=_TURN_BUDGET_CLOSE_CODE,
+        reason="LLM turn budget exhausted",
+    )
+    return False
 
 
 @router.websocket("/stream")
@@ -127,7 +171,7 @@ async def voice_stream(
     Protocol:
         Client → Server:
             1. {"type": "start", "tier": "cloud", "session_type": "chat",
-                "session_id": "...", "system_prompt": "...",
+                "session_id": "...",
                 "llm_config": {"provider": "groq", "model": "..."}}
             2. {"type": "audio", "data": "<base64 audio>", "mime": "audio/webm"}
             3. {"type": "text", "content": "typed text fallback"}
@@ -139,6 +183,10 @@ async def voice_stream(
             3. {"type": "response", "text": "...", "audio": "<base64 mp3>",
                 "latency": {"stt_ms": .., "llm_ms": .., "tts_ms": .., "total_ms": ..}}
             4. {"type": "error", "message": "..."}
+
+    Each connection is limited to ``settings.voice_max_turns_per_connection``
+    LLM-producing turns; exceeding it sends ``{"type": "error"}`` and closes
+    with code 4429.
     """
     settings = get_settings()
 
@@ -149,9 +197,13 @@ async def voice_stream(
     # Auth: try token query param first, then cookie
     user_identity = await _ws_authenticate(token) or await _ws_authenticate_from_cookie(websocket)
 
-    # Dev bypass
-    if not user_identity and settings.environment.strip().lower() == "development":
-        user_identity = {"user": "dev-user", "provider": "dev"}
+    # Dev bypass — gated on the same four conditions as require_auth.
+    if not user_identity and is_dev_auth_bypass_enabled(
+        settings=settings,
+        request_host=websocket.url.hostname or "",
+        client_host=websocket.client.host if websocket.client else "",
+    ):
+        user_identity = {"user": "local-dev", "provider": "local"}
 
     if not user_identity:
         await websocket.close(code=4001, reason="Authentication required")
@@ -166,6 +218,11 @@ async def voice_stream(
 
     session: VoiceSession | None = None
     session_id = ""
+    # HTTP middleware rate limiting does not cover WebSockets, so each connection
+    # carries its own budget of LLM-producing turns (audio + text). A value <= 0
+    # disables the budget.
+    llm_turns_used = 0
+    max_llm_turns = int(settings.voice_max_turns_per_connection or 0)
 
     try:
         while True:
@@ -190,7 +247,6 @@ async def voice_stream(
 
                 session_type = msg.get("session_type", "chat")
                 session_id = msg.get("session_id", str(uuid.uuid4()))
-                system_prompt = msg.get("system_prompt", "")
                 llm_config = None
                 if msg.get("llm_config"):
                     try:
@@ -198,6 +254,8 @@ async def voice_stream(
                     except Exception:
                         llm_config = None
 
+                # The persona is server-owned: a client-supplied system_prompt is
+                # ignored so the wire cannot redefine what the assistant is.
                 session = create_voice_session(
                     llm_client=_llm_client,
                     tier=tier,
@@ -205,7 +263,6 @@ async def voice_stream(
                     session_id=session_id,
                     user_identity=user_identity,
                     llm_config=llm_config,
-                    system_prompt=system_prompt,
                 )
 
                 await websocket.send_json({
@@ -221,6 +278,15 @@ async def voice_stream(
                         "message": "Session not started. Send {type: 'start'} first.",
                     })
                     continue
+
+                if not await _consume_turn_budget(
+                    websocket,
+                    turns_used=llm_turns_used,
+                    max_turns=max_llm_turns,
+                ):
+                    return
+
+                llm_turns_used += 1
 
                 audio_b64 = msg.get("data", "")
                 mime = msg.get("mime", "audio/webm")
@@ -277,6 +343,15 @@ async def voice_stream(
                 text = msg.get("content", "").strip()
                 if not text:
                     continue
+
+                if not await _consume_turn_budget(
+                    websocket,
+                    turns_used=llm_turns_used,
+                    max_turns=max_llm_turns,
+                ):
+                    return
+
+                llm_turns_used += 1
 
                 session.conversation_history.append({"role": "user", "content": text})
 
