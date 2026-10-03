@@ -58,7 +58,11 @@ class LLMServiceAccess:
                     users = []
                     seen: set[str] = set()
                     for raw in data["users"]:
-                        token = _normalise_token(str(raw))
+                        # Skip nulls/objects outright: `str(None)` would admit a
+                        # literal "none" identity into the allowlist.
+                        if not isinstance(raw, str):
+                            continue
+                        token = _normalise_token(raw)
                         if not token or token in seen:
                             continue
                         seen.add(token)

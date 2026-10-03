@@ -275,7 +275,12 @@ class ProgressStore:
         ``set_summary`` so a summary write can never be lost to a raw write.
         """
         now = _utc_now_iso()
-        clean_title = str(topic_title or "").strip() or topic_id
+        # A caller that omits `topic_title` must not clobber the stored human
+        # title with the opaque topic id, so the ON CONFLICT CASE guard below
+        # is only reachable when we pass the *raw* title through. The insert
+        # still needs a non-empty value for a brand-new row, hence the
+        # `or topic_id` applied only at the parameter site.
+        clean_title = str(topic_title or "").strip()
         clean_language = str(preferred_language or "").strip()
         stats = attempt_stats if isinstance(attempt_stats, dict) else {}
         with self._lock:
@@ -288,6 +293,9 @@ class ProgressStore:
                     existing["questions_asked_json"] if existing else "[]",
                     questions,
                 )
+                # Seed a brand-new row with the topic id, but pass '' for an
+                # update so the SQL CASE guard preserves the stored title.
+                insert_title = clean_title if existing else (clean_title or topic_id)
                 self._conn.execute(
                     """
                     INSERT INTO topic_progress(
@@ -315,7 +323,7 @@ class ProgressStore:
                     (
                         user_id,
                         topic_id,
-                        clean_title,
+                        insert_title,
                         _dump(merged),
                         _dump(self._clean_sections(sections)),
                         _dump(stats),

@@ -3072,7 +3072,8 @@ def _validate_quiz_item(
     diff = str(item.get("difficulty", "medium")).lower()
     if diff not in _VALID_DIFFICULTIES:
         return False, "invalid_difficulty"
-    if difficulty and diff != difficulty:
+    requested = str(difficulty or "").strip().lower()
+    if requested and diff != requested:
         return False, "difficulty_mismatch"
     item["difficulty"] = diff
     item["type"] = q_type
@@ -3103,12 +3104,13 @@ def _build_fallback_quiz_items(
     out: list[dict[str, Any]] = []
     seen_norm = {_normalise_question(q) for q in _normalise_existing_questions(existing_questions)}
     guard = 0
+    attempt = 0
     while len(out) < count and guard < (count * 12):
-        idx = len(out) + guard
-        topic = topics_content[idx % len(topics_content)]
+        topic = topics_content[attempt % len(topics_content)]
         topic_id = str(topic.get("id", "")).strip()
         if not topic_id:
             guard += 1
+            attempt += 1
             continue
         topic_title = str(topic.get("title", topic_id)).strip() or topic_id
         source_scope = str(topic.get("content", "")).strip()
@@ -3118,7 +3120,9 @@ def _build_fallback_quiz_items(
         if len(source_quote) < 8:
             source_quote = f"{topic_title} interview fundamentals and tradeoffs."
 
-        use_mcq = "mcq" in allowed_types and ("true_false" not in allowed_types or idx % 2 == 0)
+        use_mcq = "mcq" in allowed_types and (
+            "true_false" not in allowed_types or len(out) % 2 == 0
+        )
         if use_mcq:
             stems = [
                 "For {topic_title}, which approach best balances correctness, maintainability, and interview communication under constraints?",
@@ -3126,7 +3130,7 @@ def _build_fallback_quiz_items(
                 "When discussing {topic_title}, which strategy most clearly demonstrates tradeoff-driven thinking?",
                 "For {topic_title}, which interviewing approach is most likely to produce a robust and explainable solution?",
             ]
-            question = stems[idx % len(stems)].format(topic_title=topic_title)
+            question = stems[attempt % len(stems)].format(topic_title=topic_title)
             choices = [
                 {"label": "A", "text": "Clarify constraints, choose a justified approach, and explain tradeoffs."},
                 {"label": "B", "text": "Start coding immediately and defer reasoning until the end."},
@@ -3142,7 +3146,7 @@ def _build_fallback_quiz_items(
                 "True or false in a {topic_title} interview: skipping assumptions weakens the quality of technical reasoning.",
                 "For {topic_title}, true or false: discussing tradeoffs early usually improves answer clarity and credibility.",
             ]
-            question = stems[idx % len(stems)].format(topic_title=topic_title)
+            question = stems[attempt % len(stems)].format(topic_title=topic_title)
             choices = [
                 {"label": "A", "text": "True"},
                 {"label": "B", "text": "False"},
@@ -3153,6 +3157,7 @@ def _build_fallback_quiz_items(
         q_norm = _normalise_question(question)
         if not q_norm or q_norm in seen_norm:
             guard += 1
+            attempt += 1
             continue
         seen_norm.add(q_norm)
         item = {
@@ -3174,12 +3179,13 @@ def _build_fallback_quiz_items(
             item,
             allowed_topics=allowed_topics,
             allowed_types=allowed_types,
-            difficulty=difficulty,
+            difficulty=diff,
             level=level,
         )
         if valid:
             out.append(item)
         guard += 1
+        attempt += 1
 
     return out[:count]
 
@@ -4639,6 +4645,25 @@ class QuestionGenerator:
             validator=validator,
             existing_questions=additional_existing_questions,
         )
+
+        if len(raw_items) < count:
+            # Parity with the streaming route: a terminal failure or an
+            # exhausted retry budget still serves a deterministic batch
+            # instead of an empty quiz.
+            existing_texts = [
+                *(additional_existing_questions or []),
+                *[str(item.get("question", "")) for item in raw_items],
+            ]
+            raw_items.extend(
+                _build_fallback_quiz_items(
+                    topics_content=topics_content,
+                    count=count - len(raw_items),
+                    question_types=question_types,
+                    difficulty=difficulty,
+                    level=level,
+                    existing_questions=existing_texts,
+                )
+            )
 
         questions = []
         for item in raw_items:

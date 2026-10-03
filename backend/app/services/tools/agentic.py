@@ -121,8 +121,15 @@ class ToolCall:
                     arguments = function.get("arguments")
         else:
             call_id = str(getattr(payload, "id", "") or f"call_{index}")
-            name = str(getattr(payload, "name", "") or "")
             function = getattr(payload, "function", None)
+            # LiteLLM returns `ChatCompletionMessageToolCall` objects, which
+            # carry the name ONLY on `.function.name` — there is no top-level
+            # `.name` attribute. Reading only `payload.name` here would discard
+            # every real tool call and silently exit the loop with
+            # `no_tool_calls`, so mirror the dict branch's fallback.
+            name = str(getattr(payload, "name", "") or "")
+            if not name and function is not None:
+                name = str(getattr(function, "name", "") or "")
             arguments = getattr(function, "arguments", None) if function is not None else None
         if not name:
             return None
