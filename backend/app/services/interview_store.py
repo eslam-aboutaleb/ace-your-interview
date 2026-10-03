@@ -69,6 +69,7 @@ class InterviewStore:
                     asked_questions_json TEXT NOT NULL,
                     current_question TEXT NOT NULL,
                     memory_summary TEXT NOT NULL DEFAULT '',
+                    company TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -122,6 +123,7 @@ class InterviewStore:
                 "interviewer_style": "TEXT NOT NULL DEFAULT 'neutral'",
                 "feedback_mode": "TEXT NOT NULL DEFAULT 'concise'",
                 "memory_summary": "TEXT NOT NULL DEFAULT ''",
+                "company": "TEXT NOT NULL DEFAULT ''",
             }
             for column, ddl in required_columns.items():
                 if column not in existing_columns:
@@ -219,6 +221,7 @@ class InterviewStore:
             "current_question": row["current_question"],
             "memory_summary": row["memory_summary"] if "memory_summary" in row.keys() else "",
             "report_ready": bool(int(row["report_ready"])) if "report_ready" in row.keys() else False,
+            "company": row["company"] if "company" in row.keys() else "",
         }
 
     def create_session(
@@ -235,6 +238,7 @@ class InterviewStore:
         focus_areas: list[str],
         interviewer_style: str = _DEFAULT_INTERVIEWER_STYLE,
         feedback_mode: str = _DEFAULT_FEEDBACK_MODE,
+        company: str = "",
     ) -> dict[str, Any]:
         now = _utc_now_iso()
         session_id = f"is_{uuid.uuid4().hex[:16]}"
@@ -250,8 +254,9 @@ class InterviewStore:
                         target_role, interviewer_style, feedback_mode,
                         job_description_text, resume_summary_text,
                         focus_areas_json, asked_questions_json,
-                        current_question, memory_summary, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        current_question, memory_summary, company,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -270,6 +275,7 @@ class InterviewStore:
                         self._dumps([]),
                         "",
                         "",
+                        company.strip(),
                         now,
                         now,
                     ),
@@ -291,6 +297,7 @@ class InterviewStore:
             "current_question": "",
             "memory_summary": "",
             "report_ready": False,
+            "company": company.strip(),
         }
 
     def list_sessions(self, *, user_id: str, limit: int = 20, offset: int = 0) -> dict[str, Any]:
