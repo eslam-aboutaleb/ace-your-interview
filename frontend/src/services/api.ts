@@ -41,6 +41,11 @@ import type {
   LearningReviewResponse,
   ForecastResponse,
   CalibrationResponse,
+  DocumentUploadResponse,
+  DocumentDetail,
+  DocumentListResponse,
+  ChatAskRequest,
+  ChatAskResponse,
   ReviewQueueResponse,
   StudyPlanResponse,
   WeakAreasResponse,
@@ -76,11 +81,6 @@ import type {
   SaveProgressPayload,
   TopicProgressDocument,
   TopicProgressListResponse,
-  DocumentUploadResponse,
-  DocumentDetail,
-  DocumentListResponse,
-  ChatAskRequest,
-  ChatAskResponse,
 } from "@/types";
 
 const api = axios.create({
@@ -1480,6 +1480,27 @@ export async function submitCardReview(
   const { data } = await api.post<LearningReviewResponse>(
     "/learning/review",
     req,
+  );
+  return data;
+}
+
+export async function fetchForecast(
+  days = 7,
+): Promise<ForecastResponse> {
+  const { data } = await api.get<ForecastResponse>(
+    "/learning/forecast",
+    { params: { days } },
+  );
+  return data;
+}
+
+export async function fetchCalibration(): Promise<CalibrationResponse> {
+  const { data } = await api.get<CalibrationResponse>(
+    "/learning/calibration",
+  );
+  return data;
+}
+
 // ── Documents + RAG Chat ─────────────────────────────
 export async function fetchDocuments(): Promise<DocumentListResponse> {
   const { data } = await api.get<DocumentListResponse>("/documents");
@@ -1495,12 +1516,6 @@ export async function fetchDocument(
   return data;
 }
 
-export async function fetchForecast(
-  days = 7,
-): Promise<ForecastResponse> {
-  const { data } = await api.get<ForecastResponse>(
-    "/learning/forecast",
-    { params: { days } },
 export async function uploadDocument(
   file: File,
   onProgress?: (percent: number) => void,
@@ -1521,9 +1536,6 @@ export async function uploadDocument(
   return data;
 }
 
-export async function fetchCalibration(): Promise<CalibrationResponse> {
-  const { data } = await api.get<CalibrationResponse>(
-    "/learning/calibration",
 export async function deleteDocument(
   documentId: string,
 ): Promise<void> {

@@ -18,6 +18,7 @@ function queueItem(overrides: Partial<ReviewQueueItem> = {}): ReviewQueueItem {
     mastery_score: 0.42,
     last_confidence: 3,
     review_bucket: 2,
+    state: "review",
     attempts: 4,
     ...overrides,
   };
@@ -34,7 +35,15 @@ describe("ReviewQueue", () => {
       total_due: 1,
     });
     vi.mocked(fetchTopics).mockResolvedValue([
-      { id: "custom-java", title: "Custom Java" },
+      {
+        id: "custom-java",
+        title: "Custom Java",
+        description: "Custom Java topics",
+        track: "backend",
+        levels: ["junior", "mid", "senior"],
+        section_count: 1,
+        estimated_questions: 10,
+      },
     ]);
 
     render(
@@ -45,8 +54,9 @@ describe("ReviewQueue", () => {
 
     expect(await screen.findByText("Custom Java")).toBeInTheDocument();
     expect(screen.getByText(/Mastery: 42%/)).toBeInTheDocument();
-    expect(screen.getByText(/Bucket: 2/)).toBeInTheDocument();
-    expect(screen.getByText(/Attempts: 4/)).toBeInTheDocument();
+    expect(screen.getByText(/State: review/)).toBeInTheDocument();
+    expect(screen.getByText(/Reps: 4/)).toBeInTheDocument();
+    expect(screen.getByText(/Lapses: 0/)).toBeInTheDocument();
   });
 
   it("shows the empty state when nothing is due", async () => {
