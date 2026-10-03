@@ -1,4 +1,4 @@
-"""Study-app FastAPI application."""
+"""Ace Your Interview FastAPI application."""
 
 from __future__ import annotations
 

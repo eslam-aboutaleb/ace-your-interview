@@ -1,4 +1,4 @@
-"""Pydantic schemas for the study-app API."""
+"""Pydantic schemas for the Ace Your Interview API."""
 
 from __future__ import annotations
 
