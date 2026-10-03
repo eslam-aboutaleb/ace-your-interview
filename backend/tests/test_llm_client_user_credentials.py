@@ -282,10 +282,18 @@ class LLMClientUserCredentialTests(unittest.TestCase):
             )
 
         self.assertTrue(result["success"])
+        # The OAuth access token is sent as a plain Bearer api_key against
+        # Google's OpenAI-compatible endpoint, NOT as a header dict. litellm's
+        # `gemini/` provider embeds api_key into the request URL as `?key=`,
+        # which silently drops a dict-shaped credential, so the client rewrites
+        # the model prefix to `openai/` and pins `api_base` instead.
+        self.assertEqual(captured.get("api_key"), "google-access-token")
         self.assertEqual(
-            captured.get("api_key"),
-            {"Authorization": "Bearer google-access-token"},
+            captured.get("api_base"),
+            "https://generativelanguage.googleapis.com/v1beta/openai",
         )
+        self.assertEqual(captured.get("model"), "openai/gemini-1.5-pro")
+        self.assertNotIsInstance(captured.get("api_key"), dict)
         self.assertEqual(result["metadata"].get("credential_source"), "user_account")
 
 

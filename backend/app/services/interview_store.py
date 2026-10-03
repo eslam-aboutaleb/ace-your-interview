@@ -11,10 +11,55 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_INTERVIEWER_STYLE = "neutral"
 _DEFAULT_FEEDBACK_MODE = "concise"
+
+#: Fallbacks for the interview-memory limits. The settings object is the source
+#: of truth; these only keep a malformed/zero setting from disabling memory.
+DEFAULT_MEMORY_SUMMARY_MAX_CHARS = 3000
+DEFAULT_MEMORY_VERBATIM_TURNS = 4
+DEFAULT_MEMORY_ANSWER_EXCERPT_CHARS = 320
+
+
+def _positive_int(value: Any, fallback: int, *, minimum: int = 1) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, parsed)
+
+
+def memory_summary_limit() -> int:
+    """The one digest ceiling for the interview memory (Stage 3.2).
+
+    The router and this store both cap here, so a digest cannot be written at
+    one length and rendered at another.
+    """
+    return _positive_int(
+        getattr(get_settings(), "memory_summary_max_chars", DEFAULT_MEMORY_SUMMARY_MAX_CHARS),
+        DEFAULT_MEMORY_SUMMARY_MAX_CHARS,
+    )
+
+
+def memory_verbatim_turn_count() -> int:
+    """How many recent turns are kept verbatim alongside the digest."""
+    return _positive_int(
+        getattr(get_settings(), "memory_verbatim_turns", DEFAULT_MEMORY_VERBATIM_TURNS),
+        DEFAULT_MEMORY_VERBATIM_TURNS,
+        minimum=0,
+    )
+
+
+def memory_answer_excerpt_limit() -> int:
+    """Per-turn answer excerpt length inside the verbatim window."""
+    return _positive_int(
+        getattr(get_settings(), "memory_answer_excerpt_chars", DEFAULT_MEMORY_ANSWER_EXCERPT_CHARS),
+        DEFAULT_MEMORY_ANSWER_EXCERPT_CHARS,
+    )
 
 
 class TurnConflictError(Exception):
@@ -122,12 +167,91 @@ class InterviewStore:
                 "interviewer_style": "TEXT NOT NULL DEFAULT 'neutral'",
                 "feedback_mode": "TEXT NOT NULL DEFAULT 'concise'",
                 "memory_summary": "TEXT NOT NULL DEFAULT ''",
+                # Stage 3.2: `memory_digest` is the compacted digest that replaced
+                # append-and-truncate; `memory_summary` is kept as its legacy
+                # read alias so existing prompts and clients keep working.
+                "memory_digest": "TEXT NOT NULL DEFAULT ''",
+                "memory_window_json": "TEXT NOT NULL DEFAULT '[]'",
             }
             for column, ddl in required_columns.items():
                 if column not in existing_columns:
                     self._conn.execute(f"ALTER TABLE interview_sessions ADD COLUMN {column} {ddl}")
 
+            self._migrate_interview_memory()
             self._migrate_interview_turns()
+
+    def _migrate_interview_memory(self) -> None:
+        """Seed the new memory columns from what pre-migration rows already hold.
+
+        Idempotent: a row already carrying a digest (or a window) is left alone,
+        so re-opening a migrated database rewrites nothing. A legacy
+        ``memory_summary`` becomes the digest seed, and a session that already
+        has turns gets its verbatim window rebuilt from them.
+        """
+        limit = memory_summary_limit()
+        window_size = memory_verbatim_turn_count()
+        rows = self._conn.execute(
+            """
+            SELECT session_id, user_id,
+                   COALESCE(memory_digest, '') AS digest,
+                   COALESCE(memory_summary, '') AS legacy,
+                   COALESCE(memory_window_json, '[]') AS window
+            FROM interview_sessions
+            """
+        ).fetchall()
+
+        pending: list[tuple[str, str, str]] = []
+        for row in rows:
+            digest = str(row["digest"] or "").strip()
+            legacy = str(row["legacy"] or "").strip()
+            if not digest and legacy:
+                digest = legacy[:limit]
+            window = self._loads_dict_list(row["window"])
+            if not window:
+                window = self._window_from_turns(
+                    session_id=str(row["session_id"]),
+                    user_id=str(row["user_id"]),
+                    size=window_size,
+                )
+            current_window = str(row["window"] or "")
+            if digest == str(row["digest"] or "").strip() and window == self._loads_dict_list(current_window):
+                continue
+            pending.append((digest, self._dumps(window), str(row["session_id"])))
+
+        if pending:
+            self._conn.executemany(
+                """
+                UPDATE interview_sessions
+                SET memory_digest = ?, memory_window_json = ?
+                WHERE session_id = ?
+                """,
+                pending,
+            )
+            logger.info("Seeded interview memory digest/window for %s session(s)", len(pending))
+
+    def _window_from_turns(self, *, session_id: str, user_id: str, size: int) -> list[dict[str, Any]]:
+        """Rebuild a verbatim window from the newest ``size`` stored turns."""
+        if size <= 0:
+            return []
+        excerpt_limit = memory_answer_excerpt_limit()
+        rows = self._conn.execute(
+            """
+            SELECT turn_index, question, user_answer
+            FROM interview_turns
+            WHERE user_id = ? AND session_id = ?
+            ORDER BY turn_index DESC
+            LIMIT ?
+            """,
+            (user_id, session_id, size),
+        ).fetchall()
+        return [
+            {
+                "turn_index": int(row["turn_index"]),
+                "question": str(row["question"])[:220],
+                "answer_excerpt": str(row["user_answer"])[:excerpt_limit],
+            }
+            for row in reversed(rows)
+        ]
 
     def _migrate_interview_turns(self) -> None:
         """Add ``degraded`` and make ``(session_id, turn_index)`` unique.
@@ -196,10 +320,54 @@ class InterviewStore:
         return {}
 
     @staticmethod
+    def _loads_dict_list(raw: str) -> list[dict[str, Any]]:
+        try:
+            data = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    @staticmethod
+    def _memory_window_entry(entry: dict[str, Any]) -> dict[str, Any]:
+        """Normalise one rolling-window entry, applying the excerpt ceiling."""
+        try:
+            turn_index = int(entry.get("turn_index") or 0)
+        except (TypeError, ValueError):
+            turn_index = 0
+        excerpt = str(entry.get("answer_excerpt") or "").strip()
+        return {
+            "turn_index": turn_index,
+            "question": str(entry.get("question") or "").strip()[:220],
+            "answer_excerpt": excerpt[: memory_answer_excerpt_limit()],
+            "strengths": [
+                str(x).strip() for x in (entry.get("strengths") or []) if str(x).strip()
+            ][:2],
+            "improvements": [
+                str(x).strip() for x in (entry.get("improvements") or []) if str(x).strip()
+            ][:2],
+        }
+
+    @staticmethod
     def _dumps(data: Any) -> str:
         return json.dumps(data, ensure_ascii=True)
 
     def _session_row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        keys = row.keys()
+        # ``memory_summary`` stays the read alias of ``memory_digest``: prompts
+        # and clients predate the digest column and must keep working.
+        digest = (
+            str(row["memory_digest"] or "").strip()
+            if "memory_digest" in keys
+            else ""
+        )
+        legacy_summary = (
+            str(row["memory_summary"] or "").strip()
+            if "memory_summary" in keys
+            else ""
+        )
+        memory = digest or legacy_summary
         return {
             "session_id": row["session_id"],
             "track": row["track"],
@@ -210,15 +378,21 @@ class InterviewStore:
             "status": row["status"],
             "target_role": row["target_role"],
             "interviewer_style": (
-                row["interviewer_style"] if "interviewer_style" in row.keys() else _DEFAULT_INTERVIEWER_STYLE
+                row["interviewer_style"] if "interviewer_style" in keys else _DEFAULT_INTERVIEWER_STYLE
             ),
-            "feedback_mode": row["feedback_mode"] if "feedback_mode" in row.keys() else _DEFAULT_FEEDBACK_MODE,
+            "feedback_mode": row["feedback_mode"] if "feedback_mode" in keys else _DEFAULT_FEEDBACK_MODE,
             "focus_areas": self._loads_list(row["focus_areas_json"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "current_question": row["current_question"],
-            "memory_summary": row["memory_summary"] if "memory_summary" in row.keys() else "",
-            "report_ready": bool(int(row["report_ready"])) if "report_ready" in row.keys() else False,
+            "memory_summary": memory[: memory_summary_limit()],
+            "memory_digest": memory[: memory_summary_limit()],
+            "memory_window": (
+                self._loads_dict_list(row["memory_window_json"])
+                if "memory_window_json" in keys
+                else []
+            ),
+            "report_ready": bool(int(row["report_ready"])) if "report_ready" in keys else False,
         }
 
     def create_session(
@@ -290,6 +464,8 @@ class InterviewStore:
             "updated_at": now,
             "current_question": "",
             "memory_summary": "",
+            "memory_digest": "",
+            "memory_window": [],
             "report_ready": False,
         }
 
@@ -397,6 +573,32 @@ class InterviewStore:
                 )
         return self.get_session(user_id=user_id, session_id=session_id)
 
+    def set_memory_digest(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        digest: str,
+    ) -> dict[str, Any] | None:
+        """Persist the compacted digest, capped at the one shared limit.
+
+        The legacy ``memory_summary`` column is written alongside it so a
+        database read by an older build still shows the note.
+        """
+        now = _utc_now_iso()
+        text = str(digest or "").strip()[: memory_summary_limit()]
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    UPDATE interview_sessions
+                    SET memory_digest = ?, memory_summary = ?, updated_at = ?
+                    WHERE user_id = ? AND session_id = ?
+                    """,
+                    (text, text, now, user_id, session_id),
+                )
+        return self.get_session(user_id=user_id, session_id=session_id)
+
     def set_memory_summary(
         self,
         *,
@@ -404,18 +606,59 @@ class InterviewStore:
         session_id: str,
         summary: str,
     ) -> dict[str, Any] | None:
+        """Legacy spelling of :meth:`set_memory_digest`, kept for callers."""
+        return self.set_memory_digest(
+            user_id=user_id,
+            session_id=session_id,
+            digest=summary,
+        )
+
+    def get_memory_window(self, *, user_id: str, session_id: str) -> list[dict[str, Any]]:
+        """The verbatim rolling window: the last ``memory_verbatim_turns`` turns."""
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT memory_window_json
+                FROM interview_sessions
+                WHERE user_id = ? AND session_id = ?
+                """,
+                (user_id, session_id),
+            ).fetchone()
+        if not row or "memory_window_json" not in row.keys():
+            return []
+        return self._loads_dict_list(row["memory_window_json"])
+
+    def append_memory_turn(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        entry: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Append one turn to the rolling window and return the trimmed window.
+
+        The oldest entry falls off once the window is full, which is what keeps
+        the verbatim turns from growing without bound.
+        """
+        window = self.get_memory_window(user_id=user_id, session_id=session_id)
+        normalised = self._memory_window_entry(entry)
+        if normalised.get("turn_index"):
+            window = [item for item in window if item.get("turn_index") != normalised["turn_index"]]
+        window.append(normalised)
+        size = memory_verbatim_turn_count()
+        window = window[-size:] if size else []
         now = _utc_now_iso()
         with self._lock:
             with self._conn:
                 self._conn.execute(
                     """
                     UPDATE interview_sessions
-                    SET memory_summary = ?, updated_at = ?
+                    SET memory_window_json = ?, updated_at = ?
                     WHERE user_id = ? AND session_id = ?
                     """,
-                    (str(summary or "")[:3000], now, user_id, session_id),
+                    (self._dumps(window), now, user_id, session_id),
                 )
-        return self.get_session(user_id=user_id, session_id=session_id)
+        return window
 
     def turn_exists(self, *, user_id: str, session_id: str, turn_index: int) -> bool:
         """True when this turn index is already taken for the session."""

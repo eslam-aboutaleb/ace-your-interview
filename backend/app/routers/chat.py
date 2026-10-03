@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import get_settings
 from app.dependencies import require_auth
-from app.schemas.models import ChatFollowUpRequest, ChatFollowUpResponse
+from pydantic import BaseModel
+
+from app.schemas.models import ChatFollowUpRequest, ChatFollowUpResponse, ChatMessage
 from app.services.doc_parser import DocParser
 from app.services.learning_store import LearningStore
 from app.services.llm_client import BUDGET_EXCEEDED_CODE, LLMClient
@@ -28,11 +30,10 @@ _mcp_gateway: MCPGateway | None = None
 
 # ── Prompt bounds (Stage 2.2) ────────────────────────────────
 # Every externally sourced string is bounded before it is fenced, so a single
-# request cannot inflate the prompt beyond the caps below. The Pydantic
-# `max_length` values requested for `user_message` / `ChatMessage.content`
-# match these so a schema-level rejection and a router-level truncation agree.
+# request cannot inflate the prompt beyond the caps below. Where the request
+# model already bounds a field we read the bound off the schema rather than
+# restating it, so the two can never disagree and silently leave dead clamps.
 MAX_USER_MESSAGE_CHARS = 4000
-MAX_WORD_CHARS = 200
 MAX_CONTEXT_QUESTION_CHARS = 2000
 MAX_CONTEXT_ANSWER_CHARS = 6000
 MAX_HISTORY_MESSAGES = 6
@@ -41,6 +42,22 @@ MAX_HISTORY_CHARS = 12000
 MAX_TOPIC_METADATA_CHARS = 1200
 MAX_MEMORY_PROMPT_CHARS = 900
 MAX_MCP_CONTEXT_CHARS = 2500
+
+
+def _schema_max_length(model: type[BaseModel], field: str, fallback: int) -> int:
+    """Read a field's declared ``max_length`` so router clamps stay in step."""
+    declared = model.model_fields[field].metadata
+    for item in declared:
+        limit = getattr(item, "max_length", None)
+        if limit:
+            return int(limit)
+    return fallback
+
+
+#: ``word`` is schema-bounded, so the router clamp is a second line of defence.
+MAX_WORD_CHARS = _schema_max_length(ChatFollowUpRequest, "word", 200)
+MAX_HISTORY_MESSAGE_CHARS = _schema_max_length(ChatMessage, "content", MAX_HISTORY_MESSAGE_CHARS)
+MAX_USER_MESSAGE_CHARS = _schema_max_length(ChatFollowUpRequest, "user_message", MAX_USER_MESSAGE_CHARS)
 #: Absolute pre-fence ceiling, well above every per-field cap, so one pathological
 #: payload cannot cost unbounded string work before truncation.
 HARD_INPUT_GUARD_CHARS = 200_000
@@ -54,10 +71,6 @@ CHAT_SYSTEM_PROMPT = (
     "documentation and has a follow-up question about a highlighted term. "
     f"{UNTRUSTED_CLAUSE}"
 )
-
-#: Hard clip applied before fencing, so a hostile multi-megabyte payload is
-#: bounded before any regex runs over it.
-HARD_INPUT_GUARD_CHARS = 20000
 
 
 def _fence(label: str, value: str, max_chars: int) -> str:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import re
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +15,7 @@ from app.config import get_settings
 from app.dependencies import require_auth
 from app.schemas.models import (
     CreateInterviewSessionRequest,
+    InterviewAnswerAndNextResponse,
     InterviewQuestionResponse,
     InterviewReportResponse,
     InterviewSessionResponse,
@@ -27,7 +30,13 @@ from app.schemas.models import (
 )
 from app.services.doc_parser import DocParser
 from app.services.interview_generator import InterviewGenerator
-from app.services.interview_store import InterviewStore, TurnConflictError
+from app.services.interview_store import (
+    InterviewStore,
+    TurnConflictError,
+    memory_answer_excerpt_limit,
+    memory_summary_limit,
+    memory_verbatim_turn_count,
+)
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
 from app.services.llm_policy import (
@@ -37,6 +46,9 @@ from app.services.llm_policy import (
     policy_error_detail,
 )
 from app.services.mcp_gateway import MCPGateway
+from app.services.prompt_blocks import UNTRUSTED_CLAUSE, untrusted_block
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/interview-sessions", tags=["interview-sessions"])
 
@@ -44,6 +56,17 @@ _store: InterviewStore | None = None
 _generator: InterviewGenerator | None = None
 _parser: DocParser | None = None
 _learning_store: LearningStore | None = None
+
+#: Marker line every interview-memory prompt starts with. The prompt asks the
+#: model to revise the previous note, exactly as ``progress_summarizer`` does for
+#: study progress, instead of appending to a capped string.
+_MEMORY_DIGEST_MARKER = "You maintain one compact memory note per mock-interview session"
+_MEMORY_DIGEST_SYSTEM = (
+    "You are an interview memory summariser. You maintain one short, factual memory "
+    "note per mock-interview session so the next interviewer turn can build on it."
+)
+_MEMORY_DIGEST_MAX_WORDS = 180
+_FENCE_RE = re.compile(r"^```[a-zA-Z0-9_+\-]*\s*\n(?P<body>[\s\S]*?)\n?```$")
 
 
 def init(
@@ -102,6 +125,419 @@ def _record_attempt_blocked(eval_payload: dict[str, Any]) -> bool:
     return bool(eval_payload.get("degraded"))
 
 
+def _cancel_task(task: "asyncio.Task[Any] | None") -> None:
+    """Drop an in-flight provider call when a stream goes away.
+
+    A client disconnect closes the generator mid-LLM-call; without this the task
+    keeps running (and keeps spending) against a response nobody reads.
+    """
+    if task is not None and not task.done():
+        task.cancel()
+
+
+def _pending_answer(session_id: str, user: dict) -> tuple[dict[str, Any], str, int]:
+    """Shared pre-flight for the answer endpoints: session, question, turn index.
+
+    Raises the same 404/400/409 trio for every endpoint that records a turn, so
+    the combined endpoint cannot drift from ``/answer``.
+    """
+    assert _store is not None
+    session = _store.get_session_context(user_id=user["user"], session_id=session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview session not found")
+    if session["status"] != "active":
+        raise HTTPException(status_code=400, detail="Interview session already completed")
+    question = (session.get("current_question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="No active question. Generate next question first.")
+    turn_index = int(session["turns_completed"]) + 1
+    # A repeat submission of an already recorded turn is rejected before the body
+    # starts, so it gets a real HTTP status.
+    if _store.turn_exists(user_id=user["user"], session_id=session_id, turn_index=turn_index):
+        raise HTTPException(status_code=409, detail=_turn_conflict_detail())
+    return session, question, turn_index
+
+
+# ── Interview memory (Stage 3.2) ────────────────────────────
+def _memory_prompt_block(session: dict[str, Any]) -> str:
+    """Digest plus the newest verbatim turns, capped at the one shared limit.
+
+    The digest gets at most half the budget so the rolling window can never be
+    squeezed out by a long note, and the window is emitted newest-first so the
+    generator's own prefix slice keeps the most recent turns.
+    """
+    limit = memory_summary_limit()
+    digest = str(session.get("memory_digest") or session.get("memory_summary") or "").strip()
+    lines: list[str] = []
+    if digest:
+        lines.append(f"Session digest: {digest[: limit // 2]}")
+    window = session.get("memory_window") or []
+    size = memory_verbatim_turn_count()
+    # Newest first, and never `[-0:]`, which would keep the whole window when
+    # the rolling window is disabled.
+    entries = list(reversed(list(window)[-size:])) if size else []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        excerpt = str(entry.get("answer_excerpt") or "").strip()
+        question = str(entry.get("question") or "").strip()
+        if not (question or excerpt):
+            continue
+        lines.append(f"Turn {entry.get('turn_index', '?')} Q: {question} | A: {excerpt}")
+    return "\n".join(lines)[:limit]
+
+
+def _prompt_session(session: dict[str, Any]) -> dict[str, Any]:
+    """The session as the prompt builder should see it.
+
+    ``interview_generator`` reads ``memory_summary`` for both the question and
+    the evaluation prompt, so the composed digest + window is handed over under
+    that key instead of the bare digest.
+    """
+    return {**session, "memory_summary": _memory_prompt_block(session)}
+
+
+def _digest_turn_line(turn: dict[str, Any], *, excerpt_chars: int) -> str:
+    strengths = "; ".join(str(x).strip() for x in (turn.get("strengths") or [])[:2] if str(x).strip())
+    improvements = "; ".join(str(x).strip() for x in (turn.get("improvements") or [])[:2] if str(x).strip())
+    return (
+        f"Turn {turn.get('turn_index', '?')} | "
+        f"Q: {str(turn.get('question') or '').strip()[:220]} | "
+        f"A: {str(turn.get('user_answer') or '').strip()[:excerpt_chars]}"
+        + (f" | strengths: {strengths}" if strengths else "")
+        + (f" | gaps: {improvements}" if improvements else "")
+    )
+
+
+def _deterministic_digest(turns: list[dict[str, Any]]) -> str:
+    """Offline compaction: newest turns first, oldest folded into a marker.
+
+    Mirrors ``progress_summarizer.build_fallback_summary``: used whenever the
+    provider path is unavailable, so the note stays useful instead of the turn
+    being silently dropped.
+    """
+    limit = memory_summary_limit()
+    excerpt_chars = memory_answer_excerpt_limit()
+    lines = [_digest_turn_line(turn, excerpt_chars=excerpt_chars) for turn in turns]
+    lines = [line for line in lines if line.strip()]
+    if not lines:
+        return ""
+
+    kept: list[str] = []
+    used = 0
+    folded = 0
+    for line in reversed(lines):
+        cost = len(line) + 1
+        if kept and used + cost > max(0, limit - 120):
+            folded += 1
+            continue
+        kept.append(line)
+        used += cost
+    kept.reverse()
+    header = f"Interview memory through turn {turns[-1].get('turn_index', len(turns))}."
+    if folded:
+        header += f" {folded} earlier turn(s) compacted into this note."
+    return "\n".join([header, *kept])[:limit]
+
+
+def _clean_digest_text(text: str) -> str:
+    """Strip a wrapping code fence, mirroring ``progress_summarizer``'s cleaner."""
+    cleaned = str(text or "").strip()
+    match = _FENCE_RE.match(cleaned)
+    if match:
+        cleaned = match.group("body").strip()
+    return cleaned[: memory_summary_limit()]
+
+
+def _build_digest_prompt(
+    *,
+    previous_digest: str,
+    turn: dict[str, Any],
+) -> str:
+    excerpt_chars = memory_answer_excerpt_limit()
+    return f"""{_MEMORY_DIGEST_MARKER}.
+
+An interviewer and an evaluator read this note before the next turn, so it must
+carry forward every fact that still changes how they probe the candidate.
+
+Previous memory note (update it — never restart from scratch):
+{untrusted_block("previous_digest", previous_digest, memory_summary_limit() // 2) or "(no previous note — this is the first one)"}
+
+Newest recorded turn:
+{untrusted_block("new_turn_question", str(turn.get("question") or ""), 400)}
+{untrusted_block("new_turn_answer", str(turn.get("user_answer") or ""), excerpt_chars)}
+Strengths this turn: {"; ".join(str(x) for x in (turn.get("strengths") or [])[:2])}
+Improvements this turn: {"; ".join(str(x) for x in (turn.get("improvements") or [])[:2])}
+
+Write the updated memory note now, at most {_MEMORY_DIGEST_MAX_WORDS} words.
+Keep every still-useful earlier fact; fold the oldest detail away rather than
+dropping a topic outright. Cover: what has been asked and answered so far; the
+candidate's demonstrated strengths; the weakest areas so far; and anything the
+next interviewer must probe. Plain prose or short bullets. No preamble, no
+meta-commentary, no headings other than the topic title.
+
+{UNTRUSTED_CLAUSE}"""
+
+
+async def _refresh_interview_memory(
+    *,
+    user: dict[str, Any],
+    session_id: str,
+    turn_index: int,
+    question: str,
+    user_answer: str,
+    eval_payload: dict[str, Any],
+    degraded: bool,
+    llm_config: Any = None,
+) -> None:
+    """Refresh the digest and the rolling window once per recorded turn.
+
+    Never raises: the turn is already saved, so a memory failure must not fail
+    the request. The window is appended unconditionally and the digest falls
+    back to deterministic compaction whenever the provider path is unavailable.
+    """
+    assert _store is not None
+    excerpt_chars = memory_answer_excerpt_limit()
+    try:
+        _store.append_memory_turn(
+            user_id=user["user"],
+            session_id=session_id,
+            entry={
+                "turn_index": turn_index,
+                "question": question,
+                "answer_excerpt": user_answer[:excerpt_chars],
+                "strengths": eval_payload.get("strengths") or [],
+                "improvements": eval_payload.get("improvements") or [],
+            },
+        )
+
+        turns = _store.get_turns(user_id=user["user"], session_id=session_id)
+        fallback = _deterministic_digest(turns)
+        session = _store.get_session_context(user_id=user["user"], session_id=session_id) or {}
+        previous = str(session.get("memory_digest") or session.get("memory_summary") or "").strip()
+
+        digest = fallback
+        # A degraded turn means the provider already failed for this turn; one
+        # more call would only repeat the failure.
+        if not degraded and _generator is not None:
+            turn = {
+                "turn_index": turn_index,
+                "question": question,
+                "user_answer": user_answer,
+                "strengths": eval_payload.get("strengths") or [],
+                "improvements": eval_payload.get("improvements") or [],
+            }
+            try:
+                result = await _generator.llm.completion(
+                    _build_digest_prompt(
+                        previous_digest=str(session.get("memory_digest") or ""),
+                        turn=turn,
+                    ),
+                    llm_config,
+                    user_identity=user,
+                    task="final",
+                    system=_MEMORY_DIGEST_SYSTEM,
+                    max_tokens_cap=800,
+                )
+                if result.get("success"):
+                    cleaned = _clean_digest_text(result.get("analysis", ""))
+                    if cleaned:
+                        digest = cleaned
+                    else:
+                        logger.info(
+                            "Interview memory digest returned empty analysis session=%s; using compaction",
+                            session_id,
+                        )
+                else:
+                    logger.info(
+                        "Interview memory digest fell back session=%s code=%s error=%s",
+                        session_id,
+                        result.get("error_code", ""),
+                        str(result.get("error", ""))[:200],
+                    )
+            except Exception:
+                logger.exception(
+                    "Interview memory digest generation failed session=%s; using compaction",
+                    session_id,
+                )
+
+        _store.set_memory_digest(
+            user_id=user["user"],
+            session_id=session_id,
+            digest=digest or previous,
+        )
+    except Exception:
+        logger.exception("Interview memory refresh failed session=%s", session_id)
+
+
+async def _finalise_turn(
+    *,
+    user: dict[str, Any],
+    session: dict[str, Any],
+    session_id: str,
+    turn_index: int,
+    question: str,
+    body: SubmitInterviewAnswerRequest,
+    eval_payload: dict[str, Any],
+    degraded: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Record the turn, refresh memory, feed the SRS store, build the report.
+
+    Raises :class:`TurnConflictError` so each caller can map it onto its own
+    transport (HTTP 409, or a ``turn_conflict`` NDJSON event).
+    """
+    assert _store is not None and _generator is not None
+    turn_dict, updated_session = _store.record_turn(
+        user_id=user["user"],
+        session_id=session_id,
+        turn_index=turn_index,
+        question=question,
+        user_answer=body.user_answer,
+        rubric=eval_payload["rubric"],
+        strengths=eval_payload["strengths"],
+        improvements=eval_payload["improvements"],
+        follow_up_note=eval_payload["follow_up_note"],
+        response_time_ms=body.response_time_ms,
+        degraded=degraded,
+    )
+
+    await _refresh_interview_memory(
+        user=user,
+        session_id=session_id,
+        turn_index=turn_index,
+        question=question,
+        user_answer=body.user_answer,
+        eval_payload=eval_payload,
+        degraded=degraded,
+        llm_config=body.llm_config,
+    )
+
+    if get_settings().enable_adaptive_learning and _learning_store is not None and not degraded:
+        topic_id = _track_topic_id(session["track"])
+        if topic_id:
+            rubric = eval_payload["rubric"]
+            overall = int(rubric.get("overall") or 60)
+            confidence_signal = max(1, min(5, int(rubric.get("confidence_signal") or 3)))
+            await _learning_store.run_async(
+                _learning_store.record_attempt,
+                user_id=user["user"],
+                question_id=f"interview:{session_id}:{turn_index}",
+                topic_id=topic_id,
+                user_answer=body.user_answer,
+                is_correct=overall >= 70,
+                confidence=confidence_signal,
+                response_time_ms=body.response_time_ms,
+                mode="study",
+            )
+
+    if updated_session and updated_session["status"] == "completed":
+        turns = _store.get_turns(user_id=user["user"], session_id=session_id)
+        report = _generator.build_report(session=updated_session, turns=turns)
+        _store.save_report(user_id=user["user"], session_id=session_id, report=report)
+
+    session_out = _store.get_session(user_id=user["user"], session_id=session_id)
+    if not session_out:
+        raise RuntimeError("Session update failed")
+    return turn_dict, session_out
+
+
+def _turn_response(
+    *,
+    session_id: str,
+    session_out: dict[str, Any],
+    turn_dict: dict[str, Any],
+    turn_index: int,
+    question: str,
+    body: SubmitInterviewAnswerRequest,
+    eval_payload: dict[str, Any],
+    degraded: bool,
+) -> InterviewTurnResponse:
+    return InterviewTurnResponse(
+        session=session_out,
+        turn=InterviewTurn(
+            session_id=session_id,
+            turn_index=turn_index,
+            question=question,
+            user_answer=body.user_answer,
+            rubric=RubricScore(**eval_payload["rubric"]),
+            strengths=eval_payload["strengths"],
+            improvements=eval_payload["improvements"],
+            follow_up_note=eval_payload["follow_up_note"],
+            response_time_ms=max(0, body.response_time_ms),
+            created_at=turn_dict["created_at"],
+            degraded=degraded,
+        ),
+        report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
+        degraded=degraded,
+    )
+
+
+async def _generate_next_question(
+    *,
+    user: dict[str, Any],
+    session_id: str,
+    llm_config: Any,
+) -> tuple[dict[str, Any] | None, str]:
+    """Generate and persist the next question from post-turn state.
+
+    Returns ``(question_response, status)`` where status is ``generated``,
+    ``session_completed``, or ``generation_failed``. Never raises: by the time
+    this runs the turn is already recorded, so a failure here must degrade to a
+    partial answer instead of losing the turn.
+    """
+    assert _store is not None and _generator is not None
+    session = _store.get_session_context(user_id=user["user"], session_id=session_id)
+    if not session:
+        return None, "generation_failed"
+    if session["status"] != "active":
+        return None, "session_completed"
+
+    turns = _store.get_turns(user_id=user["user"], session_id=session_id)
+    try:
+        generated = await _generator.generate_question(
+            session=_prompt_session(session),
+            turns=turns,
+            llm_config=llm_config,
+            user_identity=user,
+        )
+        updated = _store.set_current_question(
+            user_id=user["user"],
+            session_id=session_id,
+            question=generated["question"],
+        )
+        if not updated:
+            return None, "generation_failed"
+        return (
+            InterviewQuestionResponse(
+                session_id=session_id,
+                turn_index=int(updated["turns_completed"]) + 1,
+                question=generated["question"],
+                competency_focus=generated.get("competency_focus", ""),
+                expected_signals=generated.get("expected_signals", []),
+            ),
+            "generated",
+        )
+    except (
+        LLMServiceApprovalRequiredError,
+        StudyAppLLMNotAssignedError,
+        PersonalCredentialRequiredError,
+    ) as exc:
+        detail = policy_error_detail(exc)
+        logger.warning(
+            "Interview next-question blocked by policy session=%s code=%s",
+            session_id,
+            detail["code"],
+        )
+        return None, "generation_failed"
+    except Exception as exc:
+        logger.warning(
+            "Interview next-question generation failed session=%s: %s",
+            session_id,
+            str(exc)[:200],
+        )
+        return None, "generation_failed"
+
+
 async def _progress_events(
     task: "asyncio.Task[Any]",
     *,
@@ -151,7 +587,7 @@ async def create_session(
         raise HTTPException(status_code=500, detail="Failed to create session context")
 
     first_q = await _generator.generate_question(
-        session=context,
+        session=_prompt_session(context),
         turns=[],
         llm_config=body.llm_config,
         user_identity=user,
@@ -182,6 +618,7 @@ async def create_session_stream(
                 "message": "Creating interview session.",
             }
         ) + "\n"
+        first_q_task: "asyncio.Task[Any] | None" = None
         try:
             session = _store.create_session(
                 user_id=user["user"],
@@ -205,7 +642,7 @@ async def create_session_stream(
 
             first_q_task = asyncio.create_task(
                 _generator.generate_question(
-                    session=context,
+                    session=_prompt_session(context),
                     turns=[],
                     llm_config=body.llm_config,
                     user_identity=user,
@@ -218,6 +655,7 @@ async def create_session_stream(
             ):
                 yield json.dumps(progress) + "\n"
             first_q = await first_q_task
+            first_q_task = None
             _store.set_current_question(
                 user_id=user["user"],
                 session_id=session["session_id"],
@@ -226,6 +664,9 @@ async def create_session_stream(
 
             payload = _to_session_response(user["user"], session["session_id"]).model_dump(mode="json")
             yield json.dumps({"type": "done", **payload}) + "\n"
+        except asyncio.CancelledError:
+            logger.info("Interview session-create stream cancelled")
+            raise
         except (
             LLMServiceApprovalRequiredError,
             StudyAppLLMNotAssignedError,
@@ -247,6 +688,8 @@ async def create_session_stream(
                     "message": str(exc).strip() or "Interview generation failed.",
                 }
             ) + "\n"
+        finally:
+            _cancel_task(first_q_task)
 
     return StreamingResponse(
         _event_stream(),
@@ -309,23 +752,9 @@ async def submit_answer(
     _ensure_ready()
     assert _store is not None and _generator is not None
 
-    session = _store.get_session_context(user_id=user["user"], session_id=session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Interview session not found")
-    if session["status"] != "active":
-        raise HTTPException(status_code=400, detail="Interview session already completed")
-
-    question = (session.get("current_question") or "").strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="No active question. Generate next question first.")
-
-    turn_index = int(session["turns_completed"]) + 1
-    # Cheap pre-check: a turn index that is already taken is a duplicate
-    # submission, so reject it before spending an evaluation call.
-    if _store.turn_exists(user_id=user["user"], session_id=session_id, turn_index=turn_index):
-        raise HTTPException(status_code=409, detail=_turn_conflict_detail())
+    session, question, turn_index = _pending_answer(session_id, user)
     eval_payload = await _generator.evaluate_answer(
-        session=session,
+        session=_prompt_session(session),
         question=question,
         user_answer=body.user_answer,
         turn_index=turn_index,
@@ -337,83 +766,27 @@ async def submit_answer(
     degraded = _record_attempt_blocked(eval_payload)
 
     try:
-        turn_dict, updated_session = _store.record_turn(
-            user_id=user["user"],
+        turn_dict, session_out = await _finalise_turn(
+            user=user,
+            session=session,
             session_id=session_id,
             turn_index=turn_index,
             question=question,
-            user_answer=body.user_answer,
-            rubric=eval_payload["rubric"],
-            strengths=eval_payload["strengths"],
-            improvements=eval_payload["improvements"],
-            follow_up_note=eval_payload["follow_up_note"],
-            response_time_ms=body.response_time_ms,
+            body=body,
+            eval_payload=eval_payload,
             degraded=degraded,
         )
     except TurnConflictError as exc:
         raise HTTPException(status_code=409, detail=_turn_conflict_detail()) from exc
 
-    prior_memory = str(session.get("memory_summary", "")).strip()
-    memory_update = (
-        f"{prior_memory}\n"
-        f"Turn {turn_index} question: {question[:220]}\n"
-        f"Candidate answer summary: {body.user_answer[:320]}\n"
-        f"Strengths: {'; '.join(eval_payload['strengths'][:2])}\n"
-        f"Improvements: {'; '.join(eval_payload['improvements'][:2])}"
-    ).strip()
-    _store.set_memory_summary(
-        user_id=user["user"],
+    return _turn_response(
         session_id=session_id,
-        summary=memory_update[:2400],
-    )
-
-    if (
-        get_settings().enable_adaptive_learning
-        and _learning_store is not None
-        and not degraded
-    ):
-        topic_id = _track_topic_id(session["track"])
-        if topic_id:
-            rubric = eval_payload["rubric"]
-            overall = int(rubric.get("overall", 60))
-            confidence_signal = max(1, min(5, int(rubric.get("confidence_signal", 3))))
-            await _learning_store.run_async(
-                _learning_store.record_attempt,
-                user_id=user["user"],
-                question_id=f"interview:{session_id}:{turn_index}",
-                topic_id=topic_id,
-                user_answer=body.user_answer,
-                is_correct=overall >= 70,
-                confidence=confidence_signal,
-                response_time_ms=body.response_time_ms,
-                mode="study",
-            )
-
-    if updated_session and updated_session["status"] == "completed":
-        turns = _store.get_turns(user_id=user["user"], session_id=session_id)
-        report = _generator.build_report(session=updated_session, turns=turns)
-        _store.save_report(user_id=user["user"], session_id=session_id, report=report)
-
-    session_out = _store.get_session(user_id=user["user"], session_id=session_id)
-    if not session_out:
-        raise HTTPException(status_code=500, detail="Session update failed")
-
-    return InterviewTurnResponse(
-        session=session_out,
-        turn=InterviewTurn(
-            session_id=session_id,
-            turn_index=turn_index,
-            question=question,
-            user_answer=body.user_answer,
-            rubric=RubricScore(**eval_payload["rubric"]),
-            strengths=eval_payload["strengths"],
-            improvements=eval_payload["improvements"],
-            follow_up_note=eval_payload["follow_up_note"],
-            response_time_ms=max(0, body.response_time_ms),
-            created_at=turn_dict["created_at"],
-            degraded=degraded,
-        ),
-        report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
+        session_out=session_out,
+        turn_dict=turn_dict,
+        turn_index=turn_index,
+        question=question,
+        body=body,
+        eval_payload=eval_payload,
         degraded=degraded,
     )
 
@@ -428,26 +801,11 @@ async def submit_answer_stream(
     _ensure_ready()
     assert _store is not None and _generator is not None
 
-    session = _store.get_session_context(user_id=user["user"], session_id=session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Interview session not found")
-    if session["status"] != "active":
-        raise HTTPException(status_code=400, detail="Interview session already completed")
-    question = (session.get("current_question") or "").strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="No active question. Generate next question first.")
-
     # A repeat submission of an already recorded turn can be rejected before the
     # response body starts, so it gets a real HTTP status. The race that slips
     # past this check is caught by record_turn and reported as a `turn_conflict`
     # error event, because a streaming response can no longer change its status.
-    stream_turn_index = int(session["turns_completed"]) + 1
-    if _store.turn_exists(
-        user_id=user["user"],
-        session_id=session_id,
-        turn_index=stream_turn_index,
-    ):
-        raise HTTPException(status_code=409, detail=_turn_conflict_detail())
+    session, question, stream_turn_index = _pending_answer(session_id, user)
 
     async def _event_stream():
         yield json.dumps(
@@ -458,11 +816,12 @@ async def submit_answer_stream(
                 "message": "Evaluating interview answer.",
             }
         ) + "\n"
+        eval_task: "asyncio.Task[Any] | None" = None
         try:
             turn_index = stream_turn_index
             eval_task = asyncio.create_task(
                 _generator.evaluate_answer(
-                    session=session,
+                    session=_prompt_session(session),
                     question=question,
                     user_answer=body.user_answer,
                     turn_index=turn_index,
@@ -477,22 +836,20 @@ async def submit_answer_stream(
             ):
                 yield json.dumps(progress) + "\n"
             eval_payload = await eval_task
+            eval_task = None
             # Internal drift signal for the eval harness; never part of the wire payload.
             eval_payload.pop("follow_up_note_repaired", None)
             degraded = _record_attempt_blocked(eval_payload)
 
             try:
-                turn_dict, updated_session = _store.record_turn(
-                    user_id=user["user"],
+                turn_dict, session_out = await _finalise_turn(
+                    user=user,
+                    session=session,
                     session_id=session_id,
                     turn_index=turn_index,
                     question=question,
-                    user_answer=body.user_answer,
-                    rubric=eval_payload["rubric"],
-                    strengths=eval_payload["strengths"],
-                    improvements=eval_payload["improvements"],
-                    follow_up_note=eval_payload["follow_up_note"],
-                    response_time_ms=body.response_time_ms,
+                    body=body,
+                    eval_payload=eval_payload,
                     degraded=degraded,
                 )
             except TurnConflictError as exc:
@@ -505,70 +862,21 @@ async def submit_answer_stream(
                 ) + "\n"
                 return
 
-            prior_memory = str(session.get("memory_summary", "")).strip()
-            memory_update = (
-                f"{prior_memory}\n"
-                f"Turn {turn_index} question: {question[:220]}\n"
-                f"Candidate answer summary: {body.user_answer[:320]}\n"
-                f"Strengths: {'; '.join(eval_payload['strengths'][:2])}\n"
-                f"Improvements: {'; '.join(eval_payload['improvements'][:2])}"
-            ).strip()
-            _store.set_memory_summary(
-                user_id=user["user"],
+            payload = _turn_response(
                 session_id=session_id,
-                summary=memory_update[:2400],
-            )
-
-            if (
-                get_settings().enable_adaptive_learning
-                and _learning_store is not None
-                and not degraded
-            ):
-                topic_id = _track_topic_id(session["track"])
-                if topic_id:
-                    rubric = eval_payload["rubric"]
-                    overall = int(rubric.get("overall", 60))
-                    confidence_signal = max(1, min(5, int(rubric.get("confidence_signal", 3))))
-                    await _learning_store.run_async(
-                        _learning_store.record_attempt,
-                        user_id=user["user"],
-                        question_id=f"interview:{session_id}:{turn_index}",
-                        topic_id=topic_id,
-                        user_answer=body.user_answer,
-                        is_correct=overall >= 70,
-                        confidence=confidence_signal,
-                        response_time_ms=body.response_time_ms,
-                        mode="study",
-                    )
-
-            if updated_session and updated_session["status"] == "completed":
-                turns = _store.get_turns(user_id=user["user"], session_id=session_id)
-                report = _generator.build_report(session=updated_session, turns=turns)
-                _store.save_report(user_id=user["user"], session_id=session_id, report=report)
-
-            session_out = _store.get_session(user_id=user["user"], session_id=session_id)
-            if not session_out:
-                raise RuntimeError("Session update failed")
-
-            payload = InterviewTurnResponse(
-                session=session_out,
-                turn=InterviewTurn(
-                    session_id=session_id,
-                    turn_index=turn_index,
-                    question=question,
-                    user_answer=body.user_answer,
-                    rubric=RubricScore(**eval_payload["rubric"]),
-                    strengths=eval_payload["strengths"],
-                    improvements=eval_payload["improvements"],
-                    follow_up_note=eval_payload["follow_up_note"],
-                    response_time_ms=max(0, body.response_time_ms),
-                    created_at=turn_dict["created_at"],
-                    degraded=degraded,
-                ),
-                report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
+                session_out=session_out,
+                turn_dict=turn_dict,
+                turn_index=turn_index,
+                question=question,
+                body=body,
+                eval_payload=eval_payload,
                 degraded=degraded,
             ).model_dump(mode="json")
             yield json.dumps({"type": "done", **payload}) + "\n"
+        except asyncio.CancelledError:
+            # Client disconnect: the provider call is dropped in the finally below.
+            logger.info("Interview answer stream cancelled session=%s", session_id)
+            raise
         except (
             LLMServiceApprovalRequiredError,
             StudyAppLLMNotAssignedError,
@@ -590,6 +898,235 @@ async def submit_answer_stream(
                     "message": str(exc).strip() or "Interview evaluation failed.",
                 }
             ) + "\n"
+        finally:
+            _cancel_task(eval_task)
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/{session_id}/answer-and-next", response_model=InterviewAnswerAndNextResponse)
+async def answer_and_next(
+    session_id: str,
+    body: SubmitInterviewAnswerRequest,
+    user: dict = Depends(require_auth),
+):
+    """Evaluate an answer, record the turn, then ask the next question.
+
+    Sequenced server-side on purpose: the next question reads post-turn state,
+    so a client-side parallel call would generate from the pre-answer session and
+    race with the question persistence. A next-question failure degrades to
+    ``next_question: null`` with the recorded turn, because the turn is already
+    committed at that point.
+    """
+    _ensure_enabled()
+    _ensure_ready()
+    assert _store is not None and _generator is not None
+
+    session, question, turn_index = _pending_answer(session_id, user)
+    eval_payload = await _generator.evaluate_answer(
+        session=_prompt_session(session),
+        question=question,
+        user_answer=body.user_answer,
+        turn_index=turn_index,
+        llm_config=body.llm_config,
+        user_identity=user,
+    )
+    eval_payload.pop("follow_up_note_repaired", None)
+    degraded = _record_attempt_blocked(eval_payload)
+
+    try:
+        turn_dict, session_out = await _finalise_turn(
+            user=user,
+            session=session,
+            session_id=session_id,
+            turn_index=turn_index,
+            question=question,
+            body=body,
+            eval_payload=eval_payload,
+            degraded=degraded,
+        )
+    except TurnConflictError as exc:
+        raise HTTPException(status_code=409, detail=_turn_conflict_detail()) from exc
+
+    next_question_payload, next_status = await _generate_next_question(
+        user=user,
+        session_id=session_id,
+        llm_config=body.llm_config,
+    )
+    if next_question_payload is not None:
+        # set_current_question rewrote current_question, so the session in the
+        # response must be re-read rather than reusing the pre-question snapshot.
+        refreshed = _store.get_session(user_id=user["user"], session_id=session_id)
+        if refreshed:
+            session_out = refreshed
+
+    turn_payload = _turn_response(
+        session_id=session_id,
+        session_out=session_out,
+        turn_dict=turn_dict,
+        turn_index=turn_index,
+        question=question,
+        body=body,
+        eval_payload=eval_payload,
+        degraded=degraded,
+    )
+    return InterviewAnswerAndNextResponse(
+        session=turn_payload.session,
+        turn=turn_payload.turn,
+        report_ready=turn_payload.report_ready,
+        degraded=turn_payload.degraded,
+        next_question=next_question_payload,
+        next_question_status=next_status,
+    )
+
+
+@router.post("/{session_id}/answer-and-next/stream")
+async def answer_and_next_stream(
+    session_id: str,
+    body: SubmitInterviewAnswerRequest,
+    user: dict = Depends(require_auth),
+):
+    """NDJSON twin of ``/answer-and-next``: same sequence, same partial success."""
+    _ensure_enabled()
+    _ensure_ready()
+    assert _store is not None and _generator is not None
+
+    session, question, stream_turn_index = _pending_answer(session_id, user)
+
+    async def _event_stream():
+        yield json.dumps(
+            {
+                "type": "start",
+                "stage": "evaluating_answer",
+                "session_id": session_id,
+                "message": "Evaluating interview answer.",
+            }
+        ) + "\n"
+        eval_task: "asyncio.Task[Any] | None" = None
+        question_task: "asyncio.Task[Any] | None" = None
+        try:
+            turn_index = stream_turn_index
+            eval_task = asyncio.create_task(
+                _generator.evaluate_answer(
+                    session=_prompt_session(session),
+                    question=question,
+                    user_answer=body.user_answer,
+                    turn_index=turn_index,
+                    llm_config=body.llm_config,
+                    user_identity=user,
+                )
+            )
+            async for progress in _progress_events(
+                eval_task,
+                stage="evaluating_answer",
+                message="Evaluating answer and preparing coaching feedback.",
+            ):
+                yield json.dumps(progress) + "\n"
+            eval_payload = await eval_task
+            eval_task = None
+            eval_payload.pop("follow_up_note_repaired", None)
+            degraded = _record_attempt_blocked(eval_payload)
+
+            try:
+                turn_dict, session_out = await _finalise_turn(
+                    user=user,
+                    session=session,
+                    session_id=session_id,
+                    turn_index=turn_index,
+                    question=question,
+                    body=body,
+                    eval_payload=eval_payload,
+                    degraded=degraded,
+                )
+            except TurnConflictError as exc:
+                yield json.dumps(
+                    {
+                        "type": "error",
+                        "code": TurnConflictError.code,
+                        "message": str(exc),
+                    }
+                ) + "\n"
+                return
+
+            turn_payload = _turn_response(
+                session_id=session_id,
+                session_out=session_out,
+                turn_dict=turn_dict,
+                turn_index=turn_index,
+                question=question,
+                body=body,
+                eval_payload=eval_payload,
+                degraded=degraded,
+            )
+
+            # The turn is saved at this point, so every failure below is a
+            # partial success rather than an error event.
+            question_task = asyncio.create_task(
+                _generate_next_question(
+                    user=user,
+                    session_id=session_id,
+                    llm_config=body.llm_config,
+                )
+            )
+            async for progress in _progress_events(
+                question_task,
+                stage="generating_question",
+                message="Generating the next interview question.",
+            ):
+                yield json.dumps(progress) + "\n"
+            next_payload, next_status = await question_task
+            question_task = None
+
+            response_session = session_out
+            if next_payload is not None:
+                refreshed = _store.get_session(user_id=user["user"], session_id=session_id)
+                if refreshed:
+                    response_session = refreshed
+
+            payload = InterviewAnswerAndNextResponse(
+                session=response_session,
+                turn=turn_payload.turn,
+                report_ready=turn_payload.report_ready,
+                degraded=turn_payload.degraded,
+                next_question=next_payload,
+                next_question_status=next_status,
+            ).model_dump(mode="json")
+            yield json.dumps({"type": "done", **payload}) + "\n"
+        except asyncio.CancelledError:
+            logger.info("Interview answer-and-next stream cancelled session=%s", session_id)
+            raise
+        except (
+            LLMServiceApprovalRequiredError,
+            StudyAppLLMNotAssignedError,
+            PersonalCredentialRequiredError,
+        ) as exc:
+            detail = policy_error_detail(exc)
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "code": detail["code"] or "generation_failed",
+                    "message": detail["message"] or "Interview evaluation blocked by policy.",
+                }
+            ) + "\n"
+        except Exception as exc:
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "code": "generation_failed",
+                    "message": str(exc).strip() or "Interview evaluation failed.",
+                }
+            ) + "\n"
+        finally:
+            _cancel_task(eval_task)
+            _cancel_task(question_task)
 
     return StreamingResponse(
         _event_stream(),
@@ -621,7 +1158,7 @@ async def next_question(
 
     turns = _store.get_turns(user_id=user["user"], session_id=session_id)
     generated = await _generator.generate_question(
-        session=session,
+        session=_prompt_session(session),
         turns=turns,
         llm_config=llm_config,
         user_identity=user,
@@ -671,10 +1208,11 @@ async def next_question_stream(
                 "message": "Generating next interview question.",
             }
         ) + "\n"
+        question_task: "asyncio.Task[Any] | None" = None
         try:
             question_task = asyncio.create_task(
                 _generator.generate_question(
-                    session=session,
+                    session=_prompt_session(session),
                     turns=turns,
                     llm_config=llm_config,
                     user_identity=user,
@@ -687,6 +1225,7 @@ async def next_question_stream(
             ):
                 yield json.dumps(progress) + "\n"
             generated = await question_task
+            question_task = None
 
             updated = _store.set_current_question(
                 user_id=user["user"],
@@ -704,6 +1243,9 @@ async def next_question_stream(
                 expected_signals=generated.get("expected_signals", []),
             ).model_dump(mode="json")
             yield json.dumps({"type": "done", **payload}) + "\n"
+        except asyncio.CancelledError:
+            logger.info("Interview next-question stream cancelled session=%s", session_id)
+            raise
         except (
             LLMServiceApprovalRequiredError,
             StudyAppLLMNotAssignedError,
@@ -725,6 +1267,8 @@ async def next_question_stream(
                     "message": str(exc).strip() or "Interview question generation failed.",
                 }
             ) + "\n"
+        finally:
+            _cancel_task(question_task)
 
     return StreamingResponse(
         _event_stream(),

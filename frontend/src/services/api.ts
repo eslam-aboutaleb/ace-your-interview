@@ -57,7 +57,12 @@ import type {
   InterviewTurnStreamDoneEvent,
   InterviewTurnStreamEvent,
   InterviewTurnStreamHandlers,
+  InterviewStreamStartEvent,
+  InterviewStreamProgressEvent,
+  InterviewStreamErrorEvent,
+  InterviewSession,
   InterviewSessionResponse,
+  InterviewTurn,
   InterviewTurnResponse,
   InterviewQuestionResponse,
   InterviewReportResponse,
@@ -239,6 +244,38 @@ export class InterviewStreamError extends Error {
 
 export function isInterviewStreamError(error: unknown): error is InterviewStreamError {
   return error instanceof InterviewStreamError;
+}
+
+/** Recorded turn plus the question that follows it (Stage 3.3).
+ *
+ * `next_question` is null when the follow-up could not be generated or the
+ * session just finished — the turn itself is always saved.
+ */
+export interface InterviewAnswerAndNextResponse {
+  session: InterviewSession;
+  turn: InterviewTurn;
+  report_ready: boolean;
+  degraded: boolean;
+  next_question: InterviewQuestionResponse | null;
+  next_question_status: "generated" | "session_completed" | "generation_failed";
+}
+
+export interface InterviewAnswerAndNextDoneEvent
+  extends InterviewAnswerAndNextResponse {
+  type: "done";
+}
+
+export type InterviewAnswerAndNextStreamEvent =
+  | InterviewStreamStartEvent
+  | InterviewStreamProgressEvent
+  | InterviewAnswerAndNextDoneEvent
+  | InterviewStreamErrorEvent;
+
+export interface InterviewAnswerAndNextHandlers {
+  onStart?: (event: InterviewStreamStartEvent) => void;
+  onProgress?: (event: InterviewStreamProgressEvent) => void;
+  onDone?: (event: InterviewAnswerAndNextDoneEvent) => void;
+  onError?: (event: InterviewStreamErrorEvent) => void;
 }
 
 type StreamErrorOptions = {
@@ -1163,6 +1200,84 @@ export async function submitInterviewAnswerStream(
       }),
     parseEvent: (line) => {
       let parsed: InterviewTurnStreamEvent;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw new InterviewStreamError("Invalid interview stream payload.", {
+          code: "stream_parse_failed",
+          fallbackEligible: true,
+        });
+      }
+      return parsed;
+    },
+    dispatchEvent,
+    getDoneEvent: () => doneEvent,
+    unavailableMessage: "Interview streaming endpoint unavailable.",
+    unavailableCode: "stream_unavailable",
+    unavailableFallbackEligible: (status) => status === 404 || status === 405,
+    incompleteMessage: "Interview stream ended before completion event.",
+    incompleteCode: "stream_incomplete",
+    incompleteFallbackEligible: true,
+  });
+}
+
+export async function submitInterviewAnswerAndNext(
+  sessionId: string,
+  req: SubmitInterviewAnswerRequest,
+): Promise<InterviewAnswerAndNextResponse> {
+  const { data } = await api.post<InterviewAnswerAndNextResponse>(
+    `/interview-sessions/${sessionId}/answer-and-next`,
+    req,
+  );
+  return data;
+}
+
+export async function submitInterviewAnswerAndNextStream(
+  sessionId: string,
+  req: SubmitInterviewAnswerRequest,
+  handlers: InterviewAnswerAndNextHandlers,
+  signal?: AbortSignal,
+): Promise<InterviewAnswerAndNextDoneEvent> {
+  let doneEvent: InterviewAnswerAndNextDoneEvent | null = null;
+
+  const dispatchEvent = (event: InterviewAnswerAndNextStreamEvent) => {
+    if (event.type === "start") {
+      handlers.onStart?.(event);
+      return;
+    }
+    if (event.type === "progress") {
+      handlers.onProgress?.(event);
+      return;
+    }
+    if (event.type === "done") {
+      doneEvent = event;
+      handlers.onDone?.(event);
+      return;
+    }
+    handlers.onError?.(event);
+    if (event.code === "llm_service_approval_required"
+      || event.code === "study_app_llm_not_assigned"
+      || event.code === "personal_credential_required") {
+      _redirectToPolicySettings(event.code);
+    }
+    throw new InterviewStreamError(event.message || "Interview evaluation failed.", {
+      code: event.code || "generation_failed",
+      fallbackEligible: false,
+    });
+  };
+
+  return _streamNdjson({
+    url: _resolveApiPath(`/interview-sessions/${encodeURIComponent(sessionId)}/answer-and-next/stream`),
+    payload: req,
+    signal,
+    makeError: (message, opts = {}) =>
+      new InterviewStreamError(message, {
+        code: opts.code,
+        status: opts.status,
+        fallbackEligible: opts.fallbackEligible,
+      }),
+    parseEvent: (line) => {
+      let parsed: InterviewAnswerAndNextStreamEvent;
       try {
         parsed = JSON.parse(line);
       } catch {

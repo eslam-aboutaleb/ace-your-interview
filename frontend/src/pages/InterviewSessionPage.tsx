@@ -17,8 +17,9 @@ import {
   generateNextInterviewQuestion,
   generateNextInterviewQuestionStream,
   isInterviewStreamError,
-  submitInterviewAnswer,
-  submitInterviewAnswerStream,
+  submitInterviewAnswerAndNext,
+  submitInterviewAnswerAndNextStream,
+  type InterviewAnswerAndNextResponse,
 } from "@/services/api";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -40,6 +41,34 @@ export default function InterviewSessionPage() {
   const [streamProgress, setStreamProgress] = useState("");
   const [startedAt, setStartedAt] = useState<number>(Date.now());
   const [lastTurn, setLastTurn] = useState<InterviewTurnResponse | null>(null);
+
+  // One round trip records the turn and fetches the question that follows it
+  // (Stage 3.3). The next question is null when the session finished or the
+  // follow-up generation failed; the turn is saved either way.
+  const applyCombinedResponse = useCallback(
+    (res: InterviewAnswerAndNextResponse) => {
+      setLastTurn(res);
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              session: res.session,
+              turns: [...prev.turns, res.turn],
+            }
+          : prev,
+      );
+      setAnswerDraft("");
+      if (res.next_question) {
+        setStartedAt(Date.now());
+      } else if (
+        res.next_question_status === "generation_failed"
+        && res.session.status === "active"
+      ) {
+        setErrorMsg("Answer saved. Could not generate the next question — try Next Question.");
+      }
+    },
+    [setData],
+  );
 
   // Voice integration
   const voice = useVoice();
@@ -168,31 +197,25 @@ export default function InterviewSessionPage() {
       },
     };
     try {
-      const res = await submitInterviewAnswerStream(sessionId, payload, {
+      const res = await submitInterviewAnswerAndNextStream(sessionId, payload, {
         onStart: (event) => {
           setStreamProgress(event.message || "Evaluating your answer...");
         },
         onProgress: (event) => {
           setStreamProgress(event.message || "Evaluating your answer...");
         },
-        onDone: () => {
-          setStreamProgress("Answer evaluation completed.");
+        onDone: (event) => {
+          setStreamProgress(
+            event.next_question
+              ? "Answer evaluation completed."
+              : "Answer saved. Preparing the next question...",
+          );
         },
         onError: (event) => {
           setErrorMsg(event.message || "Failed to submit answer. Please retry.");
         },
       });
-      setLastTurn(res);
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              session: res.session,
-              turns: [...prev.turns, res.turn],
-            }
-          : prev,
-      );
-      setAnswerDraft("");
+      applyCombinedResponse(res);
       if (res.session.status === "completed") {
         navigate(`/interview/${sessionId}/report`);
       }
@@ -201,18 +224,8 @@ export default function InterviewSessionPage() {
         setErrorMsg(streamErr.message || "Failed to submit answer. Please retry.");
       } else {
         try {
-          const res = await submitInterviewAnswer(sessionId, payload);
-          setLastTurn(res);
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  session: res.session,
-                  turns: [...prev.turns, res.turn],
-                }
-              : prev,
-          );
-          setAnswerDraft("");
+          const res = await submitInterviewAnswerAndNext(sessionId, payload);
+          applyCombinedResponse(res);
           if (res.session.status === "completed") {
             navigate(`/interview/${sessionId}/report`);
           }

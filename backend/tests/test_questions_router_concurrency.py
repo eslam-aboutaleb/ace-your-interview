@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.dependencies import require_auth
 from app.routers import questions
@@ -377,41 +378,111 @@ Static topic body.
 
     # ── 2.2 bounds on client-supplied prompt inputs ────────
 
-    def test_oversized_section_content_is_truncated_before_the_prompt(self):
-        huge = "S" * 40000
+    @staticmethod
+    def _schema_max_length(model, field: str) -> int:
+        """Read a field's declared `max_length` straight off the schema.
+
+        Deriving the expected bound from `model_fields` keeps this test pinned to
+        the single declaration instead of restating the same literal twice, so
+        moving a bound in `schemas/models.py` cannot leave a stale copy here.
+        """
+        for meta in model.model_fields[field].metadata:
+            value = getattr(meta, "max_length", None)
+            if value is not None:
+                return int(value)
+        raise AssertionError(f"{model.__name__}.{field} declares no max_length")
+
+    def test_oversized_section_content_is_rejected_at_the_schema_boundary(self):
+        title_bound = self._schema_max_length(GenerateQuestionsRequest, "section_title")
+        content_bound = self._schema_max_length(GenerateQuestionsRequest, "section_content")
+
         res = self.client.post(
             "/api/questions/generate-v2",
             json={
                 "topic_id": "custom-java",
                 "count": 1,
                 "level": "mid",
-                "section_title": "T" * 5000,
-                "section_content": huge,
+                "section_title": "T" * (title_bound + 1),
+                "section_content": "S" * (content_bound + 1),
+            },
+        )
+        # Oversized free text is refused outright, so no LLM call is made.
+        self.assertEqual(res.status_code, 422, res.text)
+        errors = {
+            tuple(error["loc"]): error for error in res.json()["detail"]
+        }
+        self.assertEqual(
+            set(errors),
+            {("body", "section_title"), ("body", "section_content")},
+        )
+        for field, bound in (("section_title", title_bound), ("section_content", content_bound)):
+            with self.subTest(field=field):
+                self.assertEqual(errors[("body", field)]["type"], "string_too_long")
+                self.assertEqual(errors[("body", field)]["ctx"]["max_length"], bound)
+        self.assertEqual(self.fake_llm.prompts, [])
+
+        # The declared limits are the same ones the router helper clamps to.
+        self.assertEqual(questions.MAX_SECTION_TITLE_CHARS, title_bound)
+        self.assertEqual(questions.MAX_SECTION_CONTENT_CHARS, content_bound)
+
+    def test_section_content_at_the_declared_bound_still_reaches_the_prompt(self):
+        title_bound = self._schema_max_length(GenerateQuestionsRequest, "section_title")
+        content_bound = self._schema_max_length(GenerateQuestionsRequest, "section_content")
+
+        res = self.client.post(
+            "/api/questions/generate-v2",
+            json={
+                "topic_id": "custom-java",
+                "count": 1,
+                "level": "mid",
+                "section_title": "T" * title_bound,
+                "section_content": "S" * content_bound,
             },
         )
         self.assertEqual(res.status_code, 200, res.text)
+
         base_prompt = self.fake_llm.prompts[0]
-        self.assertNotIn(huge, base_prompt)
-        self.assertNotIn("T" * 500, base_prompt)
-        # The section still reaches the prompt, bounded to the declared cap.
+        # The section still reaches the prompt, in full at the bound.
         self.assertIn("S" * 500, base_prompt)
+        self.assertIn("T" * 10, base_prompt)
         self.assertLess(
             len(base_prompt),
-            questions.MAX_SECTION_CONTENT_CHARS + questions.MAX_SECTION_TITLE_CHARS + 20000,
+            content_bound + title_bound + 20000,
         )
 
     def test_bounded_section_request_helper_matches_declared_limits(self):
+        title_bound = self._schema_max_length(GenerateQuestionsRequest, "section_title")
+        content_bound = self._schema_max_length(GenerateQuestionsRequest, "section_content")
+
+        # The router clamp and the schema bound are one declaration, not two.
+        self.assertEqual(questions.MAX_SECTION_TITLE_CHARS, title_bound)
+        self.assertEqual(questions.MAX_SECTION_CONTENT_CHARS, content_bound)
+
         body = GenerateQuestionsRequest(
             topic_id="custom-java",
-            section_title="T" * 500,
-            section_content="S" * 40000,
+            section_title="T" * title_bound,
+            section_content="S" * content_bound,
             existing_questions=["E" * 2000],
         )
         title, content, existing = questions._bounded_section_request(body)
-        self.assertEqual(len(title), questions.MAX_SECTION_TITLE_CHARS)
-        self.assertEqual(len(content), questions.MAX_SECTION_CONTENT_CHARS)
+        # A request already inside the schema bound is passed through whole.
+        self.assertEqual(len(title), title_bound)
+        self.assertEqual(len(content), content_bound)
+        # `existing_questions` items carry no per-item schema bound, so the
+        # router-level clamp is still the mechanism that bounds them.
         self.assertEqual(len(existing), 1)
         self.assertEqual(len(existing[0]), questions.MAX_EXISTING_QUESTION_CHARS)
+
+        # One character past a bound is a validation error, not a silent clamp.
+        with self.assertRaises(ValidationError) as ctx:
+            GenerateQuestionsRequest(
+                topic_id="custom-java",
+                section_title="T" * (title_bound + 1),
+            )
+        error = ctx.exception.errors()[0]
+        self.assertEqual(error["type"], "string_too_long")
+        self.assertEqual(error["loc"], ("section_title",))
+        self.assertEqual(error["ctx"]["max_length"], title_bound)
 
     def test_existing_questions_are_bounded_per_item(self):
         res = self.client.post(

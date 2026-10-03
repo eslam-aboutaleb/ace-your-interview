@@ -28,8 +28,15 @@ dev = [
     "pytest-cov>=5.0.0",
 ]
 
+[project.scripts]
+# Convenience wrapper for the Stage 4.1 eval harness. The canonical invocation
+# stays `python scripts/eval_agent_quality.py`, which needs no install.
+eval-agent-quality = "scripts.eval_agent_quality:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+# "scripts" is packaged only so the eval-agent-quality console script above can
+# resolve; it is not imported by the application at runtime.
+packages = ["app", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -44,6 +51,10 @@ source = ["app"]
 omit = ["app/generated/*"]
 
 [tool.coverage.report]
+# Floor, not a target. Measured at 79% when this was set; kept one point below
+# so an unrelated flake cannot turn the build red, while a real coverage drop
+# still does. Raise it as the suite grows.
+fail_under = 78
 exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
