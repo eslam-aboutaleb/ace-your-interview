@@ -428,11 +428,8 @@ export default function InterviewSessionPage() {
                   } else {
                     // Start a voice session for interview if not already active
                     if (!voice.sessionActive) {
-                      await voice.startSession("interview", {
-                        sessionId,
-                        systemPrompt:
-                          "Transcribe the user's spoken interview answer. Return only the transcription.",
-                      });
+                      // No system prompt: the server owns the interview-coach persona.
+                      await voice.startSession("interview", { sessionId });
                     }
                     voice.startRecording();
                   }
@@ -511,43 +508,57 @@ export default function InterviewSessionPage() {
             <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-3">
               Rubric Feedback
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-              {Object.entries(lastTurn.turn.rubric).map(([k, v]) => (
-                <div key={k} className="bg-udemy-bg rounded px-3 py-2">
-                  <p className="text-[11px] text-udemy-text-muted uppercase">
-                    {k.replace(/_/g, " ")}
-                  </p>
-                  <p className="font-bold">{v}</p>
+            {lastTurn.turn.degraded ? (
+              <div className="flex items-start gap-2 text-sm text-udemy-text-muted">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <p>
+                  Evaluation unavailable — your answer was saved. Submit the next
+                  question or repeat this turn to get scored feedback.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                  {Object.entries(lastTurn.turn.rubric)
+                    .filter(([k]) => k !== "degraded")
+                    .map(([k, v]) => (
+                      <div key={k} className="bg-udemy-bg rounded px-3 py-2">
+                        <p className="text-[11px] text-udemy-text-muted uppercase">
+                          {k.replace(/_/g, " ")}
+                        </p>
+                        <p className="font-bold">{v}</p>
+                      </div>
+                    ))}
                 </div>
-              ))}
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Strengths</h3>
-                <ul className="text-sm text-udemy-text-muted list-disc pl-5 space-y-1">
-                  {lastTurn.turn.strengths.map((s, i) => (
-                    <li key={`${s}-${i}`}>{s}</li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Improvements</h3>
-                <ul className="text-sm text-udemy-text-muted list-disc pl-5 space-y-1">
-                  {lastTurn.turn.improvements.map((s, i) => (
-                    <li key={`${s}-${i}`}>{s}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">Strengths</h3>
+                    <ul className="text-sm text-udemy-text-muted list-disc pl-5 space-y-1">
+                      {lastTurn.turn.strengths.map((s, i) => (
+                        <li key={`${s}-${i}`}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">Improvements</h3>
+                    <ul className="text-sm text-udemy-text-muted list-disc pl-5 space-y-1">
+                      {lastTurn.turn.improvements.map((s, i) => (
+                        <li key={`${s}-${i}`}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
 
-            <div className="mt-4">
-              <MarkdownRenderer
-                content={lastTurn.turn.follow_up_note}
-                className="text-sm"
-                compact
-              />
-            </div>
+                <div className="mt-4">
+                  <MarkdownRenderer
+                    content={lastTurn.turn.follow_up_note}
+                    className="text-sm"
+                    compact
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

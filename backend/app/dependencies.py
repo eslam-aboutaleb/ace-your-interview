@@ -1,6 +1,7 @@
 """Shared FastAPI dependencies."""
 
 from ipaddress import ip_address
+from typing import Any
 
 from fastapi import Cookie, Depends, HTTPException, Request
 
@@ -8,12 +9,12 @@ from app.config import get_settings
 from app.services.auth import decode_jwt_token
 
 
-def _is_localhost_request(request: Request) -> bool:
-    host = (request.url.hostname or "").strip().lower().rstrip(".")
-    if host == "localhost":
+def _is_localhost_host(host: str) -> bool:
+    normalised = (host or "").strip().lower().rstrip(".")
+    if normalised == "localhost":
         return True
     try:
-        return ip_address(host).is_loopback
+        return ip_address(normalised).is_loopback
     except ValueError:
         return False
 
@@ -25,18 +26,33 @@ def _is_local_frontend_config(frontend_url: str) -> bool:
     )
 
 
-def _is_loopback_client_request(request: Request) -> bool:
-    client_host = (request.client.host if request.client else "").strip()
-    if not client_host:
+def _is_loopback_host(client_host: str) -> bool:
+    normalised = (client_host or "").strip()
+    if not normalised:
         return False
     try:
-        return ip_address(client_host).is_loopback
+        return ip_address(normalised).is_loopback
     except ValueError:
         return False
 
 
 def _is_dev_environment(environment: str) -> bool:
     return (environment or "").strip().lower() in {"development", "dev", "local", "test"}
+
+
+def is_dev_auth_bypass_enabled(*, settings: Any, request_host: str, client_host: str) -> bool:
+    """Return True only when every dev-bypass precondition holds.
+
+    Non-HTTP transports (WebSocket) call this with the equivalent host values
+    so the HTTP and WebSocket auth paths cannot drift apart.
+    """
+    return bool(
+        settings.dev_auth_bypass_localhost
+        and _is_dev_environment(settings.environment)
+        and _is_local_frontend_config(settings.frontend_url)
+        and _is_localhost_host(request_host)
+        and _is_loopback_host(client_host)
+    )
 
 
 def _normalise_identity(provider: str, user: str) -> tuple[str, str]:
@@ -63,12 +79,10 @@ async def require_auth(request: Request, session: str = Cookie(default=None)) ->
     """Validate the session cookie and return ``{user, provider}``."""
     settings = get_settings()
 
-    if (
-        settings.dev_auth_bypass_localhost
-        and _is_dev_environment(settings.environment)
-        and _is_local_frontend_config(settings.frontend_url)
-        and _is_localhost_request(request)
-        and _is_loopback_client_request(request)
+    if is_dev_auth_bypass_enabled(
+        settings=settings,
+        request_host=request.url.hostname or "",
+        client_host=request.client.host if request.client else "",
     ):
         if session:
             try:

@@ -13,7 +13,7 @@ from app.services.learning_store import LearningStore
 
 
 class FakeLLM:
-    async def completion(self, prompt, llm_config=None, user_identity=None):
+    async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
         payload = {"requires_programming": False, "language_options": []}
         return {
             "success": True,

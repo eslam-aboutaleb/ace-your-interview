@@ -13,15 +13,24 @@ from app.services.http_clients import get_oauth_http_client
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_USERS_FILE = Path("allowed_users.json")
+
+def get_allowed_users_file() -> Path:
+    """Resolve the login allowlist path from settings.
+
+    Resolved lazily, never at import time: ``app/main.py`` copies ``.env`` into
+    ``os.environ`` after module imports have begun, so an import-time
+    ``get_settings()`` would silently miss ``.env`` values.
+    """
+    return Path(get_settings().allowed_users_file)
 
 
 # ── Allowed-users store (JSON file, seeded from env vars) ────────────
 
 
 def _load_allowed_users() -> dict:
-    if ALLOWED_USERS_FILE.exists():
-        with open(ALLOWED_USERS_FILE) as f:
+    allowed_users_file = get_allowed_users_file()
+    if allowed_users_file.exists():
+        with open(allowed_users_file) as f:
             return json.load(f)
     # First run – seed from env vars
     settings = get_settings()
@@ -42,7 +51,7 @@ def _load_allowed_users() -> dict:
 
 
 def _save_allowed_users(data: dict) -> None:
-    with open(ALLOWED_USERS_FILE, "w") as f:
+    with open(get_allowed_users_file(), "w") as f:
         json.dump(data, f, indent=2)
 
 

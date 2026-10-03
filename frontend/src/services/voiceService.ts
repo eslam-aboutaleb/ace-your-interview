@@ -193,7 +193,7 @@ export class BrowserVoiceService {
   }
 }
 
-// ── WebSocket Voice Service (cloud / realtime tier) ─────────
+// ── WebSocket Voice Service (cloud tier) ─────────────────
 
 export class WebSocketVoiceService {
   private ws: WebSocket | null = null;
@@ -305,7 +305,6 @@ export class WebSocketVoiceService {
     tier: VoiceTier;
     sessionType: VoiceSessionType;
     sessionId?: string;
-    systemPrompt?: string;
     llmConfig?: { provider: string; model: string };
   }): void {
     this.send({
@@ -313,7 +312,6 @@ export class WebSocketVoiceService {
       tier: opts.tier,
       session_type: opts.sessionType,
       session_id: opts.sessionId,
-      system_prompt: opts.systemPrompt,
       llm_config: opts.llmConfig,
     });
   }

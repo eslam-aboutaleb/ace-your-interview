@@ -17,7 +17,7 @@ class FakeLLM:
         self.mode = "success"
         self.calls = 0
 
-    async def completion(self, prompt, llm_config=None, user_identity=None):
+    async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
         if self.mode == "blocked":
             return {
                 "success": False,

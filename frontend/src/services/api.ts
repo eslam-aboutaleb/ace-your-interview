@@ -69,6 +69,9 @@ import type {
   LLMMyAssignmentResponse,
   UserSettingsResponse,
   UserPreferences,
+  SaveProgressPayload,
+  TopicProgressDocument,
+  TopicProgressListResponse,
 } from "@/types";
 
 const api = axios.create({
@@ -917,6 +920,59 @@ export async function fetchTopicMastery(
 export async function fetchLearnerProfile(): Promise<LearnerProfile> {
   const { data } = await api.get<LearnerProfile>("/learning/profile");
   return data;
+}
+
+// ── Per-Topic Progress ────────────────────────────────────────
+
+export async function fetchTopicProgress(
+  topicId: string,
+): Promise<TopicProgressDocument> {
+  const { data } = await api.get<TopicProgressDocument>(`/progress/${topicId}`);
+  return data;
+}
+
+export async function fetchTopicProgressList(
+  limit = 50,
+): Promise<TopicProgressListResponse> {
+  const { data } = await api.get<TopicProgressListResponse>("/progress/topics", {
+    params: { limit },
+  });
+  return data;
+}
+
+export async function saveTopicProgress(
+  topicId: string,
+  payload: SaveProgressPayload,
+): Promise<TopicProgressDocument> {
+  const { data } = await api.post<TopicProgressDocument>(
+    `/progress/${topicId}/save`,
+    payload,
+  );
+  return data;
+}
+
+/**
+ * Fire the `pagehide` beacon. Uses `fetch(..., { keepalive: true })` rather than
+ * axios because XHR is cancelled on unload; keepalive bodies are capped by the
+ * browser at 64 KB, so callers must send a bounded question list.
+ */
+export function autosaveTopicProgress(
+  topicId: string,
+  payload: SaveProgressPayload,
+): Promise<TopicProgressDocument | null> {
+  const baseUrl = import.meta.env.VITE_API_URL || "/api";
+  return fetch(`${baseUrl}/progress/${encodeURIComponent(topicId)}/autosave`, {
+    method: "POST",
+    keepalive: true,
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then(async (response) => {
+      if (!response.ok) return null;
+      return (await response.json()) as TopicProgressDocument;
+    })
+    .catch(() => null);
 }
 
 export async function updateLearnerProfile(
