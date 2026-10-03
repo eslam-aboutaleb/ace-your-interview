@@ -10,13 +10,34 @@ from app.services.learning_store import LearningStore
 
 
 class FakeLLM:
-    def __init__(self, success: bool = True, blocked: bool = False):
+    def __init__(self, success: bool = True, blocked: bool = False, error_code: str = ""):
         self.success = success
         self.blocked = blocked
+        self.error_code = error_code
         self.last_prompt = ""
+        self.last_system = ""
+        self.last_kwargs: dict = {}
 
-    async def completion(self, prompt, llm_config=None, user_identity=None):
+    async def completion(
+        self,
+        prompt,
+        llm_config=None,
+        user_identity=None,
+        task=None,
+        *,
+        system="",
+        structured=False,
+        max_tokens_cap=None,
+        tools=None,
+        tool_choice=None,
+    ):
         self.last_prompt = prompt
+        self.last_system = system
+        self.last_kwargs = {
+            "task": task,
+            "structured": structured,
+            "max_tokens_cap": max_tokens_cap,
+        }
         if self.blocked:
             return {
                 "success": False,
@@ -31,12 +52,14 @@ class FakeLLM:
                 "analysis": "### Meaning\nA concise explanation.\n\n- Practical takeaway",
                 "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
                 "error": "",
+                "error_code": "",
             }
         return {
             "success": False,
             "analysis": "",
             "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
             "error": "provider_down",
+            "error_code": self.error_code,
         }
 
 

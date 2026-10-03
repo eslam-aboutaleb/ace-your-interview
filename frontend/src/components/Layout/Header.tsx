@@ -9,11 +9,14 @@ import {
   MessageSquare,
   CalendarDays,
   Clock3,
+  FileText,
+  Layers,
   LogOut,
   User,
   LogIn,
   Menu,
   X,
+  Star,
 } from "lucide-react";
 import { useProgressStore } from "@/store/progressStore";
 import { useAuthStore } from "@/store/authStore";
@@ -99,10 +102,28 @@ export default function Header() {
             active: location.pathname.startsWith("/study-plan"),
           },
           {
+            to: "/documents",
+            label: "Documents",
+            icon: <FileText className="w-4 h-4" />,
+            active: location.pathname.startsWith("/documents"),
+          },
+          {
+            to: "/decks",
+            label: "Flashcards",
+            icon: <Layers className="w-4 h-4" />,
+            active: location.pathname.startsWith("/decks"),
+          },
+          {
             to: "/interview",
             label: "Interview",
             icon: <MessageSquare className="w-4 h-4" />,
             active: location.pathname.startsWith("/interview"),
+          },
+          {
+            to: "/star-stories",
+            label: "STAR Stories",
+            icon: <Star className="w-4 h-4" />,
+            active: location.pathname.startsWith("/star-stories"),
           },
           {
             to: "/user-settings",

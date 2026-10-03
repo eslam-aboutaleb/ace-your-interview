@@ -22,13 +22,19 @@ import {
   fetchInterviewStats,
   fetchTopicMastery,
   fetchTopics,
+  fetchForecast,
 } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
 import { useAuthStore } from "@/store/authStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
-import type { LearnerProfile, RecommendationItem, TopicSummary } from "@/types";
+import type {
+  ForecastResponse,
+  LearnerProfile,
+  RecommendationItem,
+  TopicSummary,
+} from "@/types";
 
 const TOPIC_ICONS: Record<string, string> = {
   "01-backend-fundamentals-and-http": "🌐",
@@ -70,6 +76,7 @@ export default function Dashboard() {
   const [customError, setCustomError] = useState("");
   const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
   const [profile, setProfile] = useState<LearnerProfile | null>(null);
+  const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [interviewStats, setInterviewStats] = useState({
     total_sessions: 0,
     completed_sessions: 0,
@@ -114,6 +121,11 @@ export default function Dashboard() {
       .then(setInterviewStats)
       .catch(() => {
         // ignore mock interview stats failures (feature flag may be off)
+      });
+    fetchForecast(7)
+      .then(setForecast)
+      .catch(() => {
+        // ignore forecast failures (feature flag may be off)
       });
     if (!isAuthenticated) {
       setProfile(null);
@@ -258,6 +270,66 @@ export default function Dashboard() {
           </span>
         </div>
       </div>
+
+      {/* Due forecast */}
+      {forecast && (
+        <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-4">
+          <div className="udemy-card p-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold mb-1">
+                  Due in the Next 7 Days
+                </h2>
+                <p className="text-xs text-udemy-text-muted">
+                  {forecast.total_due} card
+                  {forecast.total_due === 1 ? "" : "s"} due
+                </p>
+              </div>
+              <Link to="/review" className="btn-secondary text-sm inline-flex">
+                Review now
+              </Link>
+            </div>
+            <div className="flex items-end gap-1.5 mt-4 h-24">
+              {forecast.due_counts.map((day) => {
+                const maxCount = Math.max(
+                  1,
+                  ...forecast.due_counts.map((d) => d.count),
+                );
+                const pct = Math.round((day.count / maxCount) * 100);
+                const label = new Date(
+                  `${day.date}T00:00:00`,
+                ).toLocaleDateString(undefined, {
+                  weekday: "short",
+                  month: "numeric",
+                  day: "numeric",
+                });
+                return (
+                  <div
+                    key={day.date}
+                    className="flex-1 flex flex-col items-center justify-end gap-1 h-full"
+                    title={`${day.date}: ${day.count} due`}
+                  >
+                    <span className="text-[10px] text-udemy-text-muted">
+                      {day.count}
+                    </span>
+                    <div className="w-full rounded-t bg-udemy-purple/15 h-16 flex items-end">
+                      <div
+                        className="w-full rounded-t bg-udemy-purple"
+                        style={{
+                          height: `${day.count > 0 ? Math.max(pct, 6) : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="text-[10px] text-udemy-text-muted text-center leading-tight">
+                      {label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-6">
         <div className="grid grid-cols-1 xl:grid-cols-[1.05fr,0.95fr] gap-4">

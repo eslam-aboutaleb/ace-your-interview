@@ -75,6 +75,7 @@ async def health_check():
     # With LiteLLM we no longer have separate gRPC backends.
     # Report overall health based on whether a default provider key is set.
     from app.config import get_settings
+    from app.services.document_store import vector_index_status
     settings = get_settings()
     default_ok = _provider_configured(settings.default_provider)
 
@@ -83,6 +84,7 @@ async def health_check():
         cli_agent=default_ok,
         llm_chain_version="litellm",
         cli_agent_version="litellm",
+        vector_index=vector_index_status(),
     )
 
 

@@ -13,6 +13,21 @@ __pycache__/
 frontend/dist/
 backend/*.egg-info/
 
+# Backend runtime state (NEVER commit — Fernet-encrypted credentials,
+# OAuth tokens, the login allowlist and LLM assignments live here)
+backend/data/
+*.db
+user_llm_settings.json
+allowed_users.json
+llm_service_users.json
+llm_assignments.json
+
+# Test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+
 # IDE
 .vscode/
 .idea/

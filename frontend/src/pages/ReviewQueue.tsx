@@ -3,9 +3,13 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { AlertTriangle, Clock3, Loader2, RefreshCw } from "lucide-react";
 import { pageTransition, pageVariants } from "@/utils/animations";
-import { fetchReviewQueue, fetchTopics } from "@/services/api";
+import { fetchReviewQueue, fetchTopics, submitCardReview } from "@/services/api";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
-import type { ReviewQueueItem, TopicSummary } from "@/types";
+import type {
+  LearningReviewRating,
+  ReviewQueueItem,
+  TopicSummary,
+} from "@/types";
 
 function formatDateTime(value: string): string {
   const parsed = new Date(value);
@@ -13,11 +17,45 @@ function formatDateTime(value: string): string {
   return parsed.toLocaleString();
 }
 
+const RATING_BUTTONS: {
+  rating: LearningReviewRating;
+  label: string;
+  className: string;
+}[] = [
+  {
+    rating: "again",
+    label: "Again",
+    className: "btn-secondary rating-again",
+  },
+  {
+    rating: "hard",
+    label: "Hard",
+    className: "btn-secondary rating-hard",
+  },
+  {
+    rating: "good",
+    label: "Good",
+    className: "btn-primary rating-good",
+  },
+  {
+    rating: "easy",
+    label: "Easy",
+    className: "btn-secondary rating-easy",
+  },
+];
+
 export default function ReviewQueue() {
   const [items, setItems] = useState<ReviewQueueItem[]>([]);
   const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
+  const [submitting, setSubmitting] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [gradeError, setGradeError] = useState<
+    Record<string, string>
+  >({});
+  const [loadedAt, setLoadedAt] = useState<Record<string, number>>({});
 
   const load = async () => {
     setLoading(true);
@@ -29,6 +67,14 @@ export default function ReviewQueue() {
       ]);
       setItems(queue.items || []);
       setTopics(topicList || []);
+      const now = Date.now();
+      const stamps: Record<string, number> = {};
+      for (const item of queue.items || []) {
+        stamps[item.question_id] = now;
+      }
+      setLoadedAt(stamps);
+      setSubmitting({});
+      setGradeError({});
     } catch (err) {
       console.error(err);
       setErrorMsg("Could not load review queue. Please retry.");
@@ -57,6 +103,45 @@ export default function ReviewQueue() {
     const total = items.reduce((sum, item) => sum + item.mastery_score, 0);
     return Math.round((total / items.length) * 100);
   }, [items]);
+
+  const leechCount = useMemo(
+    () => items.filter((item) => item.leech).length,
+    [items],
+  );
+
+  const handleGrade = async (
+    item: ReviewQueueItem,
+    rating: LearningReviewRating,
+  ) => {
+    const key = item.question_id;
+    if (submitting[key] || item.suspended) return;
+    setSubmitting((prev) => ({ ...prev, [key]: true }));
+    setGradeError((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    const responseTimeMs = loadedAt[key]
+      ? Math.max(0, Date.now() - loadedAt[key])
+      : 0;
+    try {
+      await submitCardReview({
+        card_id: item.question_id,
+        topic_id: item.topic_id,
+        rating,
+        response_time_ms: responseTimeMs,
+        source_type: "question",
+      });
+      await load();
+    } catch (err) {
+      console.error(err);
+      setGradeError((prev) => ({
+        ...prev,
+        [key]: "Could not submit review. Please retry.",
+      }));
+      setSubmitting((prev) => ({ ...prev, [key]: false }));
+    }
+  };
 
   return (
     <motion.div
@@ -89,10 +174,11 @@ export default function ReviewQueue() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-5">
           <SummaryChip label="Total due" value={`${items.length}`} />
           <SummaryChip label="Overdue now" value={`${overdueNow}`} />
           <SummaryChip label="Average mastery" value={`${avgMasteryPct}%`} />
+          <SummaryChip label="Leeches" value={`${leechCount}`} />
         </div>
 
         {errorMsg && (
@@ -125,6 +211,9 @@ export default function ReviewQueue() {
             {items.map((item) => {
               const topicId = normalizeEscapedSingleLineText(item.topic_id);
               const questionId = normalizeEscapedSingleLineText(item.question_id);
+              const isSubmitting = Boolean(submitting[item.question_id]);
+              const itemError = gradeError[item.question_id];
+              const isSuspended = Boolean(item.suspended);
               return (
                 <div
                   key={`${item.topic_id}:${item.question_id}`}
@@ -141,18 +230,56 @@ export default function ReviewQueue() {
                       <div className="flex flex-wrap gap-2 mt-2 text-xs">
                         <Badge>{`Due: ${formatDateTime(item.due_at)}`}</Badge>
                         <Badge>{`Mastery: ${Math.round(item.mastery_score * 100)}%`}</Badge>
-                        <Badge>{`Confidence: ${item.last_confidence}/5`}</Badge>
-                        <Badge>{`Bucket: ${item.review_bucket}`}</Badge>
-                        <Badge>{`Attempts: ${item.attempts}`}</Badge>
+                        <Badge>{`State: ${item.state || "new"}`}</Badge>
+                        <Badge>{`Reps: ${item.attempts}`}</Badge>
+                        <Badge>{`Lapses: ${item.lapses ?? 0}`}</Badge>
+                        {item.leech && (
+                          <Badge>
+                            <span className="inline-flex items-center gap-1 text-red-700">
+                              <AlertTriangle className="w-3 h-3" />
+                              Leech
+                            </span>
+                          </Badge>
+                        )}
+                        {isSuspended && <Badge>Suspended</Badge>}
                       </div>
+                      {itemError && (
+                        <p className="text-xs text-red-700 mt-2">
+                          {itemError}
+                        </p>
+                      )}
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Link to={`/topics/${item.topic_id}`} className="btn-secondary">
-                        Study now
-                      </Link>
-                      <Link to={`/quiz/${item.topic_id}`} className="btn-primary">
-                        Quiz this topic
-                      </Link>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        {RATING_BUTTONS.map(({ rating, label, className }) => (
+                          <button
+                            key={rating}
+                            onClick={() => handleGrade(item, rating)}
+                            disabled={isSubmitting || isSuspended}
+                            className={`${className} disabled:opacity-50 min-w-[72px]`}
+                          >
+                            {isSubmitting ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              label
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          to={`/topics/${item.topic_id}`}
+                          className="btn-secondary"
+                        >
+                          Study now
+                        </Link>
+                        <Link
+                          to={`/quiz/${item.topic_id}`}
+                          className="btn-primary"
+                        >
+                          Quiz this topic
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 </div>

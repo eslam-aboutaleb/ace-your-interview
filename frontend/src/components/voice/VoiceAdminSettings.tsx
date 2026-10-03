@@ -9,7 +9,6 @@ import {
   Loader2,
   Globe,
   Wifi,
-  Zap,
   CheckCircle2,
   XCircle,
 } from "lucide-react";
@@ -41,7 +40,6 @@ const TTS_PROVIDERS = [
 const TIERS: { value: VoiceTier; label: string; icon: typeof Globe }[] = [
   { value: "browser", label: "Browser (Free)", icon: Globe },
   { value: "cloud", label: "Cloud (~$0.01)", icon: Wifi },
-  { value: "realtime", label: "Realtime (~$0.50+)", icon: Zap },
 ];
 
 export default function VoiceAdminSettings() {

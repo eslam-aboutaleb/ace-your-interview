@@ -13,9 +13,17 @@ from app.services.learning_store import LearningStore
 
 
 class FakeLLM:
-    async def completion(self, prompt, llm_config=None, user_identity=None):
-        prompt_l = prompt.lower()
-        if "expert technical quiz creator" in prompt_l:
+    async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
+        # Stage 2.1 moved each persona out of the user turn into the system role,
+        # so route on `system` first and fall back to the task-shaped prompt text.
+        haystack = f"{kwargs.get('system') or ''}\n{prompt}".lower()
+        wants_quiz = "expert technical quiz creator" in haystack or (
+            "quiz questions from the documentation" in haystack
+        )
+        wants_problem_solving = (
+            "expert algorithm interviewer and problem-solving educator" in haystack
+        )
+        if wants_quiz:
             payload = [
                 {
                     "question": "Which Java collection preserves insertion order and allows fast key lookups?",
@@ -35,7 +43,7 @@ class FakeLLM:
                     "target_level": "mid",
                 }
             ]
-        elif "expert algorithm interviewer and problem-solving educator" in prompt_l:
+        elif wants_problem_solving:
             payload = [
                 {
                     "question": "Given an integer array and a target, how would you solve two sum in python?",

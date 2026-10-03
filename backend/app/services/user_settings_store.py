@@ -16,7 +16,11 @@ from typing import Any, Optional
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.config import get_settings
-from app.schemas.models import MODEL_SUGGESTIONS, USER_SETTINGS_PROVIDER_WHITELIST
+from app.schemas.models import (
+    MODEL_SUGGESTIONS,
+    USER_SETTINGS_PROVIDER_WHITELIST,
+    VoiceTierEnum,
+)
 from app.services.http_clients import get_oauth_http_client
 from app.services.llm_assignments_store import LLMAssignmentsStore, normalise_identity
 from app.services.llm_policy import (
@@ -29,6 +33,10 @@ from app.services.llm_service_access import LLMServiceAccess
 logger = logging.getLogger(__name__)
 
 USER_SETTINGS_PROVIDERS = list(USER_SETTINGS_PROVIDER_WHITELIST)
+
+#: Voice tiers a user may pin as their preference. Unknown or disabled
+#: tiers fall back to the admin default at read time.
+VALID_VOICE_TIERS = frozenset(tier.value for tier in VoiceTierEnum)
 
 
 def identity_key_for_user(user_identity: dict | None) -> str:
@@ -126,6 +134,7 @@ class UserSettingsStore:
             "auth_mode": "api_key",
             "llm_source": "personal",
             "require_answer_reveal": False,
+            "voice_tier": None,
         }
 
     def _encrypt(self, value: str) -> str:
@@ -249,6 +258,12 @@ class UserSettingsStore:
         else:
             require_answer_reveal = bool(defaults.get("require_answer_reveal", False))
 
+        raw_voice_tier = raw.get("voice_tier", defaults.get("voice_tier"))
+        voice_tier = str(raw_voice_tier).strip() if raw_voice_tier else ""
+        if voice_tier and voice_tier not in VALID_VOICE_TIERS:
+            # Unknown tiers fall back to the admin default (None).
+            voice_tier = ""
+
         return {
             "provider": provider,
             "model": model,
@@ -257,6 +272,7 @@ class UserSettingsStore:
             "auth_mode": auth_mode,
             "llm_source": llm_source,
             "require_answer_reveal": require_answer_reveal,
+            "voice_tier": voice_tier or None,
         }
 
     def get_user_state(self, identity_key: str) -> tuple[dict[str, Any], bool]:

@@ -2,19 +2,35 @@
 
 from __future__ import annotations
 
-import json
+import inspect
 import logging
 import re
 from typing import Any, Optional
 
 from app.schemas.models import LLMConfigRequest, TopicDetail
-from app.services.llm_client import LLMClient
+from app.services.llm_client import (
+    TERMINAL_ERROR_CODES,
+    LLMClient,
+    parse_json_object,
+)
 from app.services.llm_policy import raise_if_policy_blocked_result
+from app.services.prompt_blocks import (
+    UNTRUSTED_CLAUSE,
+    render_contract,
+    untrusted_block,
+)
 
 logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 3
 _MAX_TOPIC_CONTEXT = 7000
+_MAX_TOKENS_CAP = 600
+_ADVISOR_SYSTEM_PROMPT = (
+    "You are a technical curriculum advisor. You inspect one topic's metadata and section "
+    "content and decide whether the topic needs programming-language-specific code examples, "
+    "and which languages to offer for them. You always answer with a single JSON object and "
+    "never with prose."
+)
 _CANONICAL_LANGUAGE_MAP = {
     "js": "javascript",
     "node": "javascript",
@@ -30,35 +46,6 @@ _CANONICAL_LANGUAGE_MAP = {
     "c#": "csharp",
     "c++": "cpp",
 }
-
-
-def _parse_json_object(raw: str) -> dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except json.JSONDecodeError:
-        pass
-
-    fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-    if fenced:
-        try:
-            data = json.loads(fenced.group(1))
-            return data if isinstance(data, dict) else {}
-        except json.JSONDecodeError:
-            pass
-
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            data = json.loads(text[start : end + 1])
-            return data if isinstance(data, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
 
 
 def _normalise_language(value: str) -> str:
@@ -131,35 +118,63 @@ def _fallback_profile(topic: TopicDetail) -> dict[str, Any]:
     }
 
 
+def _supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
+    """Drop call options ``client.completion`` does not accept.
+
+    ``LLMClient`` takes the full Stage-2 option set, but the client is injected,
+    so a narrower implementation may be in use. Filter against the bound
+    signature rather than assuming one shape.
+    """
+    try:
+        params = inspect.signature(client.completion).parameters
+    except (TypeError, ValueError):
+        return dict(options)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return options
+    return {key: value for key, value in options.items() if key in params}
+
+
+
 def _build_prompt(topic: TopicDetail, mcp_context: str = "") -> str:
-    topic_context = topic.raw_content[:_MAX_TOPIC_CONTEXT]
-    mcp_block = f"\n\nExternal context (optional):\n{mcp_context[:2500]}" if mcp_context else ""
-    return f"""You are a technical curriculum advisor.
-
-Given the topic metadata and section content below, decide whether this topic needs programming-language-specific code examples.
-
-Return ONLY valid JSON:
-{{
+    """Build the user turn. The advisor persona lives in ``system`` (Stage 2.1)."""
+    contract = render_contract(
+        schema_label="Return ONLY valid JSON",
+        schema_block="""{
   "requires_programming": true|false,
   "language_options": ["lowercase canonical language names"]
-}}
+}""",
+        rules=[
+            "If requires_programming=false, language_options must be [].",
+            "If requires_programming=true, return 3 to 8 language options, ordered by relevance.",
+            "Keep options specific to this topic and common in interview prep.",
+            "Use canonical lowercase names like: python, javascript, typescript, java, go, csharp, cpp, rust, sql, bash, kotlin, swift, php, ruby.",
+            "Do not include frameworks or cloud providers as languages.",
+            "Output JSON only.",
+            UNTRUSTED_CLAUSE,
+        ],
+    )
+    metadata_block = "\n".join(
+        [
+            f"Topic ID: {topic.id}",
+            f"Track: {topic.track}",
+            f"Levels: {', '.join(topic.levels)}",
+        ]
+    )
+    untrusted_blocks = "\n\n".join(
+        block
+        for block in (
+            untrusted_block("topic_title", topic.title),
+            untrusted_block("topic_description", topic.description),
+            untrusted_block("topic_content", topic.raw_content, _MAX_TOPIC_CONTEXT),
+            untrusted_block("external_context", mcp_context, 2500),
+        )
+        if block
+    )
+    return f"""{contract}
 
-Rules:
-- If requires_programming=false, language_options must be [].
-- If requires_programming=true, return 3 to 8 language options, ordered by relevance.
-- Keep options specific to this topic and common in interview prep.
-- Use canonical lowercase names like: python, javascript, typescript, java, go, csharp, cpp, rust, sql, bash, kotlin, swift, php, ruby.
-- Do not include frameworks or cloud providers as languages.
-- Output JSON only.
+{metadata_block}
 
-Topic ID: {topic.id}
-Title: {topic.title}
-Description: {topic.description}
-Track: {topic.track}
-Levels: {", ".join(topic.levels)}
-
-Topic content:
-{topic_context}{mcp_block}
+{untrusted_blocks}
 """
 
 
@@ -181,11 +196,24 @@ class TopicLanguageAdvisor:
                 prompt,
                 llm_config,
                 user_identity=user_identity,
+                **_supported_options(
+                    self.llm,
+                    {
+                        "task": "final",
+                        "system": _ADVISOR_SYSTEM_PROMPT,
+                        "structured": True,
+                        "max_tokens_cap": _MAX_TOKENS_CAP,
+                    },
+                ),
             )
             raise_if_policy_blocked_result(result)
             if not result.get("success"):
+                # A truncated response or an exhausted budget cannot be fixed by
+                # re-sending the identical prompt.
+                if str(result.get("error_code") or "") in TERMINAL_ERROR_CODES:
+                    break
                 continue
-            payload = _parse_json_object(result.get("analysis", ""))
+            payload = parse_json_object(result.get("analysis", ""))
             if not payload:
                 continue
 

@@ -12,7 +12,6 @@ import {
   Volume2,
   VolumeX,
   Settings,
-  Zap,
   Wifi,
   Globe,
 } from "lucide-react";
@@ -33,11 +32,6 @@ const TIER_LABELS: Record<
     icon: Wifi,
     desc: "~$0.01/session — Groq STT + Edge TTS",
   },
-  realtime: {
-    label: "Realtime",
-    icon: Zap,
-    desc: "~$0.50+/session — OpenAI Realtime",
-  },
 };
 
 const SESSION_TYPE_LABELS: Record<VoiceSessionType, string> = {
@@ -52,15 +46,12 @@ interface VoicePanelProps {
   defaultSessionType?: VoiceSessionType;
   /** Pre-fill session ID for interview sessions */
   sessionId?: string;
-  /** Custom system prompt */
-  systemPrompt?: string;
 }
 
 export default function VoicePanel({
   onClose,
   defaultSessionType = "chat",
   sessionId,
-  systemPrompt,
 }: VoicePanelProps) {
   const voice = useVoice();
   const [textInput, setTextInput] = useState("");
@@ -79,7 +70,6 @@ export default function VoicePanel({
   const handleStart = () => {
     voice.startSession(selectedType, {
       sessionId,
-      systemPrompt,
       tier: voice.preferredTier,
     });
   };

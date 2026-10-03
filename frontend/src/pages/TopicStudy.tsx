@@ -34,6 +34,8 @@ import {
   generateQuestionsV2Stream,
   isQuestionsStreamError,
   recordLearningAttempt,
+  saveTopicProgress,
+  autosaveTopicProgress,
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useProgressStore } from "@/store/progressStore";
@@ -42,6 +44,7 @@ import DifficultyBadge from "@/components/common/DifficultyBadge";
 import ProgressBar from "@/components/common/ProgressBar";
 import WordHighlightChat from "@/components/common/WordHighlightChat";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
+import ChatAskPanel from "@/components/ChatAskPanel";
 import {
   normalizeEscapedMultilineText,
   normalizeEscapedSingleLineText,
@@ -57,6 +60,7 @@ import type {
   LearningTrack,
   ResponseDetail,
   VideoResource,
+  SaveProgressPayload,
 } from "@/types";
 import type {
   TopicStudyProviderInfo,
@@ -89,6 +93,10 @@ const DEFAULT_PROVIDER_INFO: TopicStudyProviderInfo = {
   retries: 0,
   malformed: 0,
 };
+
+// keepalive bodies are capped at 64 KB by the browser; 60 questions keeps the
+// auto-save beacon comfortably inside that budget.
+const AUTOSAVE_QUESTION_LIMIT = 60;
 
 function stableHash(input: string): string {
   let hash = 5381;
@@ -138,6 +146,13 @@ export default function TopicStudy() {
   const [confidenceByIdx, setConfidenceByIdx] = useState<
     Record<number, number>
   >({});
+  // Per-question self-assessment outcome. submittedAttempts only records that an
+  // attempt exists, but the stored summary needs right-vs-needs-practice counts.
+  const [outcomeByIdx, setOutcomeByIdx] = useState<Record<number, boolean>>({});
+  const [visitedSections, setVisitedSections] = useState<string[]>([]);
+  const [saveProgressStatus, setSaveProgressStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
   const [questionStartMs, setQuestionStartMs] = useState<
     Record<number, number>
   >({});
@@ -190,6 +205,99 @@ export default function TopicStudy() {
   } = useProgressStore();
 
   const activeSectionSnapshot = topic?.sections[activeSection] || null;
+
+  // A section counts as covered once the learner has opened it; the stored
+  // summary uses the untouched sections to decide what to ask next.
+  useEffect(() => {
+    const heading = activeSectionSnapshot?.heading?.trim();
+    if (!heading) return;
+    setVisitedSections((prev) => (prev.includes(heading) ? prev : [...prev, heading]));
+  }, [activeSectionSnapshot?.heading]);
+
+  const buildProgressPayload = useCallback(
+    (questionLimit?: number): SaveProgressPayload => {
+      const rows = questions.map((qa, idx) => ({
+        question_id: qa.question_id,
+        question: qa.question,
+        difficulty: qa.difficulty,
+        revealed: revealedAnswers.has(idx),
+        is_correct: outcomeByIdx[idx] ?? null,
+        confidence: confidenceByIdx[idx] || 0,
+      }));
+      return {
+        topic_title: topic?.title || "",
+        // The beacon body is capped at 64 KB by the browser, so the auto-save
+        // path sends only the most recent slice.
+        questions: questionLimit ? rows.slice(-questionLimit) : rows,
+        sections: visitedSections,
+        preferred_language: preferredLanguage,
+      };
+    },
+    [
+      questions,
+      revealedAnswers,
+      outcomeByIdx,
+      confidenceByIdx,
+      topic,
+      visitedSections,
+      preferredLanguage,
+    ],
+  );
+
+  const handleSaveProgress = useCallback(async () => {
+    if (!topicId || saveProgressStatus === "saving") return;
+    setSaveProgressStatus("saving");
+    try {
+      await saveTopicProgress(topicId, buildProgressPayload());
+      setSaveProgressStatus("saved");
+    } catch (err) {
+      console.error(err);
+      setSaveProgressStatus("error");
+    }
+  }, [topicId, saveProgressStatus, buildProgressPayload]);
+
+  useEffect(() => {
+    if (saveProgressStatus === "idle") return;
+    const timer = window.setTimeout(() => setSaveProgressStatus("idle"), 2500);
+    return () => window.clearTimeout(timer);
+  }, [saveProgressStatus]);
+
+  const saveProgressLabel =
+    saveProgressStatus === "saving"
+      ? "Saving..."
+      : saveProgressStatus === "saved"
+        ? "Progress saved"
+        : saveProgressStatus === "error"
+          ? "Save failed"
+          : "Save progress";
+
+  // Two ways a study session ends without the learner pressing the button:
+  // closing/backgrounding the tab (`pagehide`) and navigating away inside the SPA
+  // (component unmount — React does not fire `pagehide` for route changes).
+  // Registered once per mount so a state change cannot trigger a summary call;
+  // the latest payload is read from a ref at fire time.
+  const progressPayloadRef = useRef<SaveProgressPayload | null>(null);
+  progressPayloadRef.current = buildProgressPayload(AUTOSAVE_QUESTION_LIMIT);
+  const autoSaveSentRef = useRef(false);
+
+  useEffect(() => {
+    if (!topicId) return;
+    const fireAutoSave = () => {
+      if (autoSaveSentRef.current) return;
+      const payload = progressPayloadRef.current;
+      // Nothing generated yet: saving would create an empty progress document
+      // and spend a summary call on a topic the learner has not worked on.
+      if (!payload || payload.questions.length === 0) return;
+      autoSaveSentRef.current = true;
+      void autosaveTopicProgress(topicId, payload);
+    };
+    window.addEventListener("pagehide", fireAutoSave);
+    return () => {
+      window.removeEventListener("pagehide", fireAutoSave);
+      fireAutoSave();
+    };
+  }, [topicId]);
+
   const activeQuestionSignature = useMemo<TopicStudyQuestionSignature | null>(
     () => {
       if (!topicId || !topic || !activeSectionSnapshot) return null;
@@ -961,6 +1069,7 @@ export default function TopicStudy() {
         mode: "study",
       });
       setSubmittedAttempts((prev) => new Set(prev).add(idx));
+      setOutcomeByIdx((prev) => ({ ...prev, [idx]: isCorrect }));
       addAnswered(topicId, 1);
       recordAttempt(topicId, isCorrect, confidence);
       setMastery(topicId, res.mastery_score);
@@ -1484,6 +1593,19 @@ export default function TopicStudy() {
                   )}
                   {generating ? "Generating..." : "Generate Questions"}
                 </button>
+
+                <button
+                  onClick={handleSaveProgress}
+                  disabled={saveProgressStatus === "saving"}
+                  className="btn-secondary flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {saveProgressStatus === "saving" ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                  {saveProgressLabel}
+                </button>
               </div>
 
               {providerInfo.provider && (
@@ -1775,6 +1897,13 @@ export default function TopicStudy() {
                         >
                           Generate More
                         </button>
+                        <button
+                          onClick={handleSaveProgress}
+                          disabled={saveProgressStatus === "saving"}
+                          className="btn-secondary disabled:opacity-60"
+                        >
+                          {saveProgressLabel}
+                        </button>
                         <Link to={`/quiz/${topicId}`} className="btn-secondary">
                           Take Quiz
                         </Link>
@@ -1784,6 +1913,8 @@ export default function TopicStudy() {
                 </AnimatePresence>
               </motion.div>
             )}
+
+            <ChatAskPanel topicId={topicId} className="mt-6" />
           </div>
         </div>
       </div>

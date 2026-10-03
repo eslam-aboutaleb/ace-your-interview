@@ -37,7 +37,10 @@ class AuthAdminTests(unittest.TestCase):
         os.environ["STUDY_LLM_ASSIGNMENTS_FILE"] = str(self.llm_assignments_file)
         get_settings.cache_clear()
 
-        self.allowed_patch = patch("app.services.auth.ALLOWED_USERS_FILE", self.allowed_file)
+        self.allowed_patch = patch(
+            "app.services.auth.get_allowed_users_file",
+            return_value=self.allowed_file,
+        )
         self.allowed_patch.start()
         auth._LLM_SERVICE_ACCESS = None
         auth._LLM_ASSIGNMENTS = None

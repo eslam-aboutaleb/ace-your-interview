@@ -6,6 +6,10 @@
 import type {
   VoiceClientMessage,
   VoiceConfig,
+  VoiceInterviewCompletedEvent,
+  VoiceInterviewReadyEvent,
+  VoiceInterviewResponseEvent,
+  VoiceInterviewStartMessage,
   VoiceLatency,
   VoiceServerMessage,
   VoiceSessionType,
@@ -39,6 +43,9 @@ export interface VoiceCallbacks {
   onSpeaking?: (speaking: boolean) => void;
   onError?: (message: string) => void;
   onDisconnect?: () => void;
+  onInterviewReady?: (event: VoiceInterviewReadyEvent) => void;
+  onInterviewResponse?: (event: VoiceInterviewResponseEvent) => void;
+  onInterviewCompleted?: (event: VoiceInterviewCompletedEvent) => void;
 }
 
 // ── Fetch voice config ──────────────────────────────────────
@@ -193,7 +200,7 @@ export class BrowserVoiceService {
   }
 }
 
-// ── WebSocket Voice Service (cloud / realtime tier) ─────────
+// ── WebSocket Voice Service (cloud tier) ─────────────────
 
 export class WebSocketVoiceService {
   private ws: WebSocket | null = null;
@@ -284,6 +291,36 @@ export class WebSocketVoiceService {
         case "stopped":
           this._sessionActive = false;
           break;
+        case "interview_ready":
+          this._sessionActive = true;
+          this.callbacks.onInterviewReady?.(msg as VoiceInterviewReadyEvent);
+          if ((msg as VoiceInterviewReadyEvent).audio) {
+            this.callbacks.onSpeaking?.(true);
+            playAudioBase64((msg as VoiceInterviewReadyEvent).audio, () => {
+              this.callbacks.onSpeaking?.(false);
+            });
+          }
+          break;
+        case "interview_response":
+          this.callbacks.onInterviewResponse?.(
+            msg as VoiceInterviewResponseEvent,
+          );
+          if ((msg as VoiceInterviewResponseEvent).audio) {
+            this.callbacks.onSpeaking?.(true);
+            playAudioBase64(
+              (msg as VoiceInterviewResponseEvent).audio,
+              () => {
+                this.callbacks.onSpeaking?.(false);
+              },
+            );
+          }
+          break;
+        case "interview_completed":
+          this._sessionActive = false;
+          this.callbacks.onInterviewCompleted?.(
+            msg as VoiceInterviewCompletedEvent,
+          );
+          break;
         case "error":
           this.callbacks.onError?.(msg.message);
           break;
@@ -305,7 +342,6 @@ export class WebSocketVoiceService {
     tier: VoiceTier;
     sessionType: VoiceSessionType;
     sessionId?: string;
-    systemPrompt?: string;
     llmConfig?: { provider: string; model: string };
   }): void {
     this.send({
@@ -313,9 +349,12 @@ export class WebSocketVoiceService {
       tier: opts.tier,
       session_type: opts.sessionType,
       session_id: opts.sessionId,
-      system_prompt: opts.systemPrompt,
       llm_config: opts.llmConfig,
     });
+  }
+
+  startInterview(config: VoiceInterviewStartMessage["config"]): void {
+    this.send({ type: "interview_start", config });
   }
 
   sendAudio(audioBase64: string, mime = "audio/webm"): void {

@@ -1,0 +1,179 @@
+name: eval-live
+
+# Stage 4.1 tier 2: the live eval.
+#
+# Regenerates the checked-in fixture outputs against real providers and reports
+# a reviewable diff against the golden store. Deliberately NOT on push:
+#   * nondeterministic - the same prompt does not produce the same JSON twice,
+#     so a per-commit run would be pure noise;
+#   * costs money - every run spends real tokens against groq/openai/etc.
+# So: workflow_dispatch for an on-demand run, plus a weekly cron as a slow
+# drift detector. backend.yml is the gate; this workflow informs a human.
+on:
+  workflow_dispatch:
+    inputs:
+      flows:
+        description: "Comma-separated flows to regenerate (blank = all)"
+        required: false
+        default: ""
+      fail_on_drift:
+        description: "Fail the run when the golden diff is non-empty"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Mondays at 06:17 UTC. Off the hour on purpose: the top of the hour is when
+    # every other scheduled workflow on GitHub fires.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-live
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    name: regenerate and diff golden outputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # Secrets reach this job only; backend.yml never sees them. A missing key
+      # surfaces in the report's errors[] list rather than as a silent pass.
+      - name: Run live eval
+        id: run_live
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EVAL_FLOWS: ${{ inputs.flows }}
+        run: |
+          set +e
+          if [ -n "${EVAL_FLOWS}" ]; then
+            python scripts/eval_agent_quality.py --live --live-flow "${EVAL_FLOWS}" --json > live-report.json
+          else
+            python scripts/eval_agent_quality.py --live --json > live-report.json
+          fi
+          status=$?
+          set -e
+          echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
+          if [ ! -s live-report.json ]; then
+            echo "::error::the harness produced no report" >&2
+            exit 1
+          fi
+
+      - name: Summarise metrics and golden diff
+        run: |
+          python - <<'PY' | tee live-summary.md
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("live-report.json").read_text())
+          summary = report["summary"]
+          live = report.get("live", {})
+
+          lines = ["## Live eval", ""]
+          lines.append(f"- run: `{live.get('run_id')}`")
+          lines.append(f"- calls recorded: {live.get('calls_recorded')}")
+          lines.append(f"- provider configured: {live.get('provider_configured')}")
+          lines.append(f"- errors: {len(live.get('errors', []))}")
+          lines += ["", "### Deterministic metrics", ""]
+          for key in (
+              "total_cases",
+              "schema_valid_rate",
+              "prompt_contract_rate",
+              "prompt_output_field_rate",
+              "untrusted_containment_rate",
+              "prompt_digest_match_rate",
+              "duplicate_rate",
+              "grounding_fidelity",
+              "repair_rate",
+              "degraded_eval_rate",
+          ):
+              lines.append(f"- {key}: {summary[key]}")
+          retry = summary["retry_distribution"]
+          lines.append(
+              f"- retry_rate: {retry['retry_rate']}% "
+              f"(verified={retry['verified']}, max_attempts={retry['max_attempts']})"
+          )
+          lines += ["", "### Golden diff", ""]
+          drift = False
+          for flow, entry in sorted(report["golden_diff"].items()):
+              if entry.get("status") != "ok":
+                  lines.append(f"- {flow}: {entry.get('status')}")
+                  continue
+              drift = drift or bool(entry.get("drift"))
+              lines.append(
+                  f"- {flow}: added={len(entry['added'])} "
+                  f"removed={len(entry['removed'])} changed={len(entry['changed'])}"
+              )
+              for item in entry["changed"][:3]:
+                  lines += [
+                      "",
+                      f"<details><summary>{item['case_id']}</summary>",
+                      "",
+                      "```diff",
+                      item["diff"],
+                      "```",
+                      "",
+                      "</details>",
+                  ]
+          lines += [
+              "",
+              f"Drift detected: **{drift}**",
+              "",
+              f"Harness gate failures: {report['gate_failures'] or 'none'}",
+          ]
+          print("\n".join(lines))
+          Path("drift.flag").write_text("true" if drift else "false")
+          PY
+
+      - name: Upload live report and recorded call telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-live-report
+          path: backend/live-report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      # The recorded telemetry is the retry distribution's only real source, so
+      # publish it as an artifact instead of committing it from CI.
+      - name: Publish recorded call telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-live-llm-calls
+          path: backend/evals/runs/llm_calls.jsonl
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Enforce gates
+        env:
+          HARNESS_EXIT: ${{ steps.run_live.outputs.exit_code }}
+          FAIL_ON_DRIFT: ${{ inputs.fail_on_drift }}
+        run: |
+          if [ "${HARNESS_EXIT}" != "0" ]; then
+            echo "::error::deterministic gates failed during the live run (exit ${HARNESS_EXIT})" >&2
+            exit 1
+          fi
+          if [ "${FAIL_ON_DRIFT}" = "true" ] && [ "$(cat drift.flag)" = "true" ]; then
+            echo "::error::golden output drift detected and fail_on_drift was requested" >&2
+            exit 1
+          fi
