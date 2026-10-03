@@ -323,9 +323,7 @@ class RagServiceTests(unittest.TestCase):
         doc_a = self._ingest(
             "u1", "topic-a", "Alpha particles are emitted by heavy nuclei."
         )
-        doc_b = self._ingest(
-            "u1", "topic-b", "Beta particles are high energy electrons."
-        )
+        self._ingest("u1", "topic-b", "Beta particles are high energy electrons.")
         llm = _FakeLLMClient(["Alpha emission comes from heavy nuclei."])
         rag = RagService(self.store, llm, self.embedding_client)
 

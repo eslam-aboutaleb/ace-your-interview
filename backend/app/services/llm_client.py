@@ -49,8 +49,9 @@ JSON_MODE_CAPABLE_PROVIDERS: frozenset[str] = frozenset(
     {"openai", "groq", "ollama", "google", "github"}
 )
 
-# Flow-level output ceilings. A caller-supplied ``max_tokens`` (or a saved user
-# preference) may lower these but never raise them.
+# Per-flow output ceilings. A caller-supplied ``max_tokens`` (or a saved user
+# preference) may lower these but never raise them. Callers pass ``flow=`` to
+# select one; an explicit ``max_tokens_cap=`` overrides it.
 DEFAULT_MAX_TOKENS = 4096
 FLOW_MAX_TOKENS_CAPS: dict[str, int] = {
     "interview_question": 600,
@@ -272,6 +273,7 @@ class LLMClient:
         system: str = "",
         structured: bool = False,
         max_tokens_cap: Optional[int] = None,
+        flow: str = "",
         tools: Optional[list[dict[str, Any]]] = None,
         tool_choice: Optional[Any] = None,
     ) -> dict:
@@ -284,6 +286,9 @@ class LLMClient:
             structured: request JSON-mode output where the provider supports it.
             max_tokens_cap: per-flow ceiling. A caller/config/preference value
                 may lower the cap but is clamped so it can never raise it.
+            flow: key into :data:`FLOW_MAX_TOKENS_CAPS`, selecting this flow's
+                ceiling. Distinct from ``task``, which drives model routing.
+                ``max_tokens_cap`` takes precedence when both are given.
             tools: OpenAI-style tool definitions. Mutually exclusive with
                 ``structured`` (``response_format``).
         """
@@ -365,15 +370,32 @@ class LLMClient:
                 elif policy_error_code == STUDY_APP_NOT_ASSIGNED_CODE:
                     policy_error_message = STUDY_APP_NOT_ASSIGNED_MESSAGE
             else:
+                saved_provider = str(prefs.get("provider", "default")).strip().lower()
                 if provider_str in ("default", ""):
-                    provider_str = str(prefs.get("provider", "default"))
-                if not model_str:
-                    model_str = str(prefs.get("model", ""))
-                    if model_str:
-                        model_locked = True
+                    provider_str = saved_provider
                 effective_provider = (
                     provider_str if provider_str not in ("default", "") else settings.default_provider
                 )
+                # Only adopt a saved model when the request did not pin a
+                # different provider: a saved `claude-3-5-sonnet-*` sent to
+                # `openai/` is a guaranteed provider-side error.
+                saved_model = str(prefs.get("model", "")).strip()
+                if not model_str and saved_model:
+                    if (
+                        effective_provider
+                        and saved_provider
+                        and saved_provider not in ("default", "")
+                        and saved_provider != str(effective_provider).strip().lower()
+                    ):
+                        logger.info(
+                            "Ignoring saved model %s: saved provider %s does not match requested provider %s",
+                            saved_model,
+                            saved_provider,
+                            effective_provider,
+                        )
+                    else:
+                        model_str = saved_model
+                        model_locked = True
                 auth_mode = str(prefs.get("auth_mode", "api_key"))
                 (
                     runtime_credential,
@@ -406,9 +428,12 @@ class LLMClient:
         )
         actual_provider = str(actual_provider or "").strip().lower()
 
+        # Ceiling resolution: explicit caller value, else this flow's entry.
+        # `task` deliberately does NOT select a cap — it routes models, and its
+        # key set is disjoint from the flow names.
         cap = max_tokens_cap if max_tokens_cap and max_tokens_cap > 0 else None
-        if cap is None:
-            cap = FLOW_MAX_TOKENS_CAPS.get(resolved_task)
+        if cap is None and flow:
+            cap = FLOW_MAX_TOKENS_CAPS.get(flow.strip().lower())
         if cap:
             max_tokens = max(1, min(max_tokens, int(cap)))
 

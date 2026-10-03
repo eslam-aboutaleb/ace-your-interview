@@ -1,7 +1,5 @@
 """Tests for the documents router: caps, mime allowlist, CRUD."""
 
-import asyncio
-import io
 import os
 import tempfile
 import unittest
@@ -12,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from app.dependencies import require_auth
 from app.routers import documents
-from app.services.document_pipeline import DocumentPipeline
 from app.services.document_store import DocumentStore
 
 

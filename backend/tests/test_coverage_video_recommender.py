@@ -612,14 +612,32 @@ class VideoRecommenderFetchTests(unittest.TestCase):
             self.assertIsNone(error)
             self.assertEqual([v["video_id"] for v in videos], ["v1"])
 
-    def test_search_id_cap_uses_the_inner_floor_for_small_limits(self):
+    def test_search_page_and_id_caps_floor_at_six_for_small_limits(self):
         with _Store() as store:
             recommender = VideoRecommender(store, _settings())
-            # limit=0 is clamped to 1 by the caller, but the helper must still
-            # floor the search page at 6 results.
-            self.assertEqual(max(6, min(12, 1 * 3)), 6)
-            self.assertEqual(max(6, min(16, 1 * 5)), 6)
-            self.assertEqual(max(6, min(12, 0 * 3)), 6)
+            search_items = [_search_item(f"v{i}") for i in range(1, 21)]
+            details = {
+                "items": [
+                    _details_item(f"v{i}", title=f"Talk {i}", duration="PT10M")
+                    for i in range(1, 21)
+                ]
+            }
+            fake = _fake(
+                [_FakeResponse(200, {"items": search_items}), _FakeResponse(200, details)]
+            )
+            with _patch_client(fake):
+                asyncio.run(
+                    recommender._fetch_videos(
+                        topic_title="HTTP",
+                        section_heading="Basics",
+                        preferred_language="",
+                        limit=1,
+                    )
+                )
+            # Even for limit=1 the search page asks for 6 and the details call
+            # carries 6 ids, not 1.
+            self.assertEqual(fake.requests[0][1]["maxResults"], 6)
+            self.assertEqual(fake.requests[1][1]["id"], "v1,v2,v3,v4,v5,v6")
 
     def test_results_are_truncated_to_the_requested_limit(self):
         with _Store() as store:

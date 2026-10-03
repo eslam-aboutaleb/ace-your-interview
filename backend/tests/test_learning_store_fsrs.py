@@ -421,7 +421,6 @@ class TopicMasteryTests(unittest.TestCase):
         )
 
     def test_fsrs_topic_mastery_groups_by_topic(self):
-        now = _now()
         for card_id in ("q1", "q2"):
             self.store.record_review(
                 user_id="alice",

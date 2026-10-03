@@ -141,6 +141,12 @@ class Settings(BaseSettings):
     embedding_provider: str = "openai"     # openai (text-embedding-3-small) or google (gemini-embedding)
     embedding_model: str = ""              # empty → provider default
 
+    # gRPC analysis backends (llm-chain / cli-agent services)
+    grpc_llm_chain_host: str = "localhost"
+    grpc_llm_chain_port: int = 50051
+    grpc_cli_agent_host: str = "localhost"
+    grpc_cli_agent_port: int = 50052
+
     model_config = {
         "env_prefix": "STUDY_",
         "env_file": ".env",

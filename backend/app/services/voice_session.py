@@ -185,7 +185,7 @@ class VoiceSession:
             user_identity=self.user_identity,
             system=self.system_prompt,
             task="final",
-            max_tokens_cap=None,
+            flow="voice_turn",
         )
 
         if result.get("success") and result.get("analysis"):
