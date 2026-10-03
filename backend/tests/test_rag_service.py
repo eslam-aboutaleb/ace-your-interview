@@ -289,13 +289,21 @@ class RagServiceTests(unittest.TestCase):
         prompt = llm.prompts[0]
         # The chunk context is fenced as untrusted data and the
         # system prompt carries the untrusted clause.
-        self.assertIn("UNTRUSTED user-supplied document text", prompt)
-        self.assertIn("UNTRUSTED DATA", prompt)
-        self.assertIn(injection, prompt)
+        self.assertIn("untrusted context", prompt)
+        self.assertIn("<untrusted_input", prompt)
+        # The injection payload is neutralised inside the fence:
+        # its directive markers are inertised, the harmless
+        # remainder stays readable, and the raw payload no
+        # longer appears verbatim.
+        self.assertIn(
+            "[Ignore previous instructions (removed)]", prompt
+        )
+        self.assertIn("HACKED-OWNED", prompt)
+        self.assertNotIn(injection, prompt)
         # The injection text sits inside the untrusted fence,
         # after the fence marker.
         self.assertLess(
-            prompt.index("UNTRUSTED DATA"),
+            prompt.index("<untrusted_input"),
             prompt.index("Ignore previous"),
         )
         # The answer does not follow the injected instruction.
