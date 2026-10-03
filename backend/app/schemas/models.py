@@ -286,6 +286,7 @@ class HealthStatus(BaseModel):
     cli_agent: bool = False
     llm_chain_version: str = ""
     cli_agent_version: str = ""
+    vector_index: str = "fallback"
 
 
 class UserAuthModeEnum(str, Enum):
@@ -923,6 +924,20 @@ class FSRSCardResponse(BaseModel):
     scheduled_days: int = 0
     elapsed_days: int = 0
     suspended: int = 0
+# ── Document Ingestion + RAG Chat Models ───────────
+class DocumentUploadResponse(BaseModel):
+    document_id: str
+    status: str
+
+
+class DocumentDetail(BaseModel):
+    document_id: str
+    filename: str
+    mime_type: str
+    title: str
+    status: str  # uploaded | processing | ready | failed
+    error: str = ""
+    chunk_count: int = 0
     created_at: str = ""
     updated_at: str = ""
 
@@ -963,3 +978,25 @@ class CalibrationResponse(BaseModel):
     within_band: bool = False
     good_rating_pct: float = 0.0
     low_signal: bool = True
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentDetail] = Field(default_factory=list)
+
+
+class Citation(BaseModel):
+    document_id: str
+    chunk_index: int
+    quote: str
+
+
+class ChatAskRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=20000)
+    document_ids: list[str] = Field(default_factory=list, max_length=100)
+    topic_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class ChatAskResponse(BaseModel):
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+    conversation_id: str

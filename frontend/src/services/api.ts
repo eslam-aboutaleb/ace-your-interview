@@ -76,6 +76,11 @@ import type {
   SaveProgressPayload,
   TopicProgressDocument,
   TopicProgressListResponse,
+  DocumentUploadResponse,
+  DocumentDetail,
+  DocumentListResponse,
+  ChatAskRequest,
+  ChatAskResponse,
 } from "@/types";
 
 const api = axios.create({
@@ -1475,6 +1480,17 @@ export async function submitCardReview(
   const { data } = await api.post<LearningReviewResponse>(
     "/learning/review",
     req,
+// ── Documents + RAG Chat ─────────────────────────────
+export async function fetchDocuments(): Promise<DocumentListResponse> {
+  const { data } = await api.get<DocumentListResponse>("/documents");
+  return data;
+}
+
+export async function fetchDocument(
+  documentId: string,
+): Promise<DocumentDetail> {
+  const { data } = await api.get<DocumentDetail>(
+    `/documents/${encodeURIComponent(documentId)}`,
   );
   return data;
 }
@@ -1485,6 +1501,22 @@ export async function fetchForecast(
   const { data } = await api.get<ForecastResponse>(
     "/learning/forecast",
     { params: { days } },
+export async function uploadDocument(
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<DocumentUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post<DocumentUploadResponse>(
+    "/documents",
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (event) => {
+        if (!onProgress || !event.total) return;
+        onProgress(Math.round((event.loaded * 100) / event.total));
+      },
+    },
   );
   return data;
 }
@@ -1492,6 +1524,18 @@ export async function fetchForecast(
 export async function fetchCalibration(): Promise<CalibrationResponse> {
   const { data } = await api.get<CalibrationResponse>(
     "/learning/calibration",
+export async function deleteDocument(
+  documentId: string,
+): Promise<void> {
+  await api.delete(`/documents/${encodeURIComponent(documentId)}`);
+}
+
+export async function askDocumentQuestion(
+  payload: ChatAskRequest,
+): Promise<ChatAskResponse> {
+  const { data } = await api.post<ChatAskResponse>(
+    "/chat/ask",
+    payload,
   );
   return data;
 }

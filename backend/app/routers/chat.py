@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import get_settings
 from app.dependencies import require_auth
-from app.schemas.models import ChatFollowUpRequest, ChatFollowUpResponse
+from app.schemas.models import (
+    ChatAskRequest,
+    ChatAskResponse,
+    ChatFollowUpRequest,
+    ChatFollowUpResponse,
+)
 from app.services.doc_parser import DocParser
 from app.services.learning_store import LearningStore
 from app.services.llm_client import BUDGET_EXCEEDED_CODE, LLMClient
@@ -326,4 +331,44 @@ Provide a clear, educational explanation grounded in the context above.
     error_msg = result.get("error", "Unknown error")
     return ChatFollowUpResponse(
         reply=f"Sorry, I couldn't process that request. Error: {error_msg}",
+    )
+
+
+# ── Document RAG ask endpoint (STUDY_ENABLE_RAG_V1) ────────
+_rag_service = None
+
+
+def init_rag_service(rag_service):
+    """Wire the citation-grounded RAG service (document ask)."""
+    global _rag_service
+    _rag_service = rag_service
+
+
+@router.post("/ask", response_model=ChatAskResponse)
+async def chat_ask(
+    body: ChatAskRequest,
+    user: dict = Depends(require_auth),
+):
+    """Answer a question grounded in the user's uploaded documents."""
+    if _rag_service is None:
+        raise HTTPException(status_code=503, detail="Service not initialised")
+    settings = get_settings()
+    if not settings.enable_rag_v1:
+        raise HTTPException(
+            status_code=503,
+            detail="Document RAG is not enabled (STUDY_ENABLE_RAG_V1=false)",
+        )
+    result = await _rag_service.ask(
+        user_id=user["user"],
+        message=body.message,
+        document_ids=body.document_ids,
+        topic_id=body.topic_id,
+        conversation_id=body.conversation_id,
+        llm_config=body.llm_config,
+        user_identity=user,
+    )
+    return ChatAskResponse(
+        answer=result["answer"],
+        citations=result["citations"],
+        conversation_id=result["conversation_id"],
     )
