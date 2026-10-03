@@ -14,6 +14,7 @@ import {
   ListChecks,
   ChevronDown,
   AlertTriangle,
+  Lightbulb,
 } from "lucide-react";
 import {
   scaleInVariants,
@@ -32,6 +33,7 @@ import {
   isQuizStreamError,
   recordLearningAttempt,
   fetchWeakAreas,
+  fetchHint,
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useProgressStore } from "@/store/progressStore";
@@ -43,6 +45,7 @@ import {
   normalizeEscapedSingleLineText,
 } from "@/utils/textNormalization";
 import type {
+  HintResponse,
   InterviewLevel,
   LearningTrack,
   ResponseDetail,
@@ -105,6 +108,15 @@ export default function QuizMode() {
   const [expandedReview, setExpandedReview] = useState<number | null>(null);
   const [weakAreas, setWeakAreas] = useState<WeakAreaItem[]>([]);
   const [loadingWeakAreas, setLoadingWeakAreas] = useState(false);
+
+  // Per-question hint state
+  const [quizHintLevel, setQuizHintLevel] = useState(1);
+  const [quizHintResult, setQuizHintResult] = useState<HintResponse | null>(
+    null,
+  );
+  const [quizHintLoading, setQuizHintLoading] = useState(false);
+  const [quizHintError, setQuizHintError] = useState("");
+  const [quizHintLevelUsed, setQuizHintLevelUsed] = useState(0);
   const [topicAiById, setTopicAiById] = useState<
     Record<
       string,
@@ -173,6 +185,14 @@ export default function QuizMode() {
       .catch(() => setWeakAreas([]))
       .finally(() => setLoadingWeakAreas(false));
   }, [quizState]);
+
+  // Reset per-question hint state when moving between questions
+  useEffect(() => {
+    setQuizHintResult(null);
+    setQuizHintError("");
+    setQuizHintLevelUsed(0);
+    setQuizHintLevel(1);
+  }, [currentIdx]);
 
   const toggleTopic = (id: string) => {
     setSelectedTopics((prev) => {
@@ -434,6 +454,30 @@ export default function QuizMode() {
     } catch (err) {
       console.error(err);
       setErrorMsg("Answer recorded locally, but syncing attempt failed.");
+    }
+  };
+
+  const handleQuizHint = async () => {
+    if (!current) return;
+    setQuizHintLoading(true);
+    setQuizHintError("");
+    try {
+      const res = await fetchHint(current.question_id, quizHintLevel, {
+        question_text: current.question,
+      });
+      setQuizHintResult(res);
+      setQuizHintLevelUsed((prev) => Math.max(prev, res.level));
+    } catch (err) {
+      const detail = (
+        err as { response?: { data?: { detail?: unknown } } }
+      )?.response?.data?.detail;
+      setQuizHintError(
+        typeof detail === "string"
+          ? detail
+          : "Could not load a hint for this question.",
+      );
+    } finally {
+      setQuizHintLoading(false);
     }
   };
 
@@ -841,6 +885,54 @@ export default function QuizMode() {
                         />
                       </div>
                     )}
+
+                    <div className="mb-5 rounded-lg border border-udemy-border p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                          <Lightbulb className="w-3.5 h-3.5 text-udemy-purple" />
+                          Hint
+                        </span>
+                        <select
+                          value={quizHintLevel}
+                          onChange={(e) => setQuizHintLevel(Number(e.target.value))}
+                          disabled={quizHintLoading}
+                          className="border border-udemy-border rounded px-2 py-1 text-xs"
+                        >
+                          <option value={1}>Level 1 — nudge</option>
+                          <option value={2}>Level 2 — approach</option>
+                          <option value={3}>Level 3 — partial</option>
+                          <option value={4}>Level 4 — answer</option>
+                        </select>
+                        <button
+                          onClick={handleQuizHint}
+                          disabled={quizHintLoading}
+                          className="btn-secondary inline-flex items-center gap-1 text-xs disabled:opacity-50"
+                        >
+                          {quizHintLoading ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Lightbulb className="w-3 h-3" />
+                          )}
+                          Get hint
+                        </button>
+                        {quizHintResult && (
+                          <span className="text-[11px] text-udemy-text-muted">
+                            {quizHintResult.hints_used}/{quizHintResult.hints_remaining === 0 ? 0 : quizHintResult.hints_used + quizHintResult.hints_remaining} used
+                          </span>
+                        )}
+                      </div>
+                      {quizHintError && (
+                        <p className="text-[11px] text-red-600 mt-1.5 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          {quizHintError}
+                        </p>
+                      )}
+                      {quizHintResult && (
+                        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded mt-2 p-2 whitespace-pre-line">
+                          {quizHintResult.hint}
+                        </p>
+                      )}
+                    </div>
 
                     <AnimatePresence>
                       {answered && current.explanation && (

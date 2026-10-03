@@ -15,6 +15,7 @@ import {
   LogIn,
   Menu,
   X,
+  Star,
 } from "lucide-react";
 import { useProgressStore } from "@/store/progressStore";
 import { useAuthStore } from "@/store/authStore";
@@ -110,6 +111,12 @@ export default function Header() {
             label: "Interview",
             icon: <MessageSquare className="w-4 h-4" />,
             active: location.pathname.startsWith("/interview"),
+          },
+          {
+            to: "/star-stories",
+            label: "STAR Stories",
+            icon: <Star className="w-4 h-4" />,
+            active: location.pathname.startsWith("/star-stories"),
           },
           {
             to: "/user-settings",
