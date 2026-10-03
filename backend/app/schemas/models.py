@@ -95,7 +95,9 @@ USER_SETTINGS_PROVIDER_WHITELIST = ["google", "openai", "anthropic", "groq"]
 class LLMConfigRequest(BaseModel):
     provider: LLMProviderEnum = LLMProviderEnum.DEFAULT
     model: str = ""
-    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    # ``None`` means "unset" so an explicit 0.0 and an absent value stay
+    # distinguishable; the client falls back to the per-flow default.
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int = Field(default=0, ge=0)
 
 
@@ -109,8 +111,8 @@ class GenerateQuestionsRequest(BaseModel):
     response_detail: Optional[ResponseDetailEnum] = None
     preferred_language: Optional[str] = Field(default=None, max_length=60)
     llm_config: Optional[LLMConfigRequest] = None
-    section_title: Optional[str] = None
-    section_content: Optional[str] = None
+    section_title: Optional[str] = Field(default=None, max_length=200)
+    section_content: Optional[str] = Field(default=None, max_length=12000)
 
 
 class QuestionAnswer(BaseModel):
@@ -284,6 +286,7 @@ class HealthStatus(BaseModel):
     cli_agent: bool = False
     llm_chain_version: str = ""
     cli_agent_version: str = ""
+    vector_index: str = "fallback"
 
 
 class UserAuthModeEnum(str, Enum):
@@ -299,7 +302,6 @@ class UserLLMSourceEnum(str, Enum):
 class VoiceTierEnum(str, Enum):
     BROWSER = "browser"
     CLOUD = "cloud"
-    REALTIME = "realtime"
 
 
 class UserPreferences(BaseModel):
@@ -375,11 +377,11 @@ class LLMMyAssignmentResponse(BaseModel):
 # ── Chat Follow-Up Models ────────────────────────────────────
 class ChatMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
-    content: str
+    content: str = Field(..., max_length=2000)
 
 
 class ChatFollowUpRequest(BaseModel):
-    word: str
+    word: str = Field(..., max_length=60)
     context_question: str = ""
     context_answer: str = ""
     topic_id: str = ""
@@ -390,8 +392,8 @@ class ChatFollowUpRequest(BaseModel):
     response_detail: Optional[ResponseDetailEnum] = None
     preferred_language: Optional[str] = Field(default=None, max_length=60)
     requires_programming: Optional[bool] = None
-    user_message: str
-    history: list[ChatMessage] = []
+    user_message: str = Field(..., max_length=4000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=50)
     conversation_id: str = ""
     use_memory: bool = True
     llm_config: Optional[LLMConfigRequest] = None
@@ -496,6 +498,10 @@ class ReviewQueueItem(BaseModel):
     last_confidence: int
     review_bucket: int
     attempts: int
+    state: str = "new"
+    lapses: int = 0
+    suspended: int = 0
+    leech: bool = False
 
 
 class ReviewQueueResponse(BaseModel):
@@ -524,6 +530,47 @@ class TopicMasteryItem(BaseModel):
 
 class TopicMasteryResponse(BaseModel):
     topics: list[TopicMasteryItem]
+
+
+class ProgressQuestion(BaseModel):
+    question_id: str = ""
+    question: str = Field(default="", max_length=4000)
+    difficulty: str = ""
+    revealed: bool = False
+    is_correct: Optional[bool] = None
+    confidence: int = Field(default=0, ge=0, le=5)
+
+
+class SaveProgressRequest(BaseModel):
+    topic_title: str = Field(default="", max_length=300)
+    questions: list[ProgressQuestion] = Field(default_factory=list, max_length=200)
+    sections: list[str] = Field(default_factory=list, max_length=200)
+    preferred_language: str = Field(default="", max_length=60)
+
+
+class TopicProgressDocument(BaseModel):
+    user_id: str
+    topic_id: str
+    topic_title: str
+    summary_text: str = ""
+    summary_status: str = "empty"
+    summary_error: str = ""
+    sections: list[str] = Field(default_factory=list)
+    attempt_stats: dict = Field(default_factory=dict)
+    preferred_language: str = ""
+    question_count: int = 0
+    revision: int = 0
+    provider_used: str = ""
+    model_used: str = ""
+    generation_source: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    questions_asked: list[str] = Field(default_factory=list)
+
+
+class TopicProgressListResponse(BaseModel):
+    topics: list[TopicProgressDocument] = Field(default_factory=list)
+    total: int = 0
 
 
 class LearnerProfile(BaseModel):
@@ -633,12 +680,15 @@ class StudyPlanResponse(BaseModel):
 
 # ── Mock Interview Models ────────────────────────────────────
 class RubricScore(BaseModel):
-    technical_accuracy: int = Field(default=3, ge=0, le=5)
-    reasoning_depth: int = Field(default=3, ge=0, le=5)
-    communication_clarity: int = Field(default=3, ge=0, le=5)
-    completeness: int = Field(default=3, ge=0, le=5)
-    confidence_signal: int = Field(default=3, ge=0, le=5)
-    overall: int = Field(default=60, ge=0, le=100)
+    """Rubric values are ``None`` when a turn was evaluated in degraded mode."""
+
+    technical_accuracy: Optional[int] = Field(default=3, ge=0, le=5)
+    reasoning_depth: Optional[int] = Field(default=3, ge=0, le=5)
+    communication_clarity: Optional[int] = Field(default=3, ge=0, le=5)
+    completeness: Optional[int] = Field(default=3, ge=0, le=5)
+    confidence_signal: Optional[int] = Field(default=3, ge=0, le=5)
+    overall: Optional[int] = Field(default=60, ge=0, le=100)
+    degraded: bool = False
 
 
 class RubricAverages(BaseModel):
@@ -679,6 +729,10 @@ class InterviewTurn(BaseModel):
     follow_up_note: str = ""
     response_time_ms: int = 0
     created_at: str
+    degraded: bool = False
+    #: True when the provider could not produce a usable evaluation. The answer
+    #: was still saved; the rubric carries no numbers.
+    degraded: bool = False
 
 
 class InterviewReport(BaseModel):
@@ -700,7 +754,7 @@ class CreateInterviewSessionRequest(BaseModel):
     track: TrackEnum
     level: LevelEnum = LevelEnum.MID
     interview_type: InterviewTypeEnum = InterviewTypeEnum.MIXED
-    turn_count: int = Field(default=5, ge=1, le=20)
+    turn_count: int = Field(default=5, ge=1, le=100)
     target_role: str = Field(default="", max_length=200)
     interviewer_style: InterviewerStyleEnum = InterviewerStyleEnum.NEUTRAL
     feedback_mode: FeedbackModeEnum = FeedbackModeEnum.CONCISE
@@ -729,6 +783,7 @@ class InterviewTurnResponse(BaseModel):
     session: InterviewSession
     turn: InterviewTurn
     report_ready: bool = False
+    degraded: bool = False
 
 
 class InterviewQuestionResponse(BaseModel):
@@ -828,3 +883,414 @@ class VoiceTurnRecord(BaseModel):
     tts_provider: str = ""
     latency_ms: int = 0
     created_at: str = ""
+
+
+# ── FSRS Spaced Repetition Models ─────────────────
+class LearningReviewRating(str, Enum):
+    AGAIN = "again"
+    HARD = "hard"
+    GOOD = "good"
+    EASY = "easy"
+
+
+class LearningReviewSourceType(str, Enum):
+    QUESTION = "question"
+    FLASHCARD = "flashcard"
+    INTERVIEW = "interview"
+    EXAM = "exam"
+
+
+class LearningReviewRequest(BaseModel):
+    card_id: str = Field(..., min_length=1, max_length=200)
+    topic_id: str = Field(..., min_length=1, max_length=200)
+    rating: LearningReviewRating
+    response_time_ms: int = Field(default=0, ge=0)
+    source_type: LearningReviewSourceType = (
+        LearningReviewSourceType.QUESTION
+    )
+
+
+class FSRSCardResponse(BaseModel):
+    card_id: str
+    topic_id: str
+    source_type: str
+    state: str
+    stability: Optional[float] = None
+    difficulty: Optional[float] = None
+    due_at: str
+    last_review_at: Optional[str] = None
+    reps: int = 0
+    lapses: int = 0
+    scheduled_days: int = 0
+    elapsed_days: int = 0
+    suspended: int = 0
+# ── Document Ingestion + RAG Chat Models ───────────
+class DocumentUploadResponse(BaseModel):
+    document_id: str
+    status: str
+
+
+class DocumentDetail(BaseModel):
+    document_id: str
+    filename: str
+    mime_type: str
+    title: str
+    status: str  # uploaded | processing | ready | failed
+    error: str = ""
+    chunk_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class FSRSReviewLogResponse(BaseModel):
+    id: int
+    card_id: str
+    rating: str
+    state: str
+    review_duration_ms: int
+    scheduled_days: Optional[int] = None
+    elapsed_days: Optional[int] = None
+    created_at: str = ""
+
+
+class LearningReviewResponse(BaseModel):
+    card: FSRSCardResponse
+    log: FSRSReviewLogResponse
+    leech: bool = False
+
+
+class ForecastDayItem(BaseModel):
+    date: str
+    count: int = 0
+
+
+class ForecastResponse(BaseModel):
+    due_counts: list[ForecastDayItem] = Field(default_factory=list)
+    total_due: int = 0
+
+
+class CalibrationResponse(BaseModel):
+    eligible_reviews: int = 0
+    successful_reviews: int = 0
+    true_retention: float = 0.0
+    target_band_low: float = 0.8
+    target_band_high: float = 0.9
+    within_band: bool = False
+    good_rating_pct: float = 0.0
+    low_signal: bool = True
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentDetail] = Field(default_factory=list)
+
+
+class Citation(BaseModel):
+    document_id: str
+    chunk_index: int
+    quote: str
+
+
+class ChatAskRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=20000)
+    document_ids: list[str] = Field(default_factory=list, max_length=100)
+    topic_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class ChatAskResponse(BaseModel):
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+    conversation_id: str
+
+
+# ── Flashcard Decks + Anki Interop Models ─────────
+class DeckCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
+class DeckUpdateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
+class DeckResponse(BaseModel):
+    deck_id: str
+    name: str
+    description: str = ""
+    card_count: int = 0
+    due_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+# ── Interview Personalization Models ─────────────────
+class ResumeProfile(BaseModel):
+    """Extracted resume profile. Raw resume text is never persisted."""
+
+    user_id: str = ""
+    skills: list[str] = Field(default_factory=list, max_length=200)
+    projects: list[str] = Field(default_factory=list, max_length=100)
+    experience_years: Optional[float] = None
+    roles: list[str] = Field(default_factory=list, max_length=50)
+    strengths: list[str] = Field(default_factory=list, max_length=50)
+    weak_spots: list[str] = Field(default_factory=list, max_length=50)
+    raw_text_hash: str = ""
+    updated_at: str = ""
+
+
+class ResumeUploadResponse(BaseModel):
+    profile: ResumeProfile
+    source: str = "llm"
+
+
+class JDAnalysisRequest(BaseModel):
+    jd_text: str = Field(..., min_length=1, max_length=20000)
+
+
+class JDAnalysisResponse(BaseModel):
+    matched: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    weak_spots: list[str] = Field(default_factory=list)
+    likely_followups: list[str] = Field(default_factory=list)
+    recommended_focus_areas: list[str] = Field(default_factory=list)
+
+
+class HintResponse(BaseModel):
+    question_id: str
+    level: int
+    hint: str
+    hints_used: int = 0
+    hints_remaining: int = 0
+
+
+class HintRequest(BaseModel):
+    question_text: str = Field(default="", max_length=8000)
+    answer_context: str = Field(default="", max_length=4000)
+
+
+class StarStory(BaseModel):
+    story_id: str
+    title: str
+    situation: str
+    task: str
+    action: str
+    result: str
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class DeckListResponse(BaseModel):
+    decks: list[DeckResponse] = Field(default_factory=list)
+
+
+class CardCreateRequest(BaseModel):
+    front: str = Field(..., min_length=1, max_length=8000)
+    back: str = Field(..., min_length=1, max_length=16000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CardUpdateRequest(BaseModel):
+    front: str = Field(..., min_length=1, max_length=8000)
+    back: str = Field(..., min_length=1, max_length=16000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class FSRSCardState(BaseModel):
+    state: str
+    stability: Optional[float] = None
+    difficulty: Optional[float] = None
+    due_at: str
+    last_review_at: Optional[str] = None
+    reps: int = 0
+    lapses: int = 0
+    scheduled_days: int = 0
+    elapsed_days: int = 0
+    suspended: int = 0
+
+
+class CardResponse(BaseModel):
+    card_id: str
+    deck_id: str
+    front: str
+    back: str
+    source_ref: str = ""
+    tags: list[str] = Field(default_factory=list)
+    fsrs_card_id: str
+    suspended: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+    fsrs: Optional[FSRSCardState] = None
+
+
+class CardListResponse(BaseModel):
+    cards: list[CardResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class GenerateCardsSourceType(str, Enum):
+    TOPIC = "topic"
+    SECTION = "section"
+    DOCUMENT = "document"
+
+
+class GenerateCardsRequest(BaseModel):
+    source_type: GenerateCardsSourceType
+    topic_id: Optional[str] = Field(default=None, max_length=200)
+    section_title: Optional[str] = Field(default=None, max_length=400)
+    document_id: Optional[str] = Field(default=None, max_length=200)
+    count: int = Field(default=10, ge=1, le=50)
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class GenerateCardsResponse(BaseModel):
+    job_id: str
+    status: str = "queued"
+
+
+class GeneratedCardItem(BaseModel):
+    card_id: str
+    front: str
+    back: str
+    source_section: str = ""
+    source_quote: str = ""
+
+
+class GenerateCardsJobResponse(BaseModel):
+    job_id: str
+    status: str  # queued | running | done | failed
+    cards: list[GeneratedCardItem] = Field(default_factory=list)
+    retries_used: int = 0
+    malformed_items_dropped: int = 0
+    error: str = ""
+
+
+class ImportDeckResponse(BaseModel):
+    deck_id: str
+    deck_name: str = ""
+    imported: int = 0
+    skipped_duplicates: int = 0
+    errors: list[str] = Field(default_factory=list)
+
+
+class FindDuplicatesRequest(BaseModel):
+    deck_id: Optional[str] = Field(default=None, max_length=200)
+    threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+
+
+class DuplicateCardRef(BaseModel):
+    card_id: str
+    deck_id: str = ""
+    front: str = ""
+
+
+class DuplicatePair(BaseModel):
+    card_a: DuplicateCardRef
+    card_b: DuplicateCardRef
+    similarity: float
+    jaccard: float
+    cosine: Optional[float] = None
+
+
+class FindDuplicatesResponse(BaseModel):
+    pairs: list[DuplicatePair] = Field(default_factory=list)
+    threshold: float = 0.85
+
+
+class DeckReviewRequest(BaseModel):
+    card_id: str = Field(..., min_length=1, max_length=200)
+    rating: LearningReviewRating
+    response_time_ms: int = Field(default=0, ge=0)
+
+
+class DeckReviewResponse(BaseModel):
+    card: CardResponse
+    log: FSRSReviewLogResponse
+    leech: bool = False
+
+
+class StudySessionResponse(BaseModel):
+    deck_id: str
+    cards: list[CardResponse] = Field(default_factory=list)
+    total_due: int = 0
+class StarStoryCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    situation: str = Field(..., min_length=1, max_length=5000)
+    task: str = Field(..., min_length=1, max_length=5000)
+    action: str = Field(..., min_length=1, max_length=5000)
+    result: str = Field(..., min_length=1, max_length=5000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class StarStoryUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=200)
+    situation: Optional[str] = Field(default=None, max_length=5000)
+    task: Optional[str] = Field(default=None, max_length=5000)
+    action: Optional[str] = Field(default=None, max_length=5000)
+    result: Optional[str] = Field(default=None, max_length=5000)
+    tags: Optional[list[str]] = Field(default=None, max_length=20)
+
+
+class StarStoryListResponse(BaseModel):
+    stories: list[StarStory] = Field(default_factory=list)
+    total: int = 0
+
+
+class StarStorySuggestionsResponse(BaseModel):
+    stories: list[StarStory] = Field(default_factory=list)
+
+
+class CompanyPackInfo(BaseModel):
+    company: str
+    track: str
+    style_config: dict[str, Any] = Field(default_factory=dict)
+    updated_at: str = ""
+
+
+class CompanyPacksResponse(BaseModel):
+    packs: list[CompanyPackInfo] = Field(default_factory=list)
+
+
+class CreateInterviewSessionRequestExtended(CreateInterviewSessionRequest):
+    """CreateInterviewSessionRequest plus interview-personalization fields."""
+
+    company: str = Field(default="", max_length=100)
+    resume_profile: bool = False
+    jd_text: str = Field(default="", max_length=20000)
+
+
+class SubmitInterviewAnswerRequestWithHints(SubmitInterviewAnswerRequest):
+    """SubmitInterviewAnswerRequest plus hint-usage disclosure."""
+
+    hint_level: int = Field(default=0, ge=0, le=4)
+    question_id: str = Field(default="", max_length=200)
+
+
+class RubricScoreExtended(RubricScore):
+    """RubricScore plus the independent_reasoning sub-score.
+
+    ``independent_reasoning`` is ``None`` when the turn was evaluated in
+    degraded mode; otherwise it equals ``reasoning_depth`` when the
+    candidate answered without hints, and is reduced by a level-dependent
+    penalty when hints were used.
+    """
+
+    independent_reasoning: Optional[int] = Field(default=None, ge=0, le=5)
+
+
+class InterviewTurnExtended(InterviewTurn):
+    """InterviewTurn whose rubric carries the independent_reasoning sub-score."""
+
+    rubric: RubricScoreExtended
+
+
+class InterviewTurnResponseExtended(InterviewTurnResponse):
+    """InterviewTurnResponse exposing the extended rubric on the turn."""
+
+    turn: InterviewTurnExtended
+
+
+class InterviewSessionResponseExtended(InterviewSessionResponse):
+    """InterviewSessionResponse whose turns carry the extended rubric."""
+
+    turns: list[InterviewTurnExtended] = Field(default_factory=list)

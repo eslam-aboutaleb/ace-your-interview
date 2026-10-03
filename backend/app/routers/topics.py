@@ -48,7 +48,7 @@ from app.services.llm_policy import (
     StudyAppLLMNotAssignedError,
     policy_error_detail,
 )
-from app.services.llm_client import LLMClient
+from app.services.llm_client import BUDGET_EXCEEDED_CODE, LLMClient
 
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 features_router = APIRouter(prefix="/api/features", tags=["features"])
@@ -58,6 +58,48 @@ _llm_client: LLMClient | None = None
 _learning_store: LearningStore | None = None
 _mcp_gateway: MCPGateway | None = None
 _video_recommender: VideoRecommender | None = None
+
+
+def _llm_error_code(exc: BaseException) -> str:
+    """Best-effort extraction of a terminal LLM error code from an exception.
+
+    The generators owned by other services raise on a non-retryable LLM
+    outcome. Budget exhaustion must reach the client as its own code rather than
+    as the generic ``generation_failed`` string, so it is detected here.
+    """
+    code = str(getattr(exc, "error_code", "") or "").strip().lower()
+    if code:
+        return code
+    if BUDGET_EXCEEDED_CODE in str(exc or "").lower():
+        return BUDGET_EXCEEDED_CODE
+    return ""
+
+
+def _budget_http_exception(exc: BaseException) -> HTTPException | None:
+    """Map LLM budget exhaustion to a distinct, non-500 client error."""
+    if _llm_error_code(exc) != BUDGET_EXCEEDED_CODE:
+        return None
+    return HTTPException(status_code=429, detail=_budget_error_payload(exc))
+
+
+def _budget_error_payload(exc: BaseException) -> dict[str, str]:
+    """Error body for a budget-exhausted generation attempt."""
+    return {
+        "code": BUDGET_EXCEEDED_CODE,
+        "message": "LLM call budget exceeded. Retry shortly.",
+    }
+
+
+def _generation_error_event(exc: BaseException, *, message: str) -> dict[str, str]:
+    """NDJSON error event, keeping budget exhaustion distinguishable.
+
+    The stream has already started by the time a generation error surfaces, so the
+    status code cannot change; the ``code`` is the only way the client can tell a
+    retryable budget rejection from a hard failure.
+    """
+    if _llm_error_code(exc) == BUDGET_EXCEEDED_CODE:
+        return {"type": "error", **_budget_error_payload(exc)}
+    return {"type": "error", "code": "generation_failed", "message": message}
 
 
 def init(
@@ -164,6 +206,15 @@ async def _ensure_topic_language_profile(
     topic: TopicDetail,
     user_identity: dict,
 ) -> dict:
+    """Return the cached language profile, running the advisor when it is cold.
+
+    When the profile is missing or stale this runs `TopicLanguageAdvisor`, a real
+    LLM call. Three LLM-backed routes reach it (`GET /api/topics/{id}`,
+    `GET|PUT /api/topics/{id}/preferences`), so all three are rate-limited under
+    the `llm` scope. The advisor falls back to deterministic values when the call
+    cannot complete, so a budget-limited read degrades the profile rather than
+    failing the read.
+    """
     if is_problem_solving_topic(topic.id):
         return await store.run_async(
             store.upsert_topic_language_profile,
@@ -689,13 +740,14 @@ async def generate_topic_content_stream(
                     "message": detail["message"] or "Dynamic topic generation blocked by policy.",
                 }
             ) + "\n"
-        except Exception:
+        except Exception as exc:
+            # Budget exhaustion is retryable and must be distinguishable from a
+            # hard failure: the stream has already started, so it is reported as
+            # its own error code rather than as `generation_failed`.
             yield json.dumps(
-                {
-                    "type": "error",
-                    "code": "generation_failed",
-                    "message": "Dynamic topic generation failed.",
-                }
+                _generation_error_event(
+                    exc, message="Dynamic topic generation failed."
+                )
             ) + "\n"
 
     return StreamingResponse(_event_stream(), media_type="application/x-ndjson")
@@ -709,12 +761,18 @@ async def create_custom_topic(
     """Analyze a custom topic and persist a deep user-scoped syllabus."""
     _, llm_client, store = _ensure_services()
     generator = CustomTopicGenerator(llm_client, _mcp_gateway)
-    generated = await generator.generate_topic(
-        topic=body.topic,
-        target_sections=body.target_sections,  # None → auto-estimate
-        llm_config=body.llm_config,
-        user_identity=user,
-    )
+    try:
+        generated = await generator.generate_topic(
+            topic=body.topic.strip(),
+            target_sections=body.target_sections,  # None → auto-estimate
+            llm_config=body.llm_config,
+            user_identity=user,
+        )
+    except Exception as exc:
+        budget_error = _budget_http_exception(exc)
+        if budget_error is not None:
+            raise budget_error
+        raise
     await store.run_async(
         store.upsert_custom_topic,
         user_id=user["user"],
@@ -826,13 +884,11 @@ async def create_custom_topic_stream(
                     "message": detail["message"] or "Custom topic generation blocked by policy.",
                 }
             ) + "\n"
-        except Exception:
+        except Exception as exc:
             yield json.dumps(
-                {
-                    "type": "error",
-                    "code": "generation_failed",
-                    "message": "Custom topic generation failed.",
-                }
+                _generation_error_event(
+                    exc, message="Custom topic generation failed."
+                )
             ) + "\n"
 
     return StreamingResponse(_event_stream(), media_type="application/x-ndjson")

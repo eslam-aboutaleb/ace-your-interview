@@ -66,7 +66,6 @@ def _build_response(identity_key: str, store: UserSettingsStore) -> UserSettings
     for provider, models in store.provider_models().items():
         api_key_connected = store.has_api_key(identity_key, provider)
         account_connected = provider == "google" and store.get_google_oauth_status(identity_key)
-        has_personal_credential = api_key_connected or account_connected
         backend_fallback_eligible = (
             _backend_provider_configured(provider)
             and backend_fallback_approved

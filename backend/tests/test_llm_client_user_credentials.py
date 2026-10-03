@@ -282,9 +282,12 @@ class LLMClientUserCredentialTests(unittest.TestCase):
             )
 
         self.assertTrue(result["success"])
-        self.assertEqual(
-            captured.get("api_key"),
-            {"Authorization": "Bearer google-access-token"},
+        # The OAuth Bearer token is routed through Google's
+        # OpenAI-compatible endpoint as a standard api_key.
+        self.assertEqual(captured.get("api_key"), "google-access-token")
+        self.assertIn(
+            "generativelanguage.googleapis.com/v1beta/openai",
+            captured.get("api_base", ""),
         )
         self.assertEqual(result["metadata"].get("credential_source"), "user_account")
 

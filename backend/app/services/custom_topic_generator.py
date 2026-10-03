@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
-import json
+import inspect
 import logging
 import math
 import re
 from typing import Any, AsyncIterator, Optional
 
 from app.schemas.models import LLMConfigRequest, TopicDetail
-from app.services.llm_client import LLMClient
+from app.services.llm_client import (
+    TERMINAL_ERROR_CODES,
+    LLMClient,
+    parse_json_object,
+)
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.mcp_gateway import MCPGateway
-from app.services.prompt_blocks import optional_context_block, render_contract
+from app.services.prompt_blocks import (
+    UNTRUSTED_CLAUSE,
+    render_contract,
+    untrusted_block,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +32,22 @@ _MAX_SECTIONS = 300
 _DEFAULT_SECTIONS = 120
 _MAX_ATTEMPTS = 4
 _MAX_STREAM_HEADINGS_CONTEXT = 200
+_MAX_TOKENS_CAP = 4000
+_ARCHITECT_SYSTEM_PROMPT = (
+    "You are an expert curriculum architect and technical interview coach. You design "
+    "learning roadmaps that turn a learner into a strong practitioner and teacher of the "
+    "requested topic. You always respond with a single JSON object and never with prose."
+)
+
 _GENERIC_HEADING_PATTERNS = [
     re.compile(r"^(module|part|chapter|section|topic)\s*[\w\-\.]*$", re.IGNORECASE),
     re.compile(r"^(introduction|overview|basics?|advanced|intermediate|conclusion)$", re.IGNORECASE),
 ]
+# Internal marker for deterministic filler sections. It is stripped before any
+# section reaches ``TopicDetail`` or a stream event, and it suppresses
+# coverage-dimension credit so boilerplate cannot masquerade as real content.
+_SYNTHETIC_KEY = "_synthetic"
+
 _REQUIRED_COVERAGE_DIMENSIONS: dict[str, tuple[str, ...]] = {
     "fundamentals": ("fundamental", "basics", "terminology", "mental model", "core concepts"),
     "workflow": ("setup", "workflow", "tooling", "delivery", "ci/cd", "build"),
@@ -126,6 +146,23 @@ def _estimate_target_sections(topic: str) -> int:
         score += 10
 
     return max(_MIN_SECTIONS, min(_MAX_SECTIONS, score))
+
+
+def _supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
+    """Drop call options ``client.completion`` does not accept.
+
+    ``LLMClient`` takes the full Stage-2 option set, but the client is injected,
+    so a narrower implementation may be in use. Filter against the bound
+    signature rather than assuming one shape.
+    """
+    try:
+        params = inspect.signature(client.completion).parameters
+    except (TypeError, ValueError):
+        return dict(options)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return options
+    return {key: value for key, value in options.items() if key in params}
+
 
 
 def _slugify_topic(topic: str) -> str:
@@ -419,7 +456,7 @@ def _autofill_section(topic: str, index: int, total: int) -> dict[str, str]:
         f"what common mistakes practitioners make at this stage, and which tradeoffs matter most "
         f"when applying {template.lower()} in production systems."
     )
-    return {"heading": heading, "content": content[:1800]}
+    return {"heading": heading, "content": content[:1800], _SYNTHETIC_KEY: True}
 
 
 def _level_bounds(level: str, total: int) -> tuple[int, int]:
@@ -433,8 +470,17 @@ def _level_bounds(level: str, total: int) -> tuple[int, int]:
 
 
 def _covered_dimensions(sections: list[dict[str, str]]) -> set[str]:
+    """Dimensions genuinely covered by ``sections``.
+
+    Deterministic filler is excluded. Its boilerplate mentions "setup",
+    "integration", "performance", "security", and so on for every topic, so
+    crediting it made every dimension look covered and the explicit
+    ``_build_dimension_section`` output never got emitted.
+    """
     covered: set[str] = set()
     for sec in sections:
+        if sec.get(_SYNTHETIC_KEY):
+            continue
         corpus = f"{sec.get('heading', '')} {sec.get('content', '')}".lower()
         for dimension, keywords in _REQUIRED_COVERAGE_DIMENSIONS.items():
             if any(keyword in corpus for keyword in keywords):
@@ -561,33 +607,12 @@ def _enforce_coverage_dimensions(
     return enforced
 
 
-def _parse_json_object(raw: str) -> dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except json.JSONDecodeError:
-        pass
-
-    fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-    if fenced:
-        try:
-            data = json.loads(fenced.group(1))
-            return data if isinstance(data, dict) else {}
-        except json.JSONDecodeError:
-            pass
-
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            data = json.loads(text[start : end + 1])
-            return data if isinstance(data, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
+def _strip_synthetic(sections: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Drop the internal filler marker so it never reaches a caller."""
+    return [
+        {key: value for key, value in section.items() if key != _SYNTHETIC_KEY}
+        for section in sections
+    ]
 
 
 def _normalise_sections(sections: Any, topic: str, target_sections: int) -> list[dict[str, str]]:
@@ -617,6 +642,7 @@ def _normalise_sections(sections: Any, topic: str, target_sections: int) -> list
                     {
                         "heading": formatted_heading,
                         "content": content[:1800],
+                        _SYNTHETIC_KEY: bool(item.get(_SYNTHETIC_KEY)),
                     },
                 )
             )
@@ -638,7 +664,7 @@ def _normalise_sections(sections: Any, topic: str, target_sections: int) -> list
                 break
 
     normalised = _enforce_coverage_dimensions(normalised[:target_sections], topic, target_sections)
-    return normalised[:target_sections]
+    return _strip_synthetic(normalised[:target_sections])
 
 
 def _build_raw_content(title: str, description: str, sections: list[dict[str, str]]) -> str:
@@ -646,62 +672,6 @@ def _build_raw_content(title: str, description: str, sections: list[dict[str, st
     for sec in sections:
         parts.extend(["", f"## {sec['heading']}", "", sec["content"]])
     return "\n".join(parts).strip()
-
-
-def _build_prompt(topic: str, target_sections: int, mcp_context: str = "") -> str:
-    junior_count = target_sections // 3
-    mid_count = target_sections // 3
-    senior_count = target_sections - junior_count - mid_count
-    mcp_block = optional_context_block(
-        "External context (optional, use only if relevant and factual)",
-        mcp_context,
-        2500,
-    )
-    contract = render_contract(
-        schema_label="Return ONLY valid JSON object with this exact schema",
-        schema_block="""{
-  "title": "string",
-  "description": "string",
-  "track": "backend|frontend|system_design|ai_stack",
-  "levels": ["junior", "mid", "senior"],
-  "sections": [
-    {
-      "heading": "specific subtopic title",
-      "content": "2-4 concise sentences with practical learning notes",
-      "level": "junior|mid|senior"
-    }
-  ]
-}""",
-        rules=[
-            f"sections length must be exactly {target_sections}.",
-            "Ensure level progression and ordering.",
-            f"first {junior_count} sections are junior.",
-            f"next {mid_count} sections are mid.",
-            f"final {senior_count} sections are senior.",
-            "Subtopics must be granular, non-duplicative, and prerequisite-aware.",
-            f'Each heading must be a real, concrete topic name specific to "{topic}".',
-            'Do NOT use generic headings like "Module 1", "Part A", "Topic X", or placeholders.',
-            "Cover a complete path from fundamentals to advanced architecture and interview tradeoffs.",
-            "Ensure the roadmap includes foundational concepts and terminology.",
-            "Ensure the roadmap includes setup/tooling and workflow.",
-            "Ensure the roadmap includes core implementation patterns.",
-            "Ensure the roadmap includes debugging and testing strategy.",
-            "Ensure the roadmap includes performance, security, and reliability.",
-            "Ensure the roadmap includes architecture/system tradeoffs.",
-            "Ensure the roadmap includes production operations and leadership decisions.",
-            "At least one section must explicitly cover each dimension above (no coverage gaps).",
-            "Every section heading should stand alone as a teachable lesson title.",
-            "Keep each section content concise and practical.",
-            "Output JSON only with escaped newlines/quotes/backslashes.",
-        ],
-    )
-    return f"""You are an expert curriculum architect and technical interview coach.
-Design this as if you are preparing someone to become a strong practitioner and teacher in the topic.
-
-Create a deep learning roadmap for the custom topic: "{topic}".
-
-{contract}{mcp_block}
-"""
 
 
 def _stream_batch_size(target_sections: int) -> int:
@@ -717,17 +687,21 @@ def _build_stream_batch_prompt(
     existing_headings: list[str],
     mcp_context: str = "",
 ) -> str:
+    """Build the user turn for one stream batch.
+
+    The architect persona lives in ``system`` (Stage 2.1). The coverage mandate
+    below is ported from the deleted non-streaming ``_build_prompt``: batches
+    are generated independently, so without it each batch drifts toward the
+    same generic topics and the finished roadmap loses whole dimensions.
+    """
     start_no = start_index + 1
     end_no = min(target_sections, start_index + batch_size)
     level_start = _level_for_position(start_index, target_sections)
     level_end = _level_for_position(max(start_index, end_no - 1), target_sections)
     existing_blob = "\n".join([f"- {h}" for h in existing_headings[-_MAX_STREAM_HEADINGS_CONTEXT:]])
     existing_block = existing_blob if existing_blob else "- (none yet)"
-    mcp_block = optional_context_block(
-        "External context (optional, use only if relevant and factual)",
-        mcp_context,
-        2500,
-    )
+    topic_block = untrusted_block("custom_topic_name", topic)
+    mcp_block = untrusted_block("external_context", mcp_context, 2500)
     contract = render_contract(
         schema_label="Return ONLY valid JSON object with this exact schema",
         schema_block="""{
@@ -747,17 +721,25 @@ def _build_stream_batch_prompt(
             f"sections length must be exactly {batch_size}.",
             f"These sections correspond to positions {start_no}..{end_no} of {target_sections}.",
             f"Expected level progression in this batch: {level_start} -> {level_end}.",
-            f'All headings must be concrete and specific to "{topic}".',
-            "Do not use generic placeholders for headings.",
+            "Subtopics must be granular, non-duplicative, and prerequisite-aware.",
+            'Each heading must be a real, concrete topic name, never a placeholder such as "Module 1", "Part A", or "Topic X".',
+            "Every section heading should stand alone as a teachable lesson title.",
+            "Keep each section content concise and practical.",
             "Do not repeat or paraphrase these existing headings:",
             existing_block,
+            "Coverage mandate: across this batch, cover the dimensions that belong at this level of the roadmap, and never leave a dimension to a later batch that a later batch may not reach.",
+            "Ensure this batch includes setup/tooling and workflow when it covers early levels.",
+            "Ensure this batch includes implementation patterns and debugging when it covers intermediate levels.",
+            "Ensure this batch includes testing, performance, security, or reliability concerns where the level calls for them.",
+            "Ensure this batch includes architecture/system tradeoffs and production operations when it covers advanced levels.",
+            "Every dimension must be explicitly named in at least one heading or sentence, not merely implied.",
             "Output JSON only with escaped newlines/quotes/backslashes.",
+            UNTRUSTED_CLAUSE,
         ],
     )
-    return f"""You are an expert curriculum architect and technical interview coach.
-Generate the next batch of roadmap sections for "{topic}".
+    return f"""{contract}
 
-{contract}{mcp_block}
+{topic_block}{mcp_block}
 """
 
 
@@ -769,10 +751,17 @@ def _normalise_stream_batch_sections(
     start_index: int,
     batch_size: int,
     seen_headings: set[str],
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], set[str]]:
+    """Normalise one batch and report the headings it consumed.
+
+    ``seen_headings`` is treated as read-only: the consumed headings are
+    returned so the caller commits them only once the batch is known good. A
+    rejected attempt must not poison the de-dup set for the next attempt.
+    """
     out: list[dict[str, str]] = []
+    consumed: set[str] = set()
     if not isinstance(sections, list):
-        return out
+        return out, consumed
 
     for item in sections:
         if len(out) >= batch_size:
@@ -791,10 +780,10 @@ def _normalise_stream_batch_sections(
         key = heading.lower()
         if key in seen_headings:
             continue
-        seen_headings.add(key)
+        consumed.add(key)
         out.append({"heading": heading, "content": content[:1800]})
 
-    return out
+    return out, consumed
 
 
 def _fallback_stream_batch_sections(
@@ -804,9 +793,10 @@ def _fallback_stream_batch_sections(
     start_index: int,
     batch_size: int,
     seen_headings: set[str],
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], set[str]]:
     fallback_pool = _normalise_sections([], topic, target_sections)
     out: list[dict[str, str]] = []
+    consumed: set[str] = set()
     while len(out) < batch_size:
         global_index = start_index + len(out)
         base = fallback_pool[global_index % len(fallback_pool)]
@@ -822,9 +812,15 @@ def _fallback_stream_batch_sections(
         while heading.lower() in seen_headings:
             heading = _format_heading(level, f"{base_heading} #{global_index + 1}.{suffix}")
             suffix += 1
-        seen_headings.add(heading.lower())
-        out.append({"heading": heading, "content": str(base.get("content", "")).strip()[:1800]})
-    return out
+        consumed.add(heading.lower())
+        out.append(
+            {
+                "heading": heading,
+                "content": str(base.get("content", "")).strip()[:1800],
+                _SYNTHETIC_KEY: True,
+            }
+        )
+    return out, consumed
 
 
 def _build_topic_detail(
@@ -978,34 +974,68 @@ class CustomTopicGenerator:
                 mcp_context=mcp_context,
             )
             batch_sections: list[dict[str, str]] = []
+            accepted_headings: set[str] = set()
+            attempt_title = title
+            attempt_description = description
+            attempt_track = track
+            attempt_levels = levels
             for _ in range(_MAX_ATTEMPTS):
                 result = await self.llm.completion(
                     prompt,
                     llm_config,
                     user_identity=user_identity,
+                    **_supported_options(
+                        self.llm,
+                        {
+                            "task": "final",
+                            "system": _ARCHITECT_SYSTEM_PROMPT,
+                            "structured": True,
+                            "max_tokens_cap": _MAX_TOKENS_CAP,
+                        },
+                    ),
                 )
                 raise_if_policy_blocked_result(result)
                 if not result.get("success"):
+                    # A truncated response or an exhausted budget cannot be fixed
+                    # by re-sending the identical prompt.
+                    if str(result.get("error_code") or "") in TERMINAL_ERROR_CODES:
+                        break
                     continue
-                payload = _parse_json_object(result.get("analysis", ""))
+                payload = parse_json_object(result.get("analysis", ""))
                 if not payload:
                     continue
-                title = str(payload.get("title", "")).strip() or title
-                parsed_description = str(payload.get("description", "")).strip()
-                if parsed_description:
-                    description = parsed_description
-                track = _normalise_track(str(payload.get("track", ""))) or track
-                levels = _normalise_levels(payload.get("levels")) or levels
-                batch_sections = _normalise_stream_batch_sections(
+                # Metadata is computed into locals so a rejected attempt cannot
+                # leak a half-parsed title, description, track, or level list.
+                candidate_title = str(payload.get("title", "")).strip() or title
+                candidate_description = str(payload.get("description", "")).strip() or description
+                candidate_track = _normalise_track(str(payload.get("track", ""))) or track
+                candidate_levels = _normalise_levels(payload.get("levels")) or levels
+                # Each attempt de-dupes against its own copy of the committed set,
+                # so a rejected attempt leaves no trace for the next attempt.
+                attempt_sections, attempt_headings = _normalise_stream_batch_sections(
                     sections=payload.get("sections"),
                     topic=source_topic,
                     target_sections=target,
                     start_index=start_index,
                     batch_size=current_batch,
-                    seen_headings=seen_headings,
+                    seen_headings=set(seen_headings),
                 )
+                if len(attempt_sections) > len(batch_sections):
+                    batch_sections = attempt_sections
+                    accepted_headings = attempt_headings
+                    attempt_title = candidate_title
+                    attempt_description = candidate_description
+                    attempt_track = candidate_track
+                    attempt_levels = candidate_levels
                 if len(batch_sections) >= current_batch:
                     break
+
+            if len(batch_sections) >= current_batch:
+                title = attempt_title
+                description = attempt_description
+                track = attempt_track
+                levels = attempt_levels
+                seen_headings.update(accepted_headings)
 
             if len(batch_sections) < current_batch:
                 logger.warning(
@@ -1015,15 +1045,15 @@ class CustomTopicGenerator:
                     current_batch,
                     len(batch_sections),
                 )
-                batch_sections.extend(
-                    _fallback_stream_batch_sections(
-                        topic=source_topic,
-                        target_sections=target,
-                        start_index=start_index + len(batch_sections),
-                        batch_size=current_batch - len(batch_sections),
-                        seen_headings=seen_headings,
-                    )
+                filler_sections, filler_headings = _fallback_stream_batch_sections(
+                    topic=source_topic,
+                    target_sections=target,
+                    start_index=start_index + len(batch_sections),
+                    batch_size=current_batch - len(batch_sections),
+                    seen_headings=seen_headings,
                 )
+                batch_sections.extend(filler_sections)
+                seen_headings.update(filler_headings)
 
             for section in batch_sections[:current_batch]:
                 sections.append(section)

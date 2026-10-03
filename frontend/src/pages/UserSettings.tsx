@@ -450,7 +450,6 @@ export default function UserSettingsPage() {
                   >
                     <option value="browser">Browser (Free)</option>
                     <option value="cloud">Cloud (~$0.01)</option>
-                    <option value="realtime">Realtime (~$0.50+)</option>
                   </select>
                 </div>
                 <label className="flex items-start gap-3 text-sm">

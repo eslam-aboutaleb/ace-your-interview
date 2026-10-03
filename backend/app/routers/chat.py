@@ -4,15 +4,25 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.config import get_settings
 from app.dependencies import require_auth
-from app.schemas.models import ChatFollowUpRequest, ChatFollowUpResponse
+from app.schemas.models import (
+    ChatAskRequest,
+    ChatAskResponse,
+    ChatFollowUpRequest,
+    ChatFollowUpResponse,
+)
 from app.services.doc_parser import DocParser
 from app.services.learning_store import LearningStore
-from app.services.llm_client import LLMClient
+from app.services.llm_client import BUDGET_EXCEEDED_CODE, LLMClient
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
-from app.services.prompt_blocks import optional_context_block, render_contract
+from app.services.prompt_blocks import (
+    UNTRUSTED_CLAUSE,
+    render_contract,
+    untrusted_block,
+)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -20,6 +30,48 @@ _llm_client: LLMClient | None = None
 _parser: DocParser | None = None
 _learning_store: LearningStore | None = None
 _mcp_gateway: MCPGateway | None = None
+
+# ── Prompt bounds (Stage 2.2) ────────────────────────────────
+# Every externally sourced string is bounded before it is fenced, so a single
+# request cannot inflate the prompt beyond the caps below. The Pydantic
+# `max_length` values requested for `user_message` / `ChatMessage.content`
+# match these so a schema-level rejection and a router-level truncation agree.
+MAX_USER_MESSAGE_CHARS = 4000
+MAX_WORD_CHARS = 200
+MAX_CONTEXT_QUESTION_CHARS = 2000
+MAX_CONTEXT_ANSWER_CHARS = 6000
+MAX_HISTORY_MESSAGES = 6
+MAX_HISTORY_MESSAGE_CHARS = 2000
+MAX_HISTORY_CHARS = 12000
+MAX_TOPIC_METADATA_CHARS = 1200
+MAX_MEMORY_PROMPT_CHARS = 900
+MAX_MCP_CONTEXT_CHARS = 2500
+#: Absolute pre-fence ceiling, well above every per-field cap, so one pathological
+#: payload cannot cost unbounded string work before truncation.
+HARD_INPUT_GUARD_CHARS = 200_000
+
+#: Per-flow output ceiling (Stage 2.3). Chat is a free-form markdown flow, so
+#: the cap is a ceiling on the answer, not on a JSON document.
+CHAT_MAX_TOKENS_CAP = 1200
+
+CHAT_SYSTEM_PROMPT = (
+    "You are a helpful study assistant. The user is studying technical "
+    "documentation and has a follow-up question about a highlighted term. "
+    f"{UNTRUSTED_CLAUSE}"
+)
+
+
+def _fence(label: str, value: str, max_chars: int) -> str:
+    """De-fang and fence one externally sourced value.
+
+    ``untrusted_block`` owns the sanitiser (delimiter stripping plus injection
+    marker neutralisation) so it cannot drift between flows. The value is only
+    clipped at ``HARD_INPUT_GUARD_CHARS`` here: clipping at the per-field cap is
+    left to ``untrusted_block`` so the prompt still carries the
+    "[truncated at N characters]" marker the model needs to know the context is
+    partial.
+    """
+    return untrusted_block(label, str(value or "").strip()[:HARD_INPUT_GUARD_CHARS], max_chars)
 
 
 def _conversation_id(body: ChatFollowUpRequest) -> str:
@@ -36,14 +88,27 @@ def _memory_prompt_block(memory: dict | None) -> str:
     summary = memory.get("summary")
     if not isinstance(summary, dict):
         return ""
-    summary_text = str(summary.get("summary", "")).strip()
-    if not summary_text:
-        return ""
-    return optional_context_block(
+    return _fence(
         "Conversation memory (assistant summary from prior turns; use as soft context)",
-        summary_text,
-        900,
+        str(summary.get("summary", "")),
+        MAX_MEMORY_PROMPT_CHARS,
     )
+
+
+def _history_block(history: list | None) -> str:
+    """Fence the recent conversation turns as one untrusted block."""
+    if not history:
+        return ""
+    lines: list[str] = []
+    for msg in list(history)[-MAX_HISTORY_MESSAGES:]:
+        role_label = "User" if getattr(msg, "role", "") == "user" else "Assistant"
+        content = str(getattr(msg, "content", "") or "").strip()[:MAX_HISTORY_MESSAGE_CHARS]
+        if not content:
+            continue
+        lines.append(f"{role_label}: {content}")
+    if not lines:
+        return ""
+    return _fence("Conversation history", "\n".join(lines), MAX_HISTORY_CHARS)
 
 
 def init(
@@ -112,11 +177,7 @@ async def chat_follow_up(
         memory_block = _memory_prompt_block(memory)
 
     # Build conversation history for context
-    history_text = ""
-    if body.history:
-        for msg in body.history[-6:]:  # Last 6 messages for context window
-            role_label = "User" if msg.role == "user" else "Assistant"
-            history_text += f"\n{role_label}: {msg.content}"
+    history_block = _history_block(body.history)
 
     topic_context_lines: list[str] = []
     if body.topic_id:
@@ -129,10 +190,10 @@ async def chat_follow_up(
         topic_context_lines.append(f"- Section: {body.section_title}")
     if body.mode:
         topic_context_lines.append(f"- Learning Mode: {body.mode}")
-    topic_context = (
-        "\n".join(topic_context_lines)
-        if topic_context_lines
-        else "- Topic metadata not provided."
+    topic_block = _fence(
+        "Topic metadata",
+        "\n".join(topic_context_lines) if topic_context_lines else "- Topic metadata not provided.",
+        MAX_TOPIC_METADATA_CHARS,
     )
     mcp_context = ""
     if _mcp_gateway is not None:
@@ -142,11 +203,7 @@ async def chat_follow_up(
             topic_id=body.topic_id,
             topic_title=body.topic_title,
         )
-    mcp_block = optional_context_block(
-        "External context (optional, use only if helpful and factual)",
-        mcp_context,
-        2500,
-    )
+    mcp_block = _fence("External web context", mcp_context, MAX_MCP_CONTEXT_CHARS)
     detail_clause = (
         "Use concise responses by default."
         if resolved_detail == "concise"
@@ -186,20 +243,22 @@ async def chat_follow_up(
         ],
     )
 
-    prompt = f"""You are a helpful study assistant. The user is studying technical documentation and has a follow-up question.
+    prompt = f"""The user is reading a Q&A in technical documentation and has a follow-up question.
 
-Context — the user was reading this Q&A:
-Question: {body.context_question}
-Answer: {body.context_answer}
+Context — the Q&A the user was reading:
+{_fence("Context question", body.context_question, MAX_CONTEXT_QUESTION_CHARS)}
+{_fence("Context answer", body.context_answer, MAX_CONTEXT_ANSWER_CHARS)}
 
 Topic context:
-{topic_context}
+{topic_block}
 
-The user highlighted the word/phrase: "{body.word}"
-{f"Previous conversation:{history_text}" if history_text else ""}
+The user highlighted this word/phrase:
+{_fence("Highlighted word", body.word, MAX_WORD_CHARS)}
+{history_block}
 {memory_block}
 
-User's question: {body.user_message}
+User's question:
+{_fence("User question", body.user_message, MAX_USER_MESSAGE_CHARS)}
 
 Provide a clear, educational explanation grounded in the context above.
 {contract}.{mcp_block}"""
@@ -208,8 +267,23 @@ Provide a clear, educational explanation grounded in the context above.
         prompt,
         body.llm_config,
         user_identity=user,
+        task="final",
+        system=CHAT_SYSTEM_PROMPT,
+        structured=False,
+        max_tokens_cap=CHAT_MAX_TOKENS_CAP,
     )
     raise_if_policy_blocked_result(result)
+    if str(result.get("error_code", "")).strip().lower() == BUDGET_EXCEEDED_CODE:
+        # A distinct, retryable outcome: the per-user LLM call budget
+        # (config.llm_user_call_budget) is exhausted for this window. Must not
+        # degrade into a generic 500 or a silent "sorry" reply.
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": BUDGET_EXCEEDED_CODE,
+                "message": str(result.get("error") or "LLM call budget exceeded."),
+            },
+        )
 
     if result["success"] and result["analysis"]:
         metadata = result.get("metadata", {})
@@ -231,13 +305,18 @@ Provide a clear, educational explanation grounded in the context above.
                 f"User asked: {body.user_message[:240]}\n"
                 f"Assistant: {reply[:380]}"
             ).strip()
+            # One shared bound for every stored memory digest (Stage 2.2/3.2).
+            memory_cap = max(
+                MAX_MEMORY_PROMPT_CHARS,
+                int(getattr(get_settings(), "memory_summary_max_chars", 1200) or 1200),
+            )
             await _learning_store.run_async(
                 _learning_store.upsert_assistant_memory,
                 user_id=user["user"],
                 conversation_id=conv_id,
                 flow="chat",
                 summary={
-                    "summary": merged_summary[:1200],
+                    "summary": merged_summary[:memory_cap],
                     "topic_id": body.topic_id,
                     "word": body.word,
                     "updated_by": "chat_follow_up",
@@ -252,4 +331,44 @@ Provide a clear, educational explanation grounded in the context above.
     error_msg = result.get("error", "Unknown error")
     return ChatFollowUpResponse(
         reply=f"Sorry, I couldn't process that request. Error: {error_msg}",
+    )
+
+
+# ── Document RAG ask endpoint (STUDY_ENABLE_RAG_V1) ────────
+_rag_service = None
+
+
+def init_rag_service(rag_service):
+    """Wire the citation-grounded RAG service (document ask)."""
+    global _rag_service
+    _rag_service = rag_service
+
+
+@router.post("/ask", response_model=ChatAskResponse)
+async def chat_ask(
+    body: ChatAskRequest,
+    user: dict = Depends(require_auth),
+):
+    """Answer a question grounded in the user's uploaded documents."""
+    if _rag_service is None:
+        raise HTTPException(status_code=503, detail="Service not initialised")
+    settings = get_settings()
+    if not settings.enable_rag_v1:
+        raise HTTPException(
+            status_code=503,
+            detail="Document RAG is not enabled (STUDY_ENABLE_RAG_V1=false)",
+        )
+    result = await _rag_service.ask(
+        user_id=user["user"],
+        message=body.message,
+        document_ids=body.document_ids,
+        topic_id=body.topic_id,
+        conversation_id=body.conversation_id,
+        llm_config=body.llm_config,
+        user_identity=user,
+    )
+    return ChatAskResponse(
+        answer=result["answer"],
+        citations=result["citations"],
+        conversation_id=result["conversation_id"],
     )

@@ -595,6 +595,10 @@ export interface ReviewQueueItem {
   last_confidence: number;
   review_bucket: number;
   attempts: number;
+  state?: string;
+  lapses?: number;
+  suspended?: number;
+  leech?: boolean;
 }
 
 export interface ReviewQueueResponse {
@@ -623,6 +627,47 @@ export interface TopicMasteryItem {
 
 export interface TopicMasteryResponse {
   topics: TopicMasteryItem[];
+}
+
+export interface ProgressQuestion {
+  question_id?: string;
+  question: string;
+  difficulty?: string;
+  revealed?: boolean;
+  is_correct?: boolean | null;
+  confidence?: number;
+}
+
+export interface SaveProgressPayload {
+  topic_title?: string;
+  questions: ProgressQuestion[];
+  sections?: string[];
+  preferred_language?: string;
+}
+
+export interface TopicProgressDocument {
+  user_id: string;
+  topic_id: string;
+  topic_title: string;
+  summary_text: string;
+  summary_status: "empty" | "pending" | "ready" | "failed" | string;
+  summary_error: string;
+  sections: string[];
+  attempt_stats: Record<string, unknown>;
+  preferred_language: string;
+  question_count: number;
+  revision: number;
+  provider_used: string;
+  model_used: string;
+  generation_source: string;
+  created_at: string;
+  updated_at: string;
+  questions_asked: string[];
+}
+
+export interface TopicProgressListResponse {
+  topics: TopicProgressDocument[];
+  total: number;
 }
 
 export interface LearnerProfile {
@@ -745,6 +790,7 @@ export interface InterviewRubricScore {
   completeness: number;
   confidence_signal: number;
   overall: number;
+  degraded?: boolean;
 }
 
 export interface InterviewRubricAverages {
@@ -785,6 +831,7 @@ export interface InterviewTurn {
   follow_up_note: string;
   response_time_ms: number;
   created_at: string;
+  degraded?: boolean;
 }
 
 export interface InterviewReport {
@@ -835,6 +882,7 @@ export interface InterviewTurnResponse {
   session: InterviewSession;
   turn: InterviewTurn;
   report_ready: boolean;
+  degraded?: boolean;
 }
 
 export interface InterviewQuestionResponse {
@@ -983,7 +1031,7 @@ export interface OllamaTestResponse {
 
 /* ── Voice Types ─────────────────────────────────────────── */
 
-export type VoiceTier = "browser" | "cloud" | "realtime";
+export type VoiceTier = "browser" | "cloud";
 
 export interface VoiceConfig {
   enabled: boolean;
@@ -1010,7 +1058,10 @@ export type VoiceServerMessage =
   | { type: "response"; text: string; audio: string; latency: VoiceLatency }
   | { type: "audio"; audio: string; text: string }
   | { type: "stopped"; session_id: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | VoiceInterviewReadyEvent
+  | VoiceInterviewResponseEvent
+  | VoiceInterviewCompletedEvent;
 
 /** Messages TO the server over WebSocket */
 export type VoiceClientMessage =
@@ -1019,10 +1070,441 @@ export type VoiceClientMessage =
       tier: VoiceTier;
       session_type: VoiceSessionType;
       session_id?: string;
-      system_prompt?: string;
       llm_config?: { provider: string; model: string };
     }
   | { type: "audio"; data: string; mime: string }
   | { type: "text"; content: string; speak?: boolean }
   | { type: "synthesize"; text: string }
-  | { type: "stop" };
+  | { type: "stop" }
+  | VoiceInterviewStartMessage;
+
+// ── FSRS Spaced Repetition ──────────────────────────
+export type LearningReviewRating = "again" | "hard" | "good" | "easy";
+
+export type LearningReviewSourceType =
+  | "question"
+  | "flashcard"
+  | "interview"
+  | "exam";
+
+export interface LearningReviewRequest {
+  card_id: string;
+  topic_id: string;
+  rating: LearningReviewRating;
+  response_time_ms?: number;
+  source_type?: LearningReviewSourceType;
+}
+
+export interface FSRSCardResponse {
+  card_id: string;
+  topic_id: string;
+  source_type: string;
+  state: string;
+  stability: number | null;
+  difficulty: number | null;
+  due_at: string;
+  last_review_at: string | null;
+  reps: number;
+  lapses: number;
+  scheduled_days: number;
+  elapsed_days: number;
+  suspended: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FSRSReviewLogResponse {
+  id: number;
+  card_id: string;
+  rating: string;
+  state: string;
+  review_duration_ms: number;
+  scheduled_days: number | null;
+  elapsed_days: number | null;
+  created_at: string;
+}
+
+export interface LearningReviewResponse {
+  card: FSRSCardResponse;
+  log: FSRSReviewLogResponse;
+  leech: boolean;
+}
+
+export interface ForecastDayItem {
+  date: string;
+  count: number;
+}
+
+export interface ForecastResponse {
+  due_counts: ForecastDayItem[];
+  total_due: number;
+}
+
+export interface CalibrationResponse {
+  eligible_reviews: number;
+  successful_reviews: number;
+  true_retention: number;
+  target_band_low: number;
+  target_band_high: number;
+  within_band: boolean;
+  good_rating_pct: number;
+  low_signal: boolean;
+}
+
+/* ── Documents + RAG Chat Types ────────────────────── */
+
+export type DocumentStatus = "uploaded" | "processing" | "ready" | "failed";
+
+export interface DocumentUploadResponse {
+  document_id: string;
+  status: string;
+}
+
+export interface DocumentDetail {
+  document_id: string;
+  filename: string;
+  mime_type: string;
+  title: string;
+  status: DocumentStatus;
+  error: string;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentListResponse {
+  documents: DocumentDetail[];
+}
+
+export interface Citation {
+  document_id: string;
+  chunk_index: number;
+  quote: string;
+}
+
+export interface ChatAskRequest {
+  message: string;
+  document_ids?: string[];
+  topic_id?: string;
+  conversation_id?: string;
+  llm_config?: LLMConfig;
+}
+
+export interface ChatAskResponse {
+  answer: string;
+  citations: Citation[];
+  conversation_id: string;
+}
+
+/* ── Flashcard Decks + Anki Interop ────────── */
+
+export interface DeckCreateRequest {
+  name: string;
+  description?: string;
+}
+
+export interface DeckUpdateRequest {
+  name: string;
+  description?: string;
+}
+
+export interface DeckResponse {
+  deck_id: string;
+  name: string;
+  description: string;
+  card_count: number;
+  due_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeckListResponse {
+  decks: DeckResponse[];
+}
+
+export interface CardCreateRequest {
+  front: string;
+  back: string;
+  tags?: string[];
+}
+
+export interface CardUpdateRequest {
+  front: string;
+  back: string;
+  tags?: string[];
+}
+
+export interface FSRSCardState {
+  state: string;
+  stability: number | null;
+  difficulty: number | null;
+  due_at: string;
+  last_review_at: string | null;
+  reps: number;
+  lapses: number;
+  scheduled_days: number;
+  elapsed_days: number;
+  suspended: number;
+}
+
+export interface FlashcardResponse {
+  card_id: string;
+  deck_id: string;
+  front: string;
+  back: string;
+  source_ref: string;
+  tags: string[];
+  fsrs_card_id: string;
+  suspended: number;
+  created_at: string;
+  updated_at: string;
+  fsrs: FSRSCardState | null;
+}
+
+export interface FlashcardListResponse {
+  cards: FlashcardResponse[];
+  total: number;
+}
+
+export type GenerateCardsSourceType = "topic" | "section" | "document";
+
+export interface GenerateCardsRequest {
+  source_type: GenerateCardsSourceType;
+  topic_id?: string;
+  section_title?: string;
+  document_id?: string;
+  count: number;
+  llm_config?: LLMConfig;
+}
+
+export interface GenerateCardsResponse {
+  job_id: string;
+  status: string;
+}
+
+export interface GeneratedCardItem {
+  card_id: string;
+  front: string;
+  back: string;
+  source_section: string;
+  source_quote: string;
+}
+
+export interface GenerateCardsJobResponse {
+  job_id: string;
+  status: string;
+  cards: GeneratedCardItem[];
+  retries_used: number;
+  malformed_items_dropped: number;
+  error: string;
+}
+
+export interface ImportDeckResponse {
+  deck_id: string;
+  deck_name: string;
+  imported: number;
+  skipped_duplicates: number;
+  errors: string[];
+}
+
+export interface FindDuplicatesRequest {
+  deck_id?: string;
+  threshold?: number;
+}
+
+export interface DuplicateCardRef {
+  card_id: string;
+  deck_id: string;
+  front: string;
+}
+
+export interface DuplicatePair {
+  card_a: DuplicateCardRef;
+  card_b: DuplicateCardRef;
+  similarity: number;
+  jaccard: number;
+  cosine: number | null;
+}
+
+export interface FindDuplicatesResponse {
+  pairs: DuplicatePair[];
+  threshold: number;
+}
+
+export interface DeckReviewRequest {
+  card_id: string;
+  rating: LearningReviewRating;
+  response_time_ms?: number;
+}
+
+export interface DeckReviewResponse {
+  card: FlashcardResponse;
+  log: FSRSReviewLogResponse;
+  leech: boolean;
+}
+
+export interface StudySessionResponse {
+  deck_id: string;
+  cards: FlashcardResponse[];
+  total_due: number;
+}
+/* ── Interview Personalization ────────────────────── */
+
+export interface ResumeSkillProfile {
+  user_id: string;
+  skills: string[];
+  projects: string[];
+  experience_years: number | null;
+  roles: string[];
+  strengths: string[];
+  weak_spots: string[];
+  raw_text_hash: string;
+  updated_at: string;
+}
+
+export interface ResumeUploadResponse {
+  profile: ResumeSkillProfile;
+  source: string;
+}
+
+export interface JDAnalysisResponse {
+  matched: string[];
+  gaps: string[];
+  weak_spots: string[];
+  likely_followups: string[];
+  recommended_focus_areas: string[];
+}
+
+export interface CompanyPackInfo {
+  company: string;
+  track: string;
+  style_config: Record<string, unknown>;
+  updated_at: string;
+}
+
+export interface CompanyPacksResponse {
+  packs: CompanyPackInfo[];
+}
+
+export interface HintRequest {
+  question_text?: string;
+  answer_context?: string;
+}
+
+export interface HintResponse {
+  question_id: string;
+  level: number;
+  hint: string;
+  hints_used: number;
+  hints_remaining: number;
+}
+
+export interface StarStory {
+  story_id: string;
+  title: string;
+  situation: string;
+  task: string;
+  action: string;
+  result: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StarStoryCreateRequest {
+  title: string;
+  situation: string;
+  task: string;
+  action: string;
+  result: string;
+  tags?: string[];
+}
+
+export interface StarStoryUpdateRequest {
+  title?: string;
+  situation?: string;
+  task?: string;
+  action?: string;
+  result?: string;
+  tags?: string[];
+}
+
+export interface StarStoryListResponse {
+  stories: StarStory[];
+  total: number;
+}
+
+export interface StarStorySuggestionsResponse {
+  stories: StarStory[];
+}
+
+export interface CreateInterviewSessionRequestExtended
+  extends CreateInterviewSessionRequest {
+  company?: string;
+  resume_profile?: boolean;
+  jd_text?: string;
+}
+
+export interface SubmitInterviewAnswerRequestWithHints
+  extends SubmitInterviewAnswerRequest {
+  hint_level?: number;
+  question_id?: string;
+}
+
+export interface InterviewRubricScoreExtended extends InterviewRubricScore {
+  independent_reasoning: number | null;
+}
+
+export interface InterviewTurnExtended extends InterviewTurn {
+  rubric: InterviewRubricScoreExtended;
+}
+
+export interface InterviewTurnResponseExtended extends Omit<InterviewTurnResponse, "turn"> {
+  turn: InterviewTurnExtended;
+}
+
+export interface InterviewSessionResponseExtended
+  extends Omit<InterviewSessionResponse, "turns"> {
+  turns: InterviewTurnExtended[];
+}
+
+// ── Voice interview WebSocket ──────────────────────
+
+export interface VoiceInterviewReadyEvent {
+  type: "interview_ready";
+  session_id: string;
+  question: string;
+  competency_focus: string;
+  expected_signals: string[];
+  audio: string;
+  turn_count: number;
+}
+
+export interface VoiceInterviewResponseEvent {
+  type: "interview_response";
+  text: string;
+  audio: string;
+  rubric: InterviewRubricScoreExtended | null;
+  degraded: boolean;
+  completed: boolean;
+  latency: { llm_ms: number; total_ms: number };
+}
+
+export interface VoiceInterviewCompletedEvent {
+  type: "interview_completed";
+  session_id: string;
+  report: InterviewReport;
+}
+
+export type VoiceInterviewStreamEvent =
+  | { type: "transcript"; text: string; final: boolean }
+  | VoiceInterviewReadyEvent
+  | VoiceInterviewResponseEvent
+  | VoiceInterviewCompletedEvent
+  | { type: "error"; message: string }
+  | { type: "stopped"; session_id: string };
+
+export interface VoiceInterviewStartMessage {
+  type: "interview_start";
+  config: CreateInterviewSessionRequestExtended;
+}

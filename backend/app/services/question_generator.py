@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
 import re
@@ -23,7 +24,11 @@ from app.schemas.models import (
     QuizQuestionType,
     QuizQuestionV2,
 )
-from app.services.llm_client import LLMClient
+from app.services.llm_client import (
+    TERMINAL_ERROR_CODES,
+    LLMClient,
+    parse_json_object,
+)
 from app.services.llm_policy import (
     APPROVAL_REQUIRED_CODE,
     APPROVAL_REQUIRED_MESSAGE,
@@ -38,7 +43,12 @@ from app.services.llm_policy import (
 )
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
-from app.services.prompt_blocks import optional_context_block, render_contract
+from app.services.question_text import normalise_question
+from app.services.prompt_blocks import (
+    UNTRUSTED_CLAUSE,
+    render_contract,
+    untrusted_block,
+)
 from app.services.topic_catalog import (
     PROBLEM_SOLVING_DEFAULT_LANGUAGE,
     is_problem_solving_topic,
@@ -48,6 +58,48 @@ logger = logging.getLogger(__name__)
 
 _MAX_DOC_CONTEXT = 45000
 _MAX_TOPIC_CONTEXT = 9000
+# The progress block rides along on every generation prompt, so it is capped
+# hard. It is the mitigation for the question-list caps below: once the
+# normalizer's 80-item cap and the uniqueness block's 60-item slice are reached,
+# the oldest history drops out of the prompt, but this block still describes it.
+_MAX_PROGRESS_BLOCK_CHARS = 1200
+# Per-flow output ceiling. A caller/config/preference value may lower it but
+# never raise it (enforced by ``LLMClient``).
+_MIN_QUESTIONS_MAX_TOKENS_CAP = 600
+_MAX_QUESTIONS_MAX_TOKENS_CAP = 8000
+_TOKENS_PER_QUESTION = 140
+
+
+def _questions_max_tokens_cap(count: int) -> int:
+    """Scale the questions/quiz output budget with the requested item count."""
+    scaled = int(count or 0) * _TOKENS_PER_QUESTION
+    return max(
+        _MIN_QUESTIONS_MAX_TOKENS_CAP,
+        min(_MAX_QUESTIONS_MAX_TOKENS_CAP, scaled),
+    )
+
+
+def _supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
+    """Drop call options ``client.completion`` does not accept.
+
+    ``LLMClient`` takes the full Stage-2 option set, but the client is injected,
+    so a narrower implementation may be in use. Filter against the bound
+    signature rather than assuming one shape.
+    """
+    try:
+        params = inspect.signature(client.completion).parameters
+    except (TypeError, ValueError):
+        return dict(options)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return options
+    return {key: value for key, value in options.items() if key in params}
+
+
+
+_PROGRESS_BLOCK_LABEL = (
+    "Learner progress on this topic so far "
+    "(use it to continue from where they stopped, never to repeat covered material)"
+)
 _BASE_MAX_ATTEMPTS = 5
 _MAX_TOTAL_ATTEMPTS = 18
 _MAX_RECOVERY_ATTEMPTS = 24
@@ -126,7 +178,7 @@ def _question_id(topic_id: str, question: str) -> str:
 
 
 def _normalise_question(text: str) -> str:
-    return re.sub(r"\s+", " ", text.strip().lower())
+    return normalise_question(text)
 
 
 def _question_tokens(text: str) -> set[str]:
@@ -206,6 +258,33 @@ def _normalise_existing_questions(existing_questions: list[str] | None) -> list[
         if len(out) >= 80:
             break
     return out
+
+
+def _merge_existing_questions(
+    existing_questions: list[str] | None,
+    additional_existing_questions: list[str] | None,
+) -> list[str]:
+    """Merge the client's per-checkpoint list with the server-stored history.
+
+    Client-first: that preserves today's per-checkpoint behaviour exactly (the
+    client list wins the budget), and the stored history then fills what is left
+    of the 80-item cap. Documented limitation: past the cap the oldest stored
+    questions are dropped from the prompt, which is what the progress block is
+    there to compensate for.
+    """
+    return _normalise_existing_questions(
+        [*(existing_questions or []), *(additional_existing_questions or [])]
+    )
+
+
+def _progress_block(prior_progress: str) -> str:
+    # ``prior_progress`` is model-generated text derived from stored learner
+    # history, so it is fenced like any other untrusted block.
+    return untrusted_block(
+        _PROGRESS_BLOCK_LABEL,
+        prior_progress,
+        _MAX_PROGRESS_BLOCK_CHARS,
+    )
 
 
 def _problem_solving_language(preferred_language: str) -> str:
@@ -430,8 +509,17 @@ def _grounding_anchor_phrases(
 def _render_grounding_anchors_block(anchors: list[str]) -> str:
     if not anchors:
         return ""
-    return "\nGrounding anchors from the topic content. Each generated question must clearly target one of these:\n" + "\n".join(
-        [f"- {anchor}" for anchor in anchors]
+    # Anchors are phrases lifted verbatim from the topic title, section title, and
+    # course content, so the whole list is untrusted. Fenced, because an anchor
+    # containing a closing tag would otherwise end the list and turn the rest of
+    # the prompt into instructions the model should follow.
+    return (
+        "\nGrounding anchors from the topic content. Each generated question must "
+        "clearly target one of these:\n"
+        + untrusted_block(
+            "grounding_anchors",
+            "\n".join([f"- {anchor}" for anchor in anchors]),
+        )
     )
 
 
@@ -525,7 +613,7 @@ _PROBLEM_SOLVING_FALLBACK_SCENARIOS: tuple[dict[str, str], ...] = (
     {
         "id": "two_sum_hash_map",
         "question": (
-            "In {source_scope}, consider an array-based input. Return the two indices "
+            "In {source_scope}, consider an array-based input related to {focus}. Return the two indices "
             "whose values satisfy a target-sum constraint. Explain your approach, complexity, and "
             "edge-case handling as you would in a live interview."
         ),
@@ -618,7 +706,7 @@ _PROBLEM_SOLVING_FALLBACK_SCENARIOS: tuple[dict[str, str], ...] = (
     {
         "id": "search_rotated_binary_search",
         "question": (
-            "In {source_scope}, you receive a rotated sorted array and a target value. "
+            "In {source_scope}, you receive a rotated sorted array tied to {focus} and a target value. "
             "Return the index or -1 if not found, and explain how you adapt binary search under rotation."
         ),
         "problem": (
@@ -781,11 +869,918 @@ def top_k_frequent(nums, k):
 """,
 }
 
+_PROBLEM_SOLVING_JAVA_CODE_TEMPLATES: dict[str, str] = {
+    "two_sum_hash_map": """import java.util.HashMap;
+import java.util.Map;
+
+class Solution {
+    public int[] twoSum(int[] nums, int target) {
+        // Store each seen value with its index so complement lookups stay O(1).
+        Map<Integer, Integer> seen = new HashMap<>();
+
+        // Scan the array once and look for the complement before storing the current value.
+        for (int index = 0; index < nums.length; index++) {
+            int value = nums[index];
+            int complement = target - value;
+            if (seen.containsKey(complement)) {
+                // Return the earlier index and the current index as soon as the pair is found.
+                return new int[] {seen.get(complement), index};
+            }
+            seen.put(value, index);
+        }
+
+        // Return an empty result when the input does not contain a valid pair.
+        return new int[0];
+    }
+}
+""",
+    "longest_substring_sliding_window": """import java.util.HashMap;
+import java.util.Map;
+
+class Solution {
+    public int lengthOfLongestSubstring(String s) {
+        // Track the latest index of each character for fast window fixes.
+        Map<Character, Integer> lastSeen = new HashMap<>();
+        int left = 0;
+        int best = 0;
+
+        // Expand the window with `right` and shrink from `left` on duplicates.
+        for (int right = 0; right < s.length(); right++) {
+            char current = s.charAt(right);
+            Integer previous = lastSeen.get(current);
+            if (previous != null && previous >= left) {
+                left = previous + 1;
+            }
+            lastSeen.put(current, right);
+            best = Math.max(best, right - left + 1);
+        }
+
+        // The best window length is the answer.
+        return best;
+    }
+}
+""",
+    "merge_intervals_sorting": """import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+
+class Solution {
+    public int[][] merge(int[][] intervals) {
+        // Sort by start so overlap checks become local.
+        Arrays.sort(intervals, Comparator.comparingInt(pair -> pair[0]));
+        List<int[]> merged = new ArrayList<>();
+
+        // Merge into the latest interval when ranges overlap.
+        for (int[] interval : intervals) {
+            if (merged.isEmpty() || interval[0] > merged.get(merged.size() - 1)[1]) {
+                merged.add(new int[] {interval[0], interval[1]});
+                continue;
+            }
+            int[] last = merged.get(merged.size() - 1);
+            last[1] = Math.max(last[1], interval[1]);
+        }
+
+        // Return merged disjoint intervals.
+        return merged.toArray(new int[0][]);
+    }
+}
+""",
+    "top_k_frequent_heap": """import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+
+class Solution {
+    public int[] topKFrequent(int[] nums, int k) {
+        // Count frequency of each value in O(n).
+        Map<Integer, Integer> counts = new HashMap<>();
+        for (int value : nums) {
+            counts.merge(value, 1, Integer::sum);
+        }
+
+        // Use a max-heap ordered by frequency for top-k extraction.
+        PriorityQueue<Map.Entry<Integer, Integer>> heap =
+                new PriorityQueue<>(Comparator.comparingInt(Map.Entry::getValue));
+        heap.addAll(counts.entrySet());
+
+        List<Integer> result = new ArrayList<>();
+        while (result.size() < k && !heap.isEmpty()) {
+            result.add(heap.poll().getKey());
+        }
+
+        // Return the most frequent values in descending order.
+        int[] top = new int[result.size()];
+        for (int i = 0; i < top.length; i++) {
+            top[i] = result.get(i);
+        }
+        return top;
+    }
+}
+""",
+    "search_rotated_binary_search": """class Solution {
+    public int search(int[] nums, int target) {
+        // Keep classic binary-search boundaries.
+        int left = 0;
+        int right = nums.length - 1;
+
+        // One half is always sorted even after rotation.
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            if (nums[mid] == target) {
+                return mid;
+            }
+            if (nums[left] <= nums[mid]) {
+                if (nums[left] <= target && target < nums[mid]) {
+                    right = mid - 1;
+                } else {
+                    left = mid + 1;
+                }
+            } else if (nums[mid] < target && target <= nums[right]) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+
+        // Return -1 when the target is absent.
+        return -1;
+    }
+}
+""",
+    "number_of_islands_dfs": """class Solution {
+    public int numIslands(char[][] grid) {
+        // Guard empty input to avoid index errors.
+        if (grid == null || grid.length == 0 || grid[0].length == 0) {
+            return 0;
+        }
+
+        int rows = grid.length;
+        int cols = grid[0].length;
+        int islands = 0;
+
+        // Count each connected component once, marking its cells as water.
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                if (grid[r][c] == '1') {
+                    islands++;
+                    sink(grid, r, c, rows, cols);
+                }
+            }
+        }
+        return islands;
+    }
+
+    private void sink(char[][] grid, int r, int c, int rows, int cols) {
+        // Stop at water or bounds so each cell is visited once.
+        if (r < 0 || r >= rows || c < 0 || c >= cols || grid[r][c] != '1') {
+            return;
+        }
+        grid[r][c] = '0';
+
+        // Explore all four directions for the current island.
+        sink(grid, r + 1, c, rows, cols);
+        sink(grid, r - 1, c, rows, cols);
+        sink(grid, r, c + 1, rows, cols);
+        sink(grid, r, c - 1, rows, cols);
+    }
+}
+""",
+}
+
+_PROBLEM_SOLVING_CPP_CODE_TEMPLATES: dict[str, str] = {
+    "two_sum_hash_map": """#include <unordered_map>
+#include <vector>
+
+using namespace std;
+
+vector<int> twoSum(const vector<int>& nums, int target) {
+    // Store each seen value with its index so complement lookups stay O(1).
+    unordered_map<int, int> seen;
+
+    // Scan the array once and look for the complement before storing the current value.
+    for (int index = 0; index < static_cast<int>(nums.size()); index++) {
+        int value = nums[index];
+        int complement = target - value;
+        auto found = seen.find(complement);
+        if (found != seen.end()) {
+            // Return the earlier index and the current index as soon as the pair is found.
+            return {found->second, index};
+        }
+        seen[value] = index;
+    }
+
+    // Return an empty result when the input does not contain a valid pair.
+    return {};
+}
+""",
+    "longest_substring_sliding_window": """#include <algorithm>
+#include <string>
+#include <unordered_map>
+
+using namespace std;
+
+int lengthOfLongestSubstring(const string& s) {
+    // Track the latest index of each character for fast window fixes.
+    unordered_map<char, int> lastSeen;
+    int left = 0;
+    int best = 0;
+
+    // Expand the window with `right` and shrink from `left` on duplicates.
+    for (int right = 0; right < static_cast<int>(s.size()); right++) {
+        auto found = lastSeen.find(s[right]);
+        if (found != lastSeen.end() && found->second >= left) {
+            left = found->second + 1;
+        }
+        lastSeen[s[right]] = right;
+        best = max(best, right - left + 1);
+    }
+
+    // The best window length is the answer.
+    return best;
+}
+""",
+    "merge_intervals_sorting": """#include <algorithm>
+#include <vector>
+
+using namespace std;
+
+vector<vector<int>> mergeIntervals(vector<vector<int>>& intervals) {
+    // Sort by start so overlap checks become local.
+    sort(intervals.begin(), intervals.end());
+    vector<vector<int>> merged;
+
+    // Merge into the latest interval when ranges overlap.
+    for (const auto& interval : intervals) {
+        if (merged.empty() || interval[0] > merged.back()[1]) {
+            merged.push_back(interval);
+            continue;
+        }
+        merged.back()[1] = max(merged.back()[1], interval[1]);
+    }
+
+    // Return merged disjoint intervals.
+    return merged;
+}
+""",
+    "top_k_frequent_heap": """#include <algorithm>
+#include <queue>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+using namespace std;
+
+vector<int> topKFrequent(const vector<int>& nums, int k) {
+    // Count frequency of each value in O(n).
+    unordered_map<int, int> counts;
+    for (int value : nums) {
+        counts[value]++;
+    }
+
+    // Use a max-heap ordered by frequency for top-k extraction.
+    priority_queue<pair<int, int>> heap;
+    for (const auto& entry : counts) {
+        heap.push({entry.second, entry.first});
+    }
+
+    vector<int> result;
+    while (!heap.empty() && static_cast<int>(result.size()) < k) {
+        result.push_back(heap.top().second);
+        heap.pop();
+    }
+
+    // Return the most frequent values in descending order.
+    sort(result.begin(), result.end(), greater<int>());
+    return result;
+}
+""",
+    "search_rotated_binary_search": """#include <vector>
+
+using namespace std;
+
+int searchRotated(const vector<int>& nums, int target) {
+    // Keep classic binary-search boundaries.
+    int left = 0;
+    int right = static_cast<int>(nums.size()) - 1;
+
+    // One half is always sorted even after rotation.
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        if (nums[mid] == target) {
+            return mid;
+        }
+        if (nums[left] <= nums[mid]) {
+            if (nums[left] <= target && target < nums[mid]) {
+                right = mid - 1;
+            } else {
+                left = mid + 1;
+            }
+        } else if (nums[mid] < target && target <= nums[right]) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+
+    // Return -1 when the target is absent.
+    return -1;
+}
+""",
+    "number_of_islands_dfs": """#include <vector>
+
+using namespace std;
+
+int numIslands(vector<vector<char>>& grid) {
+    // Guard empty input to avoid index errors.
+    if (grid.empty() || grid[0].empty()) {
+        return 0;
+    }
+
+    int rows = static_cast<int>(grid.size());
+    int cols = static_cast<int>(grid[0].size());
+    int islands = 0;
+
+    // Count each connected component once, sinking its cells into water.
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            if (grid[r][c] == '1') {
+                islands++;
+                sink(grid, r, c, rows, cols);
+            }
+        }
+    }
+    return islands;
+}
+
+void sink(vector<vector<char>>& grid, int r, int c, int rows, int cols) {
+    // Stop at water or bounds so each cell is visited once.
+    if (r < 0 || r >= rows || c < 0 || c >= cols || grid[r][c] != '1') {
+        return;
+    }
+    grid[r][c] = '0';
+
+    // Explore all four directions for the current island.
+    sink(grid, r + 1, c, rows, cols);
+    sink(grid, r - 1, c, rows, cols);
+    sink(grid, r, c + 1, rows, cols);
+    sink(grid, r, c - 1, rows, cols);
+}
+""",
+}
+
+_PROBLEM_SOLVING_JAVASCRIPT_CODE_TEMPLATES: dict[str, str] = {
+    "two_sum_hash_map": """function twoSum(nums, target) {
+  // Store each seen value with its index so complement lookups stay O(1).
+  const seen = new Map();
+
+  // Scan the array once and look for the complement before storing the current value.
+  for (let index = 0; index < nums.length; index += 1) {
+    const value = nums[index];
+    const complement = target - value;
+    if (seen.has(complement)) {
+      // Return the earlier index and the current index as soon as the pair is found.
+      return [seen.get(complement), index];
+    }
+    seen.set(value, index);
+  }
+
+  // Return an empty result when the input does not contain a valid pair.
+  return [];
+}
+""",
+    "longest_substring_sliding_window": """function lengthOfLongestSubstring(s) {
+  // Track the latest index of each character for fast window fixes.
+  const lastSeen = new Map();
+  let left = 0;
+  let best = 0;
+
+  // Expand the window with `right` and shrink from `left` on duplicates.
+  for (let right = 0; right < s.length; right += 1) {
+    const current = s[right];
+    const previous = lastSeen.get(current);
+    if (previous !== undefined && previous >= left) {
+      left = previous + 1;
+    }
+    lastSeen.set(current, right);
+    best = Math.max(best, right - left + 1);
+  }
+
+  // The best window length is the answer.
+  return best;
+}
+""",
+    "merge_intervals_sorting": """function mergeIntervals(intervals) {
+  // Sort by start so overlap checks become local.
+  const sorted = intervals.slice().sort((a, b) => a[0] - b[0]);
+  const merged = [];
+
+  // Merge into the latest interval when ranges overlap.
+  for (const [start, end] of sorted) {
+    if (merged.length === 0 || start > merged[merged.length - 1][1]) {
+      merged.push([start, end]);
+      continue;
+    }
+    merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], end);
+  }
+
+  // Return merged disjoint intervals.
+  return merged;
+}
+""",
+    "top_k_frequent_heap": """function topKFrequent(nums, k) {
+  // Count frequency of each value in O(n).
+  const counts = new Map();
+  for (const value of nums) {
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+
+  // Sort the (value, count) pairs by descending frequency and take the top k.
+  const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+
+  // Return the most frequent values in descending order.
+  return ranked.slice(0, k).map(([value]) => value);
+}
+""",
+    "search_rotated_binary_search": """function searchRotated(nums, target) {
+  // Keep classic binary-search boundaries.
+  let left = 0;
+  let right = nums.length - 1;
+
+  // One half is always sorted even after rotation.
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    if (nums[mid] === target) {
+      return mid;
+    }
+    if (nums[left] <= nums[mid]) {
+      if (nums[left] <= target && target < nums[mid]) {
+        right = mid - 1;
+      } else {
+        left = mid + 1;
+      }
+    } else if (nums[mid] < target && target <= nums[right]) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+
+  // Return -1 when the target is absent.
+  return -1;
+}
+""",
+    "number_of_islands_dfs": """function numIslands(grid) {
+  // Guard empty input to avoid index errors.
+  if (!grid || grid.length === 0 || grid[0].length === 0) {
+    return 0;
+  }
+
+  const rows = grid.length;
+  const cols = grid[0].length;
+  let islands = 0;
+
+  // Count each connected component once, sinking its cells into water.
+  const sink = (r, c) => {
+    // Stop at water or bounds so each cell is visited once.
+    if (r < 0 || r >= rows || c < 0 || c >= cols || grid[r][c] !== "1") {
+      return;
+    }
+    grid[r][c] = "0";
+
+    // Explore all four directions for the current island.
+    sink(r + 1, c);
+    sink(r - 1, c);
+    sink(r, c + 1);
+    sink(r, c - 1);
+  };
+
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      if (grid[r][c] === "1") {
+        islands += 1;
+        sink(r, c);
+      }
+    }
+  }
+  return islands;
+}
+""",
+}
+
+_PROBLEM_SOLVING_CSHARP_CODE_TEMPLATES: dict[str, str] = {
+    "two_sum_hash_map": """using System.Collections.Generic;
+
+public class Solution
+{
+    public int[] TwoSum(int[] nums, int target)
+    {
+        // Store each seen value with its index so complement lookups stay O(1).
+        var seen = new Dictionary<int, int>();
+
+        // Scan the array once and look for the complement before storing the current value.
+        for (var index = 0; index < nums.Length; index++)
+        {
+            var value = nums[index];
+            var complement = target - value;
+            if (seen.TryGetValue(complement, out var previousIndex))
+            {
+                // Return the earlier index and the current index as soon as the pair is found.
+                return new[] { previousIndex, index };
+            }
+            seen[value] = index;
+        }
+
+        // Return an empty result when the input does not contain a valid pair.
+        return new int[0];
+    }
+}
+""",
+    "longest_substring_sliding_window": """using System;
+using System.Collections.Generic;
+
+public class Solution
+{
+    public int LengthOfLongestSubstring(string s)
+    {
+        // Track the latest index of each character for fast window fixes.
+        var lastSeen = new Dictionary<char, int>();
+        var left = 0;
+        var best = 0;
+
+        // Expand the window with `right` and shrink from `left` on duplicates.
+        for (var right = 0; right < s.Length; right++)
+        {
+            var current = s[right];
+            if (lastSeen.TryGetValue(current, out var previous) && previous >= left)
+            {
+                left = previous + 1;
+            }
+            lastSeen[current] = right;
+            best = Math.Max(best, right - left + 1);
+        }
+
+        // The best window length is the answer.
+        return best;
+    }
+}
+""",
+    "merge_intervals_sorting": """using System.Collections.Generic;
+using System.Linq;
+
+public class Solution
+{
+    public int[][] Merge(int[][] intervals)
+    {
+        // Sort by start so overlap checks become local.
+        var sorted = intervals.OrderBy(pair => pair[0]).ToList();
+        var merged = new List<int[]>();
+
+        // Merge into the latest interval when ranges overlap.
+        foreach (var interval in sorted)
+        {
+            if (merged.Count == 0 || interval[0] > merged[merged.Count - 1][1])
+            {
+                merged.Add(new[] { interval[0], interval[1] });
+                continue;
+            }
+            merged[merged.Count - 1][1] = System.Math.Max(merged[merged.Count - 1][1], interval[1]);
+        }
+
+        // Return merged disjoint intervals.
+        return merged.ToArray();
+    }
+}
+""",
+    "top_k_frequent_heap": """using System.Collections.Generic;
+using System.Linq;
+
+public class Solution
+{
+    public int[] TopKFrequent(int[] nums, int k)
+    {
+        // Count frequency of each value in O(n).
+        var counts = new Dictionary<int, int>();
+        foreach (var value in nums)
+        {
+            counts[value] = counts.TryGetValue(value, out var seen) ? seen + 1 : 1;
+        }
+
+        // Order the (value, count) pairs by descending frequency and take the top k.
+        return counts
+            .OrderByDescending(entry => entry.Value)
+            .Take(k)
+            .Select(entry => entry.Key)
+            .ToArray();
+    }
+}
+""",
+    "search_rotated_binary_search": """public class Solution
+{
+    public int Search(int[] nums, int target)
+    {
+        // Keep classic binary-search boundaries.
+        var left = 0;
+        var right = nums.Length - 1;
+
+        // One half is always sorted even after rotation.
+        while (left <= right)
+        {
+            var mid = left + (right - left) / 2;
+            if (nums[mid] == target)
+            {
+                return mid;
+            }
+            if (nums[left] <= nums[mid])
+            {
+                if (nums[left] <= target && target < nums[mid])
+                {
+                    right = mid - 1;
+                }
+                else
+                {
+                    left = mid + 1;
+                }
+            }
+            else if (nums[mid] < target && target <= nums[right])
+            {
+                left = mid + 1;
+            }
+            else
+            {
+                right = mid - 1;
+            }
+        }
+
+        // Return -1 when the target is absent.
+        return -1;
+    }
+}
+""",
+    "number_of_islands_dfs": """public class Solution
+{
+    public int NumIslands(char[][] grid)
+    {
+        // Guard empty input to avoid index errors.
+        if (grid == null || grid.Length == 0 || grid[0].Length == 0)
+        {
+            return 0;
+        }
+
+        var rows = grid.Length;
+        var cols = grid[0].Length;
+        var islands = 0;
+
+        // Count each connected component once, sinking its cells into water.
+        for (var r = 0; r < rows; r++)
+        {
+            for (var c = 0; c < cols; c++)
+            {
+                if (grid[r][c] == '1')
+                {
+                    islands++;
+                    Sink(grid, r, c, rows, cols);
+                }
+            }
+        }
+        return islands;
+    }
+
+    private static void Sink(char[][] grid, int r, int c, int rows, int cols)
+    {
+        // Stop at water or bounds so each cell is visited once.
+        if (r < 0 || r >= rows || c < 0 || c >= cols || grid[r][c] != '1')
+        {
+            return;
+        }
+        grid[r][c] = '0';
+
+        // Explore all four directions for the current island.
+        Sink(grid, r + 1, c, rows, cols);
+        Sink(grid, r - 1, c, rows, cols);
+        Sink(grid, r, c + 1, rows, cols);
+        Sink(grid, r, c - 1, rows, cols);
+    }
+}
+""",
+}
+
+_PROBLEM_SOLVING_GO_CODE_TEMPLATES: dict[str, str] = {
+    "two_sum_hash_map": """package main
+
+func twoSum(nums []int, target int) []int {
+    // Store each seen value with its index so complement lookups stay O(1).
+    seen := make(map[int]int)
+
+    // Scan the array once and look for the complement before storing the current value.
+    for index, value := range nums {
+        complement := target - value
+        if previousIndex, ok := seen[complement]; ok {
+            // Return the earlier index and the current index as soon as the pair is found.
+            return []int{previousIndex, index}
+        }
+        seen[value] = index
+    }
+
+    // Return an empty result when the input does not contain a valid pair.
+    return []int{}
+}
+""",
+    "longest_substring_sliding_window": """package main
+
+func lengthOfLongestSubstring(s string) int {
+    // Track the latest index of each character for fast window fixes.
+    lastSeen := make(map[rune]int)
+    left := 0
+    best := 0
+
+    // Expand the window with `right` and shrink from `left` on duplicates.
+    for right, current := range []rune(s) {
+        if previous, ok := lastSeen[current]; ok && previous >= left {
+            left = previous + 1
+        }
+        lastSeen[current] = right
+        if right-left+1 > best {
+            best = right - left + 1
+        }
+    }
+
+    // The best window length is the answer.
+    return best
+}
+""",
+    "merge_intervals_sorting": """package main
+
+import "sort"
+
+func mergeIntervals(intervals [][2]int) [][2]int {
+    // Sort by start so overlap checks become local.
+    sort.Slice(intervals, func(a, b int) bool { return intervals[a][0] < intervals[b][0] })
+    merged := make([][2]int, 0, len(intervals))
+
+    // Merge into the latest interval when ranges overlap.
+    for _, interval := range intervals {
+        last := len(merged) - 1
+        if last < 0 || interval[0] > merged[last][1] {
+            merged = append(merged, interval)
+            continue
+        }
+        if interval[1] > merged[last][1] {
+            merged[last][1] = interval[1]
+        }
+    }
+
+    // Return merged disjoint intervals.
+    return merged
+}
+""",
+    "top_k_frequent_heap": """package main
+
+import (
+    "container/heap"
+)
+
+type countEntry struct {
+    value int
+    count int
+}
+
+type countHeap []countEntry
+
+func (h countHeap) Len() int           { return len(h) }
+func (h countHeap) Less(a, b int) bool { return h[a].count > h[b].count }
+func (h countHeap) Swap(a, b int)      { h[a], h[b] = h[b], h[a] }
+func (h *countHeap) Push(x any)        { *h = append(*h, x.(countEntry)) }
+func (h *countHeap) Pop() any {
+    // Remove the lowest-priority entry so the root stays the most frequent value.
+    old := *h
+    last := old[len(old)-1]
+    *h = old[:len(old)-1]
+    return last
+}
+
+func topKFrequent(nums []int, k int) []int {
+    // Count frequency of each value in O(n).
+    counts := make(map[int]int)
+    for _, value := range nums {
+        counts[value]++
+    }
+
+    // Use a max-heap ordered by frequency for top-k extraction.
+    h := &countHeap{}
+    for value, count := range counts {
+        *h = append(*h, countEntry{value: value, count: count})
+    }
+    heap.Init(h)
+
+    result := make([]int, 0, k)
+    for len(result) < k && h.Len() > 0 {
+        result = append(result, heap.Pop(h).(countEntry).value)
+    }
+
+    // Return the most frequent values.
+    return result
+}
+""",
+    "search_rotated_binary_search": """package main
+
+func searchRotated(nums []int, target int) int {
+    // Keep classic binary-search boundaries.
+    left, right := 0, len(nums)-1
+
+    // One half is always sorted even after rotation.
+    for left <= right {
+        mid := left + (right-left)/2
+        if nums[mid] == target {
+            return mid
+        }
+        if nums[left] <= nums[mid] {
+            if nums[left] <= target && target < nums[mid] {
+                right = mid - 1
+            } else {
+                left = mid + 1
+            }
+        } else if nums[mid] < target && target <= nums[right] {
+            left = mid + 1
+        } else {
+            right = mid - 1
+        }
+    }
+
+    // Return -1 when the target is absent.
+    return -1
+}
+""",
+    "number_of_islands_dfs": """package main
+
+func numIslands(grid [][]byte) int {
+    // Guard empty input to avoid index errors.
+    if len(grid) == 0 || len(grid[0]) == 0 {
+        return 0
+    }
+
+    rows, cols := len(grid), len(grid[0])
+    var sink func(r, c int)
+    islands := 0
+
+    // Count each connected component once, sinking its cells into water.
+    sink = func(r, c int) {
+        // Stop at water or bounds so each cell is visited once.
+        if r < 0 || r >= rows || c < 0 || c >= cols || grid[r][c] != '1' {
+            return
+        }
+        grid[r][c] = '0'
+
+        // Explore all four directions for the current island.
+        sink(r+1, c)
+        sink(r-1, c)
+        sink(r, c+1)
+        sink(r, c-1)
+    }
+
+    for r := 0; r < rows; r++ {
+        for c := 0; c < cols; c++ {
+            if grid[r][c] == '1' {
+                islands++
+                sink(r, c)
+            }
+        }
+    }
+    return islands
+}
+""",
+}
+
+#: Genuine, hand-written source per language and scenario.
+#:
+#: A language is deliberately *absent* from a scenario rather than inheriting
+#: another language's source. Relabelling the Python two-sum implementation
+#: under a ```java fence is a correctness defect (plan item 1.10), so "no entry
+#: here" means "no code block at all", not "reuse something close enough".
+_PROBLEM_SOLVING_CODE_TEMPLATES_BY_LANGUAGE: dict[str, dict[str, str]] = {
+    "python": _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES,
+    "java": _PROBLEM_SOLVING_JAVA_CODE_TEMPLATES,
+    "cpp": _PROBLEM_SOLVING_CPP_CODE_TEMPLATES,
+    "javascript": _PROBLEM_SOLVING_JAVASCRIPT_CODE_TEMPLATES,
+    "csharp": _PROBLEM_SOLVING_CSHARP_CODE_TEMPLATES,
+    "go": _PROBLEM_SOLVING_GO_CODE_TEMPLATES,
+}
+
 
 def _problem_solving_scenario_ids_for_language(language: str) -> list[str]:
-    if language == "python":
-        return [item["id"] for item in _PROBLEM_SOLVING_FALLBACK_SCENARIOS]
-    return [_PROBLEM_SOLVING_DEFAULT_SCENARIO_ID]
+    """Scenario ids that have a genuine code template in ``language``.
+
+    Empty for an unsupported language, which lets the caller fall back to a
+    language-agnostic question instead of borrowing another language's source.
+    """
+    templates = _PROBLEM_SOLVING_CODE_TEMPLATES_BY_LANGUAGE.get(
+        str(language or "").strip().lower()
+    )
+    if not templates:
+        return []
+    return list(templates)
 
 
 def _problem_solving_question_seed(
@@ -903,131 +1898,21 @@ def _problem_solving_code_template(
     *,
     scenario_id: str = _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID,
 ) -> str:
-    if language == "python":
-        return _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES.get(
-            scenario_id,
-            _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES[_PROBLEM_SOLVING_DEFAULT_SCENARIO_ID],
-        ).strip()
+    """Return genuine source for ``language``/``scenario_id``, or an empty string.
 
-    templates = {
-        "python": _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES[_PROBLEM_SOLVING_DEFAULT_SCENARIO_ID],
-        "java": """import java.util.HashMap;
-import java.util.Map;
-
-class Solution {
-    public int[] twoSum(int[] nums, int target) {
-        // Store each seen value with its index so complement lookups stay O(1).
-        Map<Integer, Integer> seen = new HashMap<>();
-
-        // Scan the array once and look for the complement before storing the current value.
-        for (int index = 0; index < nums.length; index++) {
-            int value = nums[index];
-            int complement = target - value;
-            if (seen.containsKey(complement)) {
-                // Return the earlier index and the current index as soon as the pair is found.
-                return new int[] {seen.get(complement), index};
-            }
-            seen.put(value, index);
-        }
-
-        // Return an empty result when the input does not contain a valid pair.
-        return new int[0];
-    }
-}
-""",
-        "cpp": """#include <unordered_map>
-#include <vector>
-
-using namespace std;
-
-vector<int> twoSum(const vector<int>& nums, int target) {
-    // Store each seen value with its index so complement lookups stay O(1).
-    unordered_map<int, int> seen;
-
-    // Scan the array once and look for the complement before storing the current value.
-    for (int index = 0; index < static_cast<int>(nums.size()); index++) {
-        int value = nums[index];
-        int complement = target - value;
-        auto found = seen.find(complement);
-        if (found != seen.end()) {
-            // Return the earlier index and the current index as soon as the pair is found.
-            return {found->second, index};
-        }
-        seen[value] = index;
-    }
-
-    // Return an empty result when the input does not contain a valid pair.
-    return {};
-}
-""",
-        "javascript": """function twoSum(nums, target) {
-  // Store each seen value with its index so complement lookups stay O(1).
-  const seen = new Map();
-
-  // Scan the array once and look for the complement before storing the current value.
-  for (let index = 0; index < nums.length; index += 1) {
-    const value = nums[index];
-    const complement = target - value;
-    if (seen.has(complement)) {
-      // Return the earlier index and the current index as soon as the pair is found.
-      return [seen.get(complement), index];
-    }
-    seen.set(value, index);
-  }
-
-  // Return an empty result when the input does not contain a valid pair.
-  return [];
-}
-""",
-        "csharp": """using System.Collections.Generic;
-
-public class Solution
-{
-    public int[] TwoSum(int[] nums, int target)
-    {
-        // Store each seen value with its index so complement lookups stay O(1).
-        var seen = new Dictionary<int, int>();
-
-        // Scan the array once and look for the complement before storing the current value.
-        for (var index = 0; index < nums.Length; index++)
-        {
-            var value = nums[index];
-            var complement = target - value;
-            if (seen.TryGetValue(complement, out var previousIndex))
-            {
-                // Return the earlier index and the current index as soon as the pair is found.
-                return new[] { previousIndex, index };
-            }
-            seen[value] = index;
-        }
-
-        // Return an empty result when the input does not contain a valid pair.
-        return new int[0];
-    }
-}
-""",
-        "go": """package main
-
-func twoSum(nums []int, target int) []int {
-    // Store each seen value with its index so complement lookups stay O(1).
-    seen := make(map[int]int)
-
-    // Scan the array once and look for the complement before storing the current value.
-    for index, value := range nums {
-        complement := target - value
-        if previousIndex, ok := seen[complement]; ok {
-            // Return the earlier index and the current index as soon as the pair is found.
-            return []int{previousIndex, index}
-        }
-        seen[value] = index
-    }
-
-    // Return an empty result when the input does not contain a valid pair.
-    return []int{}
-}
-""",
-    }
-    return templates.get(language, templates[PROBLEM_SOLVING_DEFAULT_LANGUAGE]).strip()
+    Never falls back to another language's implementation: relabelling Python
+    source under a ```java fence produces an answer that looks right and is
+    wrong. An empty result means the caller must omit the code block, which in
+    turn fails ``_validate_problem_solving_answer`` rather than shipping a
+    mismatch.
+    """
+    templates = _PROBLEM_SOLVING_CODE_TEMPLATES_BY_LANGUAGE.get(
+        str(language or "").strip().lower()
+    )
+    if not templates:
+        return ""
+    code = templates.get(scenario_id, "")
+    return code.strip()
 
 
 def _build_problem_solving_fallback_answer(
@@ -1056,39 +1941,46 @@ def _build_problem_solving_fallback_answer(
             "| Chosen approach | Preserves the exact state the next step needs | Reduces repeated work while keeping the explanation easy to defend |",
         ]
     )
-    answer = "\n\n".join(
-        [
-            "### Problem",
-            (
-                f"**What the problem is asking:** {seed['problem']}"
-            ),
-            "### Solution Walkthrough",
-            f"**Direct answer:** {short_answer}",
-            (
-                f"**Detailed explanation:** {seed['walkthrough']}\n\n"
-                f"{approach_table}"
-            ),
-            (
-                f"**Why this works:** {seed['walkthrough']}\n"
-                "- The invariant tells you what must stay true after every update.\n"
-                "- The chosen structure stores exactly the information the next step needs.\n"
-                "- The update order prevents invalid reuse or stale state."
-            ),
-            (
-                f"**Common mistake:** A weak answer for {focus} starts coding the brute-force idea before "
-                "stating the invariant and why the chosen structure fits the constraint."
-            ),
-            "### Complexity",
-            f"**Time and space:** {time_and_space}",
-            f"**Tradeoff / scaling caveat:** {tradeoff}",
-            "### Code",
-            f"```{language}\n{code}\n```",
-            (
-                "**Invariant note:** The state update inside the main scan is what preserves the core invariant, "
-                "so each step keeps the partial solution valid before the next iteration."
-            ),
-        ]
-    ).strip()
+    blocks = [
+        "### Problem",
+        (
+            f"**What the problem is asking:** {seed['problem']}"
+        ),
+        "### Solution Walkthrough",
+        f"**Direct answer:** {short_answer}",
+        (
+            f"**Detailed explanation:** {seed['walkthrough']}\n\n"
+            f"{approach_table}"
+        ),
+        (
+            f"**Why this works:** {seed['walkthrough']}\n"
+            "- The invariant tells you what must stay true after every update.\n"
+            "- The chosen structure stores exactly the information the next step needs.\n"
+            "- The update order prevents invalid reuse or stale state."
+        ),
+        (
+            f"**Common mistake:** A weak answer for {focus} starts coding the brute-force idea before "
+            "stating the invariant and why the chosen structure fits the constraint."
+        ),
+        "### Complexity",
+        f"**Time and space:** {time_and_space}",
+        f"**Tradeoff / scaling caveat:** {tradeoff}",
+    ]
+    if code:
+        # Only ever emit a code block whose source genuinely is ``language``.
+        # With no template the heading is omitted, so validation rejects the
+        # answer instead of a mismatched fence reaching the learner.
+        blocks.extend(
+            [
+                "### Code",
+                f"```{language}\n{code}\n```",
+                (
+                    "**Invariant note:** The state update inside the main scan is what preserves the core invariant, "
+                    "so each step keeps the partial solution valid before the next iteration."
+                ),
+            ]
+        )
+    answer = "\n\n".join(blocks).strip()
     return answer, seed["reasoning_summary"]
 
 
@@ -1216,6 +2108,88 @@ def _problem_solving_fallback_count_with_headroom(missing_count: int, problem_so
     return min(24, max(missing, missing * 3, missing + scenario_count))
 
 
+def _question_system_prompt(problem_solving_mode: bool) -> str:
+    """The ``system`` role for question generation (Stage 2.1).
+
+    The persona used to be the first line of the user turn, which gave
+    externally sourced course text the same authority as the instruction.
+    """
+    if problem_solving_mode:
+        return (
+            "You are an expert algorithm interviewer and problem-solving educator. "
+            "You write interview-grade algorithmic questions with fully worked, commented "
+            "solutions, and you always respond with a single JSON array and never with prose."
+        )
+    return (
+        "You are an expert technical interviewer and educator. You write interview-grade "
+        "questions with direct, detailed study answers grounded in the supplied course "
+        "material, and you always respond with a single JSON array and never with prose."
+    )
+
+
+def _problem_solving_few_shot_example(language: str) -> str:
+    """Worked example showing the exact answer shape the validator enforces."""
+    code = _problem_solving_code_template(
+        language,
+        scenario_id=_PROBLEM_SOLVING_DEFAULT_SCENARIO_ID,
+    )
+    fence = language if code else "python"
+    sample = code or _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES[
+        _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID
+    ]
+    return (
+        "Worked example showing the required shape (its content is illustrative, "
+        "not reusable content):\n"
+        "[\n"
+        '  {\n'
+        '    "question": "Given an array of integers and a target, return the two indices whose values sum to the target, or an empty array when no pair exists.",\n'
+        '    "answer": "### Problem\\n**What the problem is asking:** Return two indices i and j where nums[i] + nums[j] equals target.\\n\\n'
+        '### Solution Walkthrough\\n**Direct answer:** Use a hash map from value to index and check each value\\u0027s complement before storing it.\\n\\n'
+        "**Detailed explanation:** A one-pass scan keeps every earlier value reachable in O(1), which removes the nested loop entirely.\\n\\n"
+        "**Why this works:** Checking the complement before inserting the current value guarantees the same element is never reused.\\n\\n"
+        "**Common mistake:** Inserting the current value first, which lets one element satisfy both slots.\\n\\n"
+        "### Complexity\\n**Time and space:** Time is O(n) for the single scan; extra space is O(n) for the map.\\n\\n"
+        "**Tradeoff / scaling caveat:** The map trades memory for linear time; under a hard memory cap, sort-then-two-pointers is the fallback.\\n\\n"
+        f"### Code\\n```{fence}\\n{sample}\\n```\\n\\n"
+        '**Invariant note:** Storing the value only after the complement check is what keeps the partial solution valid.\\",\\n'
+        '    "difficulty": "medium",\n'
+        '    "learning_objective": "After this question, the learner should be able to choose a one-pass hash-map strategy and justify it.",\n'
+        '    "source_section": "Hash maps",\n'
+        '    "source_quote": "A hash map keeps every earlier value reachable in constant time.",\n'
+        '    "reasoning_summary": "Identify the complement invariant first, then pick the structure that preserves it.",\n'
+        '    "target_level": "mid"\n'
+        "  }\n"
+        "]"
+    )
+
+
+def _conceptual_few_shot_example() -> str:
+    """Worked example showing the exact conceptual answer shape."""
+    return (
+        "Worked example showing the required shape (its content is illustrative, "
+        "not reusable content):\n"
+        "[\n"
+        '  {\n'
+        '    "question": "Why does an idempotency key make a retried payment request safe?",\n'
+        '    "answer": "**Answer:** An idempotency key makes a retried payment safe because the server stores the first response for that key and replays it instead of executing the charge twice.\\n\\n'
+        "**Detailed explanation:**\\n\\n"
+        "| Concern | What matters for this topic |\\n"
+        "| --- | --- |\\n"
+        "| Core role | The key identifies one logical request, not one HTTP call. |\\n"
+        "| Main tradeoff | Storing the first response costs memory and needs an expiry policy. |\\n"
+        "| Failure risk | A key with no expiry grows the store; a key reused for a different body breaks the guarantee. |\\n\\n"
+        '**Common mistake:** Deduplicating in the client only, which cannot protect against a network-level retry after the response was lost.\\n",\n'
+        '    "difficulty": "medium",\n'
+        '    "learning_objective": "After this question, the learner should be able to explain where the idempotency guarantee is enforced and why.",\n'
+        '    "source_section": "Reliable retries",\n'
+        '    "source_quote": "The server stores the first response for a key and replays it on retry.",\n'
+        '    "reasoning_summary": "Name the retry hazard first, then the store that removes it.",\n'
+        '    "target_level": "mid"\n'
+        "  }\n"
+        "]"
+    )
+
+
 def _build_prompt(
     topic_id: str,
     topic_title: str,
@@ -1230,21 +2204,23 @@ def _build_prompt(
     requires_programming: bool = False,
     requested_total_count: Optional[int] = None,
     existing_questions: Optional[list[str]] = None,
+    additional_existing_questions: Optional[list[str]] = None,
+    prior_progress: str = "",
     mcp_context: str = "",
 ) -> str:
     problem_solving_mode = is_problem_solving_topic(topic_id)
     target_level = _normalise_level(level)
     requested_total = max(1, int(requested_total_count or count or 1))
-    existing_seed = _normalise_existing_questions(existing_questions)
+    existing_seed = _merge_existing_questions(existing_questions, additional_existing_questions)
     diff_clause = ""
     if difficulty:
         diff_clause = f' All questions should be "{difficulty}" difficulty.'
 
     if section_title and section_content:
-        scope = f'the "{section_title}" section of "{topic_title}"'
+        scope = f'the section titled "{section_title}"'
         content = _clamp_content(section_content)
     else:
-        scope = f'"{topic_title}"'
+        scope = "the current topic"
         content = _clamp_content(doc_content)
     grounding_anchors = _grounding_anchor_phrases(
         topic_title=topic_title,
@@ -1281,17 +2257,8 @@ def _build_prompt(
         )
     elif not requires_programming:
         code_clause = "Avoid code blocks unless code is explicitly required by the question."
-    mcp_block = optional_context_block(
-        "External context (optional, use only if relevant and factual)",
-        mcp_context,
-        2500,
-    )
+    mcp_block = untrusted_block("external_context", mcp_context, 2500)
 
-    role_clause = (
-        "You are an expert algorithm interviewer and problem-solving educator."
-        if problem_solving_mode
-        else "You are an expert technical interviewer and educator."
-    )
     problem_scope_rules = (
         [
             "Questions must be true problem-solving prompts (algorithmic/coding style), not generic theory prompts.",
@@ -1321,6 +2288,25 @@ def _build_prompt(
             "\nAlready generated questions for this checkpoint. Do NOT repeat or rephrase these:\n"
             f"{existing_blob}\n"
         )
+    progress_block = _progress_block(prior_progress)
+    untrusted_blocks = "\n\n".join(
+        block
+        for block in (
+            untrusted_block("topic_title", topic_title),
+            untrusted_block("section_title", section_title or ""),
+            untrusted_block(
+                "section_content" if (section_title and section_content) else "documentation",
+                content,
+                _MAX_DOC_CONTEXT,
+            ),
+        )
+        if block
+    )
+    few_shot_block = (
+        _problem_solving_few_shot_example(problem_solving_language)
+        if problem_solving_mode
+        else _conceptual_few_shot_example()
+    )
     prompt_contract = render_contract(
         schema_label="Return ONLY valid JSON in this shape",
         schema_block=f"""[
@@ -1371,15 +2357,15 @@ def _build_prompt(
             "mid: implementation details, constraints, and moderate tradeoffs.",
             "senior: architecture, scaling, risk, and deep tradeoff decisions.",
             "Keep markdown practical and interview-usable, not terse.",
+            UNTRUSTED_CLAUSE,
         ],
     )
-    return f"""{role_clause}
-
-Given documentation about {scope}, generate exactly {count} interview-style questions with direct, detailed study answers.{diff_clause}
+    return f"""Generate exactly {count} interview-style questions with direct, detailed study answers.{diff_clause}
 Target candidate level: "{target_level}".
+Target scope: {scope}.
 User requested total questions for this checkpoint: {requested_total}.
 This call is generating {count} new questions to fill remaining slots.
-{uniqueness_block}
+{progress_block}{uniqueness_block}
 {grounding_block}
 
 {prompt_contract}
@@ -1387,8 +2373,55 @@ This call is generating {count} new questions to fill remaining slots.
 Optional fields (recommended when available): learning_objective, source_section, source_quote,
 reasoning_summary, target_level.
 
-Documentation:
-{content}{mcp_block}"""
+{few_shot_block}
+
+{untrusted_blocks}{mcp_block}"""
+
+
+_QUIZ_SYSTEM_PROMPT = (
+    "You are an expert technical quiz creator. You write multiple-choice and true/false "
+    "questions whose explanations are grounded in the supplied course material, and you "
+    "always respond with a single JSON array and never with prose."
+)
+
+_QUIZ_FEW_SHOT_EXAMPLE = (
+    "Worked example showing the required shape (its content is illustrative, not reusable "
+    "content):\n"
+    "[\n"
+    '  {\n'
+    '    "question": "Which statement about connection pooling is correct?",\n'
+    '    "type": "mcq",\n'
+    '    "choices": [{"label":"A","text":"A pool fixes the cost of acquiring a connection"}, '
+    '{"label":"B","text":"A pool bounds concurrent connections and reuses warm ones"}, '
+    '{"label":"C","text":"A pool removes the need for timeouts"}, '
+    '{"label":"D","text":"A pool guarantees transaction isolation"}],\n'
+    '    "correct_answer": "B",\n'
+    '    "explanation": "Pooling reuses already-established connections, which removes most of '
+    'the handshake cost, and caps how many can be open at once. It does not remove the need for '
+    'statement timeouts, and isolation is still chosen per transaction.\\n\\n'
+    "The wrong options fail for specific reasons worth naming: A describes what pooling does not "
+    'remove, and D confuses capacity control with correctness guarantees.",\n'
+    '    "difficulty": "medium",\n'
+    '    "topic_id": "topic-databases",\n'
+    '    "source_quote": "A pool bounds concurrent connections and reuses warm ones.",\n'
+    '    "reasoning_summary": "Pooling is a capacity and latency control, not a correctness guarantee.",\n'
+    '    "target_level": "mid"\n'
+    "  },\n"
+    '  {\n'
+    '    "question": "A statement-level timeout guarantees a query cannot hold locks indefinitely.",\n'
+    '    "type": "true_false",\n'
+    '    "choices": [{"label":"A","text":"true"}, {"label":"B","text":"false"}],\n'
+    '    "correct_answer": "B",\n'
+    '    "explanation": "A timeout bounds how long the server waits, but a blocked transaction can '
+    'still hold locks beyond it unless cancellation is honoured and the transaction is rolled back.",\n'
+    '    "difficulty": "hard",\n'
+    '    "topic_id": "topic-databases",\n'
+    '    "source_quote": "Cancellation must be honoured and the transaction rolled back.",\n'
+    '    "reasoning_summary": "The timeout bounds waiting, not lock ownership.",\n'
+    '    "target_level": "mid"\n'
+    "  }\n"
+    "]"
+)
 
 
 def _build_quiz_prompt(
@@ -1399,10 +2432,15 @@ def _build_quiz_prompt(
     level: Optional[str] = None,
     response_detail: str = "concise",
     preferred_language: str = "",
+    existing_questions: Optional[list[str]] = None,
+    additional_existing_questions: Optional[list[str]] = None,
+    prior_progress: str = "",
     mcp_context: str = "",
 ) -> str:
+    """Build the quiz user turn. The creator persona lives in ``system`` (Stage 2.1)."""
     target_level = _normalise_level(level)
     types = question_types or ["mcq", "true_false"]
+    existing_seed = _merge_existing_questions(existing_questions, additional_existing_questions)
     diff_clause = ""
     if difficulty:
         diff_clause = f' All questions should be "{difficulty}" difficulty.'
@@ -1419,7 +2457,7 @@ def _build_quiz_prompt(
         if response_detail != "very_detailed"
         else "Provide very detailed explanations with practical depth."
     )
-    docs_text = ""
+    docs_blocks: list[str] = []
     for tc in topics_content:
         topic_requires_programming = bool(tc.get("requires_programming"))
         topic_language = str(tc.get("preferred_language", "")).strip().lower()
@@ -1427,15 +2465,24 @@ def _build_quiz_prompt(
         topic_notes = [f"detail={topic_detail or response_detail}"]
         if topic_requires_programming and topic_language:
             topic_notes.append(f"preferred_language={topic_language}")
-        docs_text += (
-            f"\n\n--- Topic: {tc['title']} (id: {tc['id']}) [{', '.join(topic_notes)}] ---\n"
-            f"{tc['content'][:_MAX_TOPIC_CONTEXT]}"
+        docs_blocks.append(
+            untrusted_block(
+                f"topic id={tc['id']}",
+                f"Topic title: {tc['title']}\n"
+                f"Notes: {', '.join(topic_notes)}\n\n"
+                f"{tc['content']}",
+                _MAX_TOPIC_CONTEXT,
+            )
         )
-    mcp_block = optional_context_block(
-        "External context (optional, use only if relevant and factual)",
-        mcp_context,
-        2500,
-    )
+    mcp_block = untrusted_block("external_context", mcp_context, 2500)
+    progress_block = _progress_block(prior_progress)
+    uniqueness_block = ""
+    if existing_seed:
+        existing_blob = "\n".join([f"- {q}" for q in existing_seed[:60]])
+        uniqueness_block = (
+            "\nAlready asked for these topics. Do NOT repeat or rephrase these questions:\n"
+            f"{existing_blob}\n"
+        )
     prompt_contract = render_contract(
         schema_block="""[
   {
@@ -1482,18 +2529,18 @@ def _build_quiz_prompt(
             "mid: applied reasoning with concrete constraints.",
             "senior: architecture-level reasoning and tradeoff depth.",
             "Keep markdown compact and practical.",
+            UNTRUSTED_CLAUSE,
         ],
     )
-    return f"""You are an expert technical quiz creator.
-
-Create exactly {count} quiz questions from the documentation below.{diff_clause}
+    return f"""Create exactly {count} quiz questions from the documentation below.{diff_clause}
 Target candidate level: "{target_level}".
 {type_instructions}
-
+{progress_block}{uniqueness_block}
 {prompt_contract}
 
-Documentation:
-{docs_text[:_MAX_DOC_CONTEXT]}{mcp_block}"""
+{_QUIZ_FEW_SHOT_EXAMPLE}
+
+{chr(10).join(docs_blocks)[:_MAX_DOC_CONTEXT]}{mcp_block}"""
 
 
 def _build_retry_prompt(
@@ -1503,7 +2550,19 @@ def _build_retry_prompt(
     existing_questions: list[str],
     hard_requirements: Optional[list[str]] = None,
     recovery_guidance: str = "",
+    *,
+    include_base_prompt: bool = False,
 ) -> str:
+    """Build a short correction turn for one retry.
+
+    The base prompt can carry up to ``_MAX_DOC_CONTEXT`` (45000) characters, so
+    embedding it made every retry roughly twice the cost of the original call
+    and let the worst case transmit the same context eighteen times. The base
+    prompt was already sent on the first attempt of this cycle, so a retry now
+    states only the correction. ``include_base_prompt`` restores the old
+    behaviour for the single case that still wants a self-contained turn: the
+    very first attempt after a prompt is rebuilt.
+    """
     existing_blob = "\n".join([f"- {q}" for q in existing_questions[:50]])
     hard_requirements_block = ""
     if hard_requirements:
@@ -1513,7 +2572,15 @@ def _build_retry_prompt(
     recovery_guidance_block = ""
     if recovery_guidance.strip():
         recovery_guidance_block = f"Recovery guidance:\n{recovery_guidance.strip()}\n"
+    base_block = ""
+    if include_base_prompt and base_prompt:
+        base_block = (
+            "\nThe full task contract and documentation were already sent with the "
+            "previous attempt. Do not repeat that material here.\n"
+        )
     return f"""Your previous output did not satisfy the schema or quality constraints.
+The original task, its contract, and its documentation were already provided. Keep
+answering that same task; only fix what the issues below describe.
 
 Missing items needed: {missing_count}
 Validation issues:
@@ -1526,13 +2593,77 @@ Do not repeat any of these existing questions:
 {existing_blob if existing_blob else "- (none)"}
 
 Return ONLY a JSON array with exactly {missing_count} NEW valid items.
+{base_block}"""
 
-{base_prompt}
-"""
+
+def _strip_outer_code_fence(candidate: str) -> str:
+    stripped = candidate.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) < 3 or not lines[-1].strip().startswith("```"):
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _parse_text_qa_pairs(candidate: str) -> list[dict]:
+    """Read ``Question:``/``Answer:`` prose into items.
+
+    Kept deliberately: providers outside ``JSON_MODE_CAPABLE_PROVIDERS``
+    (Anthropic) get no ``response_format``, so a prose response is a real
+    outcome rather than a malformed one.
+    """
+    cleaned = candidate.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = _strip_outer_code_fence(cleaned)
+
+    q_pattern = re.compile(
+        r"(?im)^\s*(?:\d+\s*[\).:\-]\s*)?(?:\*\*)?\s*(?:question|q)\s*\d*\s*[:\-]\s*"
+    )
+    a_pattern = re.compile(r"(?im)^\s*(?:\*\*)?\s*(?:answer|a)\s*\d*\s*[:\-]\s*")
+    q_matches = list(q_pattern.finditer(cleaned))
+    items: list[dict] = []
+
+    if q_matches:
+        for idx, q_match in enumerate(q_matches):
+            block_end = q_matches[idx + 1].start() if idx + 1 < len(q_matches) else len(cleaned)
+            block = cleaned[q_match.end() : block_end].strip()
+            if not block:
+                continue
+            answer_match = a_pattern.search(block)
+            if answer_match:
+                question = block[: answer_match.start()].strip(" -*\t\n")
+                answer = block[answer_match.end() :].strip(" \t\n")
+            else:
+                parts = [p.strip() for p in block.split("\n", 1)]
+                question = parts[0].strip(" -*\t")
+                answer = parts[1].strip() if len(parts) > 1 else ""
+            if question and answer:
+                items.append({"question": question, "answer": answer})
+        if items:
+            return items
+
+    numbered_pattern = re.compile(
+        r"(?ims)^\s*(\d+)[\).:\-]\s*(.+?)(?:\n\s*(?:answer|a)\s*[:\-]\s*(.+?))(?=^\s*\d+[\).:\-]|\Z)"
+    )
+    for match in numbered_pattern.finditer(cleaned):
+        question = match.group(2).strip(" -*\t\n")
+        answer = match.group(3).strip()
+        if question and answer:
+            items.append({"question": question, "answer": answer})
+    return items
 
 
 def _parse_questions_json(raw: str) -> list[dict]:
-    """Robustly extract JSON array from LLM response."""
+    """Extract a JSON array of items from an LLM response.
+
+    Stage 2.3 collapsed the salvage chain. The local sliding ``raw_decode``
+    scan and the duplicated fenced re-parse existed only to re-read near-JSON,
+    which the shared ``parse_json_object`` already handles (direct, then fenced,
+    then first/last delimiter slice) and which ``structured=True`` makes rare.
+    What stays is genuinely schema repair: unwrapping a ``{"questions": [...]}``
+    envelope or a single-item object, and the plain-text reader that providers
+    without JSON mode (Anthropic) still need.
+    """
     text = (raw or "").strip()
     if not text:
         return []
@@ -1548,94 +2679,28 @@ def _parse_questions_json(raw: str) -> list[dict]:
                 return [payload]
         return []
 
-    def _try_load_json(candidate: str) -> list[dict]:
+    def _try_load_json(candidate: str) -> Any:
         try:
-            parsed = json.loads(candidate)
+            return json.loads(candidate)
         except json.JSONDecodeError:
-            return []
-        return _extract_items(parsed)
+            return None
 
-    def _strip_outer_code_fence(candidate: str) -> str:
-        stripped = candidate.strip()
-        if not stripped.startswith("```"):
-            return stripped
-        lines = stripped.splitlines()
-        if len(lines) < 3 or not lines[-1].strip().startswith("```"):
-            return stripped
-        return "\n".join(lines[1:-1]).strip()
+    candidates: list[Any] = [_try_load_json(text)]
+    fenced = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+    if fenced:
+        candidates.append(_try_load_json(fenced.group(1)))
+    start, end = text.find("["), text.rfind("]")
+    if start != -1 and end > start:
+        candidates.append(_try_load_json(text[start : end + 1]))
+    # Shared salvage, so a dict envelope survives the same way every other flow.
+    candidates.append(parse_json_object(text))
 
-    def _parse_text_qa_pairs(candidate: str) -> list[dict]:
-        cleaned = candidate.replace("\r\n", "\n").replace("\r", "\n")
-        cleaned = _strip_outer_code_fence(cleaned)
+    for candidate in candidates:
+        items = _extract_items(candidate)
+        if items:
+            return items
 
-        q_pattern = re.compile(
-            r"(?im)^\s*(?:\d+\s*[\).:\-]\s*)?(?:\*\*)?\s*(?:question|q)\s*\d*\s*[:\-]\s*"
-        )
-        a_pattern = re.compile(r"(?im)^\s*(?:\*\*)?\s*(?:answer|a)\s*\d*\s*[:\-]\s*")
-        q_matches = list(q_pattern.finditer(cleaned))
-        items: list[dict] = []
-
-        if q_matches:
-            for idx, q_match in enumerate(q_matches):
-                block_end = q_matches[idx + 1].start() if idx + 1 < len(q_matches) else len(cleaned)
-                block = cleaned[q_match.end() : block_end].strip()
-                if not block:
-                    continue
-                answer_match = a_pattern.search(block)
-                if answer_match:
-                    question = block[: answer_match.start()].strip(" -*\t\n")
-                    answer = block[answer_match.end() :].strip(" \t\n")
-                else:
-                    parts = [p.strip() for p in block.split("\n", 1)]
-                    question = parts[0].strip(" -*\t")
-                    answer = parts[1].strip() if len(parts) > 1 else ""
-                if question and answer:
-                    items.append({"question": question, "answer": answer})
-            if items:
-                return items
-
-        numbered_pattern = re.compile(
-            r"(?ims)^\s*(\d+)[\).:\-]\s*(.+?)(?:\n\s*(?:answer|a)\s*[:\-]\s*(.+?))(?=^\s*\d+[\).:\-]|\Z)"
-        )
-        for match in numbered_pattern.finditer(cleaned):
-            question = match.group(2).strip(" -*\t\n")
-            answer = match.group(3).strip()
-            if question and answer:
-                items.append({"question": question, "answer": answer})
-        return items
-
-    parsed = _try_load_json(text)
-    if parsed:
-        return parsed
-
-    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-    if m:
-        parsed = _try_load_json(m.group(1))
-        if parsed:
-            return parsed
-
-    decoder = json.JSONDecoder()
-    cursor = 0
-    while cursor < len(text):
-        start_match = re.search(r"[\[{]", text[cursor:])
-        if not start_match:
-            break
-        start = cursor + start_match.start()
-        try:
-            decoded, consumed = decoder.raw_decode(text[start:])
-        except json.JSONDecodeError:
-            cursor = start + 1
-            continue
-        parsed = _extract_items(decoded)
-        if parsed:
-            return parsed
-        cursor = start + consumed
-
-    parsed = _parse_text_qa_pairs(text)
-    if parsed:
-        return parsed
-
-    return []
+    return _parse_text_qa_pairs(text)
 
 
 def _extract_content_fragments(content: str, *, limit: int = 48) -> list[str]:
@@ -1722,6 +2787,16 @@ def _build_fallback_question_items(
         if problem_solving_mode
         else []
     )
+    if problem_solving_mode and not scenario_ids:
+        # No genuine code template exists for this language. Emit a
+        # language-agnostic problem prompt with no code template rather than
+        # borrowing another language's source; the answer then fails
+        # ``_validate_problem_solving_answer`` and is dropped, which is the
+        # intended outcome (a wrong fence is worse than a short answer).
+        logger.warning(
+            "problem_solving_fallback_has_no_template_for_language language=%s",
+            selected_language,
+        )
 
     templates_by_difficulty = {
         "easy": [
@@ -1769,13 +2844,20 @@ def _build_fallback_question_items(
         angle = angles[(idx // max(1, len(fragments))) % len(angles)]
         difficulty_value = _fallback_difficulty_for_index(len(items), remaining, difficulty)
         scenario_id = _PROBLEM_SOLVING_DEFAULT_SCENARIO_ID
-        if problem_solving_mode:
+        if problem_solving_mode and scenario_ids:
             scenario_id = scenario_ids[idx % len(scenario_ids)]
             question = _problem_solving_question_seed(
                 focus,
                 source_scope,
                 scenario_id=scenario_id,
             )["question"]
+        elif problem_solving_mode:
+            # Language-agnostic prompt with no scenario template.
+            question = (
+                f"In {source_scope}, design an interview-grade algorithm problem about {focus}. "
+                "State the input, output, and constraints, then explain the invariant your "
+                "solution preserves, its complexity, and how you would test it."
+            )
         else:
             templates = templates_by_difficulty.get(
                 difficulty_value,
@@ -1990,7 +3072,8 @@ def _validate_quiz_item(
     diff = str(item.get("difficulty", "medium")).lower()
     if diff not in _VALID_DIFFICULTIES:
         return False, "invalid_difficulty"
-    if difficulty and diff != difficulty:
+    requested = str(difficulty or "").strip().lower()
+    if requested and diff != requested:
         return False, "difficulty_mismatch"
     item["difficulty"] = diff
     item["type"] = q_type
@@ -2021,12 +3104,13 @@ def _build_fallback_quiz_items(
     out: list[dict[str, Any]] = []
     seen_norm = {_normalise_question(q) for q in _normalise_existing_questions(existing_questions)}
     guard = 0
+    attempt = 0
     while len(out) < count and guard < (count * 12):
-        idx = len(out) + guard
-        topic = topics_content[idx % len(topics_content)]
+        topic = topics_content[attempt % len(topics_content)]
         topic_id = str(topic.get("id", "")).strip()
         if not topic_id:
             guard += 1
+            attempt += 1
             continue
         topic_title = str(topic.get("title", topic_id)).strip() or topic_id
         source_scope = str(topic.get("content", "")).strip()
@@ -2036,7 +3120,9 @@ def _build_fallback_quiz_items(
         if len(source_quote) < 8:
             source_quote = f"{topic_title} interview fundamentals and tradeoffs."
 
-        use_mcq = "mcq" in allowed_types and ("true_false" not in allowed_types or idx % 2 == 0)
+        use_mcq = "mcq" in allowed_types and (
+            "true_false" not in allowed_types or len(out) % 2 == 0
+        )
         if use_mcq:
             stems = [
                 "For {topic_title}, which approach best balances correctness, maintainability, and interview communication under constraints?",
@@ -2044,7 +3130,7 @@ def _build_fallback_quiz_items(
                 "When discussing {topic_title}, which strategy most clearly demonstrates tradeoff-driven thinking?",
                 "For {topic_title}, which interviewing approach is most likely to produce a robust and explainable solution?",
             ]
-            question = stems[idx % len(stems)].format(topic_title=topic_title)
+            question = stems[attempt % len(stems)].format(topic_title=topic_title)
             choices = [
                 {"label": "A", "text": "Clarify constraints, choose a justified approach, and explain tradeoffs."},
                 {"label": "B", "text": "Start coding immediately and defer reasoning until the end."},
@@ -2060,7 +3146,7 @@ def _build_fallback_quiz_items(
                 "True or false in a {topic_title} interview: skipping assumptions weakens the quality of technical reasoning.",
                 "For {topic_title}, true or false: discussing tradeoffs early usually improves answer clarity and credibility.",
             ]
-            question = stems[idx % len(stems)].format(topic_title=topic_title)
+            question = stems[attempt % len(stems)].format(topic_title=topic_title)
             choices = [
                 {"label": "A", "text": "True"},
                 {"label": "B", "text": "False"},
@@ -2071,6 +3157,7 @@ def _build_fallback_quiz_items(
         q_norm = _normalise_question(question)
         if not q_norm or q_norm in seen_norm:
             guard += 1
+            attempt += 1
             continue
         seen_norm.add(q_norm)
         item = {
@@ -2092,12 +3179,13 @@ def _build_fallback_quiz_items(
             item,
             allowed_topics=allowed_topics,
             allowed_types=allowed_types,
-            difficulty=difficulty,
+            difficulty=diff,
             level=level,
         )
         if valid:
             out.append(item)
         guard += 1
+        attempt += 1
 
     return out[:count]
 
@@ -2113,6 +3201,7 @@ async def _collect_with_retries(
     existing_questions: Optional[list[str]] = None,
     hard_requirements: Optional[list[str]] = None,
     retry_guidance: str = "",
+    system_prompt: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     existing_seed = _normalise_existing_questions(existing_questions)
     dedup: set[str] = {_normalise_question(q) for q in existing_seed}
@@ -2122,19 +3211,36 @@ async def _collect_with_retries(
     retries_used = 0
     issue_counter: Counter[str] = Counter()
     metadata: dict[str, Any] = {}
+    max_tokens_cap = _questions_max_tokens_cap(target_count)
     prompt = base_prompt
     last_error = ""
+    terminal_reason = ""
 
     for _ in range(_attempt_budget(target_count)):
         result = await llm.completion(
             prompt,
             llm_config,
             user_identity=user_identity,
+            **_supported_options(
+                llm,
+                {
+                    "task": "final",
+                    "system": system_prompt,
+                    "structured": True,
+                    "max_tokens_cap": max_tokens_cap,
+                },
+            ),
         )
         raise_if_policy_blocked_result(result)
         metadata = result.get("metadata", {})
         if not result.get("success"):
             last_error = result.get("error", "unknown_error")
+            error_code = str(result.get("error_code") or "")
+            if error_code in TERMINAL_ERROR_CODES:
+                # A truncated response or an exhausted budget cannot be fixed by
+                # re-sending the same prompt at the same cap.
+                terminal_reason = error_code
+                break
             retries_used += 1
             prompt = _build_retry_prompt(
                 base_prompt=base_prompt,
@@ -2198,7 +3304,7 @@ async def _collect_with_retries(
             recovery_guidance=retry_guidance,
         )
 
-    if len(valid_items) < target_count:
+    if len(valid_items) < target_count and not terminal_reason:
         # Final pass: request one item at a time to reduce duplicate/schema drift.
         for _ in range(_recovery_budget(target_count - len(valid_items))):
             if len(valid_items) >= target_count:
@@ -2216,10 +3322,25 @@ async def _collect_with_retries(
                 single_prompt,
                 llm_config,
                 user_identity=user_identity,
+                **_supported_options(
+                    llm,
+                    {
+                        "task": "final",
+                        "system": system_prompt,
+                        "structured": True,
+                        "max_tokens_cap": max_tokens_cap,
+                    },
+                ),
             )
             raise_if_policy_blocked_result(result)
             metadata = result.get("metadata", {})
             if not result.get("success"):
+                error_code = str(result.get("error_code") or "")
+                if error_code in TERMINAL_ERROR_CODES:
+                    # Single-item recovery cannot fix a truncated response or an
+                    # exhausted budget either.
+                    terminal_reason = error_code
+                    break
                 retries_used += 1
                 issue_counter["transport_or_provider_error"] += 1
                 continue
@@ -2261,18 +3382,20 @@ async def _collect_with_retries(
 
     if len(valid_items) < target_count:
         logger.warning(
-            "Generation produced %d/%d valid items after retries=%d issues=%s last_error=%s",
+            "Generation produced %d/%d valid items after retries=%d issues=%s last_error=%s terminal=%s",
             len(valid_items),
             target_count,
             retries_used,
             dict(issue_counter),
             last_error,
+            terminal_reason,
         )
 
     stats = {
         "metadata": metadata,
         "retries_used": retries_used,
         "malformed_items_dropped": malformed_items,
+        "terminal_reason": terminal_reason,
     }
     return valid_items[:target_count], stats
 
@@ -2360,10 +3483,14 @@ class QuestionGenerator:
         response_detail: str = "very_detailed",
         preferred_language: str = "",
         requires_programming: bool = False,
+        prior_progress: str = "",
+        additional_existing_questions: Optional[list[str]] = None,
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(0, int(count))
         requested_total = max(1, int(requested_total_count or count or 1))
-        seed_existing = _normalise_existing_questions(existing_questions)
+        seed_existing = _merge_existing_questions(
+            existing_questions, additional_existing_questions
+        )
         problem_solving_mode = is_problem_solving_topic(topic_id)
         selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
             (preferred_language or "").strip().lower()
@@ -2414,9 +3541,14 @@ class QuestionGenerator:
                 requires_programming=requires_programming if (problem_solving_mode or not relaxed) else False,
                 requested_total_count=requested_total,
                 existing_questions=generated_question_texts,
+                additional_existing_questions=additional_existing_questions,
+                prior_progress=prior_progress,
                 mcp_context=mcp_context,
             )
             prompt = base_prompt
+            system_prompt = _question_system_prompt(problem_solving_mode)
+            max_tokens_cap = _questions_max_tokens_cap(1)
+            terminal_reason = ""
 
             try:
                 for _ in range(_attempt_budget(1)):
@@ -2424,11 +3556,27 @@ class QuestionGenerator:
                         prompt,
                         llm_config,
                         user_identity=user_identity,
+                        **_supported_options(
+                            self.llm,
+                            {
+                                "task": "final",
+                                "system": system_prompt,
+                                "structured": True,
+                                "max_tokens_cap": max_tokens_cap,
+                            },
+                        ),
                     )
                     raise_if_policy_blocked_result(result)
                     metadata = result.get("metadata", {})
 
                     if not result.get("success"):
+                        error_code = str(result.get("error_code") or "")
+                        if error_code in TERMINAL_ERROR_CODES:
+                            # Retrying a truncated response or an exhausted
+                            # budget re-sends the same prompt at the same cap.
+                            last_error = f"{error_code}: {result.get('error', '')}".strip(": ")
+                            terminal_reason = error_code
+                            break
                         retries_used += 1
                         last_error = str(result.get("error", "unknown_error"))
                         issue_counter["transport_or_provider_error"] += 1
@@ -2535,16 +3683,18 @@ class QuestionGenerator:
 
                 if issue_counter:
                     logger.warning(
-                        "Streaming slot failed to produce valid question after retries=%d issues=%s last_error=%s",
+                        "Streaming slot failed to produce valid question after retries=%d issues=%s last_error=%s terminal=%s",
                         retries_used,
                         dict(issue_counter),
                         last_error,
+                        terminal_reason,
                     )
                 return {
                     "question": None,
                     "metadata": metadata,
                     "retries_used": retries_used,
                     "malformed_items_dropped": malformed_dropped,
+                    "terminal_reason": terminal_reason,
                 }
             except (
                 LLMServiceApprovalRequiredError,
@@ -2608,6 +3758,7 @@ class QuestionGenerator:
                 if section_first
                 else [(False, False), (False, True)]
             )
+        terminal_reason = ""
         for include_section, relaxed in phase_modes:
             while generated_count < target_count:
                 result = await _generate_one(include_section=include_section, relaxed=relaxed)
@@ -2618,6 +3769,11 @@ class QuestionGenerator:
                     provider_used = str(metadata.get("provider"))
                 if metadata.get("model"):
                     model_used = str(metadata.get("model"))
+                terminal_reason = str(result.get("terminal_reason") or "")
+                if terminal_reason:
+                    # A truncated response or an exhausted budget will not change
+                    # on the next slot, so stop and fall back deterministically.
+                    break
 
                 error = result.get("error")
                 if error:
@@ -2638,7 +3794,10 @@ class QuestionGenerator:
                     "question": question,
                 }
 
-        if generated_count < target_count:
+            if terminal_reason:
+                break
+
+        if generated_count < target_count and not terminal_reason:
             for _ in range(_recovery_budget(target_count - generated_count)):
                 if generated_count >= target_count:
                     break
@@ -2654,6 +3813,10 @@ class QuestionGenerator:
                     provider_used = str(metadata.get("provider"))
                 if metadata.get("model"):
                     model_used = str(metadata.get("model"))
+                if str(result.get("terminal_reason") or ""):
+                    # A truncated response or an exhausted budget will not change
+                    # on the next recovery attempt; fall back deterministically.
+                    break
 
                 error = result.get("error")
                 if error:
@@ -2747,6 +3910,8 @@ class QuestionGenerator:
         response_detail: str = "very_detailed",
         preferred_language: str = "",
         requires_programming: bool = False,
+        prior_progress: str = "",
+        additional_existing_questions: Optional[list[str]] = None,
     ) -> GenerateQuestionsResponse:
         problem_solving_mode = is_problem_solving_topic(topic_id)
         selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
@@ -2768,6 +3933,11 @@ class QuestionGenerator:
             response_detail=response_detail,
             preferred_language=selected_language,
             requires_programming=requires_programming,
+            prior_progress=prior_progress,
+            additional_existing_questions=additional_existing_questions,
+        )
+        merged_seed = _merge_existing_questions(
+            existing_questions, additional_existing_questions
         )
         target_count = max(1, int(count or 1))
         questions = [
@@ -2800,7 +3970,7 @@ class QuestionGenerator:
                 section_title=section_title,
                 section_content=section_content,
                 existing_questions=[
-                    *(_normalise_existing_questions(existing_questions)),
+                    *merged_seed,
                     *[q.question for q in questions],
                 ],
                 preferred_language=selected_language,
@@ -2852,6 +4022,8 @@ class QuestionGenerator:
         response_detail: str = "very_detailed",
         preferred_language: str = "",
         requires_programming: bool = False,
+        prior_progress: str = "",
+        additional_existing_questions: Optional[list[str]] = None,
     ) -> GenerateQuestionsV2Response:
         target_count = max(1, int(count or 1))
         problem_solving_mode = is_problem_solving_topic(topic_id)
@@ -2870,7 +4042,9 @@ class QuestionGenerator:
         retries_used = 0
         malformed_items_dropped = 0
         raw_items: list[dict[str, Any]] = []
-        existing_seed = _normalise_existing_questions(existing_questions)
+        existing_seed = _merge_existing_questions(
+            existing_questions, additional_existing_questions
+        )
         dedup_norm: set[str] = {_normalise_question(q) for q in existing_seed}
         seen_questions: list[str] = [*existing_seed]
         problem_pattern_signatures: set[str] = set()
@@ -2923,16 +4097,21 @@ class QuestionGenerator:
                 section_title=mode["section_title"],
                 content=mode["section_content"] or doc_content,
             )
-            validator = lambda item, mode=mode, grounding_anchors=grounding_anchors: _validate_question_item(
+            def validator(
                 item,
-                topic_id,
-                mode["difficulty"],
-                level,
-                preferred_language=str(mode["preferred_language"]),
-                requires_programming=bool(mode["requires_programming"]),
-                topic_title=topic_title,
+                mode=mode,
                 grounding_anchors=grounding_anchors,
-            )
+            ):
+                return _validate_question_item(
+                    item,
+                    topic_id,
+                    mode["difficulty"],
+                    level,
+                    preferred_language=str(mode["preferred_language"]),
+                    requires_programming=bool(mode["requires_programming"]),
+                    topic_title=topic_title,
+                    grounding_anchors=grounding_anchors,
+                )
             prompt = _build_prompt(
                 topic_id=topic_id,
                 topic_title=topic_title,
@@ -2940,6 +4119,8 @@ class QuestionGenerator:
                 count=remaining,
                 requested_total_count=requested_total_count,
                 existing_questions=existing_for_pass,
+                additional_existing_questions=additional_existing_questions,
+                prior_progress=prior_progress,
                 difficulty=mode["difficulty"],
                 level=level,
                 section_title=mode["section_title"],
@@ -2957,6 +4138,7 @@ class QuestionGenerator:
                 target_count=remaining,
                 validator=validator,
                 existing_questions=existing_for_pass,
+                system_prompt=_question_system_prompt(problem_solving_mode),
                 hard_requirements=(
                     _problem_solving_required_markdown(selected_language)
                     if problem_solving_mode
@@ -2971,6 +4153,10 @@ class QuestionGenerator:
                 provider_used = str(pass_metadata.get("provider"))
             if pass_metadata.get("model"):
                 model_used = str(pass_metadata.get("model"))
+            if str(pass_stats.get("terminal_reason") or ""):
+                # A truncated response or an exhausted budget will not change on
+                # the next pass, so stop here and fall back deterministically.
+                break
 
             for item in pass_items:
                 question_text = str(item.get("question", "")).strip()
@@ -3060,6 +4246,8 @@ class QuestionGenerator:
         preferred_language: str = "",
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
+        prior_progress: str = "",
+        additional_existing_questions: Optional[list[str]] = None,
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(1, int(count or 1))
         effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
@@ -3078,7 +4266,10 @@ class QuestionGenerator:
             allowed_types = {"mcq", "true_false"}
 
         dedup_norm: set[str] = set()
-        generated_question_texts: list[str] = []
+        generated_question_texts: list[str] = _merge_existing_questions(
+            None, additional_existing_questions
+        )
+        dedup_norm.update(_normalise_question(q) for q in generated_question_texts)
         provider_used = ""
         model_used = ""
         retries_used = 0
@@ -3098,19 +4289,35 @@ class QuestionGenerator:
                 level,
                 response_detail=effective_detail,
                 preferred_language=(preferred_language or "").strip().lower(),
+                additional_existing_questions=additional_existing_questions,
+                prior_progress=prior_progress,
                 mcp_context=mcp_context,
             )
             base_prompt = prompt
+            max_tokens_cap = _questions_max_tokens_cap(1)
+            terminal_reason = ""
             try:
                 for _ in range(_attempt_budget(1)):
                     result = await self.llm.completion(
                         prompt,
                         llm_config,
                         user_identity=user_identity,
+                        **_supported_options(
+                            self.llm,
+                            {
+                                "task": "final",
+                                "system": _QUIZ_SYSTEM_PROMPT,
+                                "structured": True,
+                                "max_tokens_cap": max_tokens_cap,
+                            },
+                        ),
                     )
                     raise_if_policy_blocked_result(result)
                     metadata = result.get("metadata", {})
                     if not result.get("success"):
+                        if str(result.get("error_code") or "") in TERMINAL_ERROR_CODES:
+                            terminal_reason = str(result.get("error_code") or "")
+                            break
                         local_retries += 1
                         issue_counter["transport_or_provider_error"] += 1
                         prompt = _build_retry_prompt(
@@ -3192,6 +4399,7 @@ class QuestionGenerator:
                     "metadata": metadata,
                     "retries_used": local_retries,
                     "malformed_items_dropped": local_malformed,
+                    "terminal_reason": terminal_reason,
                 }
             except (
                 LLMServiceApprovalRequiredError,
@@ -3204,6 +4412,7 @@ class QuestionGenerator:
                     "metadata": metadata,
                     "retries_used": local_retries,
                     "malformed_items_dropped": local_malformed,
+                    "terminal_reason": "",
                 }
             except Exception as exc:
                 logger.exception("Streaming quiz generation failed: %s", exc)
@@ -3224,6 +4433,7 @@ class QuestionGenerator:
             "question_types": sorted(allowed_types),
         }
 
+        terminal_reason = ""
         while generated_count < target_count:
             yield {
                 "type": "progress",
@@ -3240,6 +4450,11 @@ class QuestionGenerator:
                 provider_used = str(metadata.get("provider"))
             if metadata.get("model"):
                 model_used = str(metadata.get("model"))
+            terminal_reason = str(result.get("terminal_reason") or "")
+            if terminal_reason:
+                # A truncated response or an exhausted budget will not change on
+                # the next slot, so stop and fall back deterministically.
+                break
 
             error = result.get("error")
             if error:
@@ -3256,7 +4471,7 @@ class QuestionGenerator:
             generated_count += 1
             yield {"type": "question", "question": question}
 
-        if generated_count < target_count:
+        if generated_count < target_count and not terminal_reason:
             for _ in range(_recovery_budget(target_count - generated_count)):
                 if generated_count >= target_count:
                     break
@@ -3339,6 +4554,8 @@ class QuestionGenerator:
         preferred_language: str = "",
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
+        prior_progress: str = "",
+        additional_existing_questions: Optional[list[str]] = None,
     ) -> GenerateQuizResponse:
         v2 = await self.generate_quiz_v2(
             topics_content=topics_content,
@@ -3350,6 +4567,8 @@ class QuestionGenerator:
             preferred_language=preferred_language,
             llm_config=llm_config,
             user_identity=user_identity,
+            prior_progress=prior_progress,
+            additional_existing_questions=additional_existing_questions,
         )
         legacy_questions = [
             QuizQuestion(
@@ -3381,6 +4600,8 @@ class QuestionGenerator:
         preferred_language: str = "",
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
+        prior_progress: str = "",
+        additional_existing_questions: Optional[list[str]] = None,
     ) -> GenerateQuizV2Response:
         effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
         mcp_context = await self._mcp_context_for_flow(
@@ -3400,17 +4621,20 @@ class QuestionGenerator:
             level,
             response_detail=effective_detail,
             preferred_language=(preferred_language or "").strip().lower(),
+            additional_existing_questions=additional_existing_questions,
+            prior_progress=prior_progress,
             mcp_context=mcp_context,
         )
         allowed_topics = {str(tc["id"]) for tc in topics_content}
         allowed_types = set(question_types or ["mcq", "true_false"])
-        validator = lambda item: _validate_quiz_item(
-            item,
-            allowed_topics,
-            allowed_types,
-            difficulty,
-            level,
-        )
+        def validator(item):
+            return _validate_quiz_item(
+                item,
+                allowed_topics,
+                allowed_types,
+                difficulty,
+                level,
+            )
 
         raw_items, stats = await _collect_with_retries(
             llm=self.llm,
@@ -3419,7 +4643,27 @@ class QuestionGenerator:
             user_identity=user_identity,
             target_count=count,
             validator=validator,
+            existing_questions=additional_existing_questions,
         )
+
+        if len(raw_items) < count:
+            # Parity with the streaming route: a terminal failure or an
+            # exhausted retry budget still serves a deterministic batch
+            # instead of an empty quiz.
+            existing_texts = [
+                *(additional_existing_questions or []),
+                *[str(item.get("question", "")) for item in raw_items],
+            ]
+            raw_items.extend(
+                _build_fallback_quiz_items(
+                    topics_content=topics_content,
+                    count=count - len(raw_items),
+                    question_types=question_types,
+                    difficulty=difficulty,
+                    level=level,
+                    existing_questions=existing_texts,
+                )
+            )
 
         questions = []
         for item in raw_items:
@@ -3451,3 +4695,241 @@ class QuestionGenerator:
             retries_used=stats.get("retries_used", 0),
             malformed_items_dropped=stats.get("malformed_items_dropped", 0),
         )
+
+    async def generate_cards(
+        self,
+        topic_id: str,
+        topic_title: str,
+        doc_content: str,
+        count: int = 10,
+        section_title: Optional[str] = None,
+        section_content: Optional[str] = None,
+        response_detail: str = "very_detailed",
+        existing_cards: Optional[list[str]] = None,
+        llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Generate flashcards ``{front, back, source_quote, source_section}``.
+
+        Reuses the v2 question machinery: the same
+        grounding-anchor validation, the same
+        ``_collect_with_retries`` retry/repair loop, and
+        the same ``LLMClient`` budget policy. ``count`` is
+        capped at ``MAX_CARD_GENERATION_COUNT``.
+        """
+        target_count = max(1, min(int(count or 10), MAX_CARD_GENERATION_COUNT))
+        mcp_context = await self._mcp_context_for_flow(
+            flow="questions",
+            query=f"{topic_title} {section_title or ''} flashcards",
+            topic_id=topic_id,
+            topic_title=topic_title,
+        )
+        grounding_anchors = _grounding_anchor_phrases(
+            topic_title=topic_title,
+            section_title=section_title,
+            content=section_content if (section_title and section_content) else doc_content,
+        )
+        prompt = _build_card_prompt(
+            topic_id=topic_id,
+            topic_title=topic_title,
+            doc_content=doc_content,
+            count=target_count,
+            section_title=section_title,
+            section_content=section_content,
+            response_detail=response_detail,
+            existing_cards=existing_cards,
+            mcp_context=mcp_context,
+        )
+
+        def validator(item: dict[str, Any]) -> tuple[bool, str]:
+            return _validate_card_item(
+                item,
+                topic_title=topic_title,
+                grounding_anchors=grounding_anchors,
+            )
+
+        raw_items, stats = await _collect_with_retries(
+            llm=self.llm,
+            base_prompt=prompt,
+            llm_config=llm_config,
+            user_identity=user_identity,
+            target_count=target_count,
+            validator=validator,
+            existing_questions=existing_cards,
+            system_prompt=_CARD_SYSTEM_PROMPT,
+        )
+
+        cards: list[dict[str, Any]] = []
+        seen_fronts: set[str] = set()
+        for item in raw_items:
+            front = str(item.get("front", "")).strip()
+            norm = _normalise_question(front)
+            if not norm or norm in seen_fronts:
+                continue
+            seen_fronts.add(norm)
+            cards.append(
+                {
+                    "card_id": _card_id(topic_id, front),
+                    "front": front,
+                    "back": str(item.get("back", "")).strip(),
+                    "source_section": str(
+                        item.get("source_section", "")
+                    ).strip(),
+                    "source_quote": str(
+                        item.get("source_quote", "")
+                    ).strip(),
+                }
+            )
+        return cards[:target_count], stats
+
+
+# ── Flashcard generation (STUDY_ENABLE_FLASHCARDS_V1) ──
+
+#: Hard cap on cards generated per request (plan decision).
+MAX_CARD_GENERATION_COUNT = 50
+
+_CARD_SYSTEM_PROMPT = (
+    "You are an expert technical educator. You write interview-grade "
+    "flashcards: a concise question on the front and a direct, detailed "
+    "answer on the back, both grounded in the supplied course material. "
+    "You always respond with a single JSON array and never with prose."
+)
+
+
+def _build_card_prompt(
+    topic_id: str,
+    topic_title: str,
+    doc_content: str,
+    count: int = 10,
+    section_title: Optional[str] = None,
+    section_content: Optional[str] = None,
+    response_detail: str = "very_detailed",
+    existing_cards: Optional[list[str]] = None,
+    mcp_context: str = "",
+) -> str:
+    """Build the flashcard generation user turn."""
+    if section_title and section_content:
+        scope = f'the "{section_title}" section of "{topic_title}"'
+        content = _clamp_content(section_content)
+    else:
+        scope = f'"{topic_title}"'
+        content = _clamp_content(doc_content)
+    grounding_anchors = _grounding_anchor_phrases(
+        topic_title=topic_title,
+        section_title=section_title,
+        content=section_content if (section_title and section_content) else doc_content,
+    )
+    grounding_block = _render_grounding_anchors_block(grounding_anchors)
+    detail_clause = (
+        "Keep back answers concise but complete: the direct answer first, "
+        "then the key mechanism, tradeoff, or failure mode an interviewer "
+        "would probe."
+        if response_detail != "very_detailed"
+        else "Be maximally detailed on the back: the direct answer first, "
+        "then layered explanation, concrete examples, edge cases, and the "
+        "tradeoff or failure mode an interviewer would probe."
+    )
+    uniqueness_block = ""
+    seed = _normalise_existing_questions(existing_cards)
+    if seed:
+        existing_blob = "\n".join([f"- {q}" for q in seed[:60]])
+        uniqueness_block = (
+            "\nAlready generated cards for this topic. Do NOT repeat or "
+            f"rephrase these:\n{existing_blob}\n"
+        )
+    mcp_block = untrusted_block("external_context", mcp_context, 2500)
+    untrusted_blocks = "\n\n".join(
+        block
+        for block in (
+            untrusted_block("topic_title", topic_title),
+            untrusted_block("section_title", section_title or ""),
+            untrusted_block(
+                "section_content" if (section_title and section_content) else "documentation",
+                content,
+                _MAX_DOC_CONTEXT,
+            ),
+        )
+        if block
+    )
+    prompt_contract = render_contract(
+        schema_label="Return ONLY valid JSON in this shape",
+        schema_block="""[
+  {
+    "front": "Concise flashcard question",
+    "back": "Direct, detailed answer",
+    "source_section": "Section name",
+    "source_quote": "short direct quote from course content"
+  }
+]""",
+        rules=[
+            f"Return exactly {count} items; never return fewer.",
+            "Front text must be a self-contained question that names the topic concept.",
+            "Back text must directly answer the front; no meta-guidance about how to answer.",
+            "Each card must be explicitly grounded to the current topic, section, or one of the grounding anchors below.",
+            "Do not ask generic questions that could fit many unrelated topics with only minor wording changes.",
+            "Front and back must stay aligned to the same concept.",
+            detail_clause,
+            "source_quote must be factual text from the provided course content.",
+            "Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.",
+            "Do not wrap JSON with prose; return raw JSON only.",
+            UNTRUSTED_CLAUSE,
+        ],
+    )
+    return f"""Generate exactly {count} interview-grade flashcards for {scope}.
+{uniqueness_block}
+{grounding_block}
+
+{prompt_contract}
+
+{untrusted_blocks}{mcp_block}"""
+
+
+def _validate_card_item(
+    item: dict[str, Any],
+    *,
+    topic_title: str,
+    grounding_anchors: list[str],
+) -> tuple[bool, str]:
+    """Validate one generated flashcard item.
+
+    Mirrors ``front`` into ``question`` so the shared
+    retry machinery's near-duplicate detection works
+    unchanged on the card front text.
+    """
+    front = str(item.get("front", "")).strip()
+    back = str(item.get("back", "")).strip()
+    if not front:
+        return False, "missing_or_empty_front"
+    if len(front) < 8:
+        return False, "front_too_short"
+    if not back:
+        return False, "missing_or_empty_back"
+    if len(back) < 15:
+        return False, "back_too_short"
+    source_quote = str(item.get("source_quote", "")).strip()
+    if not source_quote:
+        return False, "missing_source_quote"
+    source_section = str(item.get("source_section", "")).strip()
+    if not source_section:
+        return False, "missing_source_section"
+    item["question"] = front
+    item["front"] = front
+    item["back"] = back
+    item["source_quote"] = source_quote
+    item["source_section"] = source_section
+    if topic_title or grounding_anchors:
+        if not _question_is_grounded_to_anchors(
+            front,
+            topic_title=topic_title,
+            anchors=grounding_anchors,
+            problem_solving_mode=False,
+        ):
+            return False, "card_not_grounded_to_topic"
+    return True, ""
+
+
+def _card_id(topic_id: str, front: str) -> str:
+    digest = hashlib.sha1(
+        f"card:{topic_id}:{front.strip().lower()}".encode("utf-8")
+    ).hexdigest()
+    return f"{topic_id}:{digest[:14]}"

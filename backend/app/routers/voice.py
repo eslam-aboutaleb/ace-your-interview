@@ -8,31 +8,47 @@ import logging
 import os
 import time
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from app.config import get_settings
-from app.dependencies import is_admin_identity, require_admin, require_auth
+from app.dependencies import (
+    is_dev_auth_bypass_enabled,
+    require_admin,
+    require_auth,
+)
 from app.schemas.models import (
+    CreateInterviewSessionRequestExtended,
     LLMConfigRequest,
     VoiceConfigResponse,
     VoiceSettingsUpdateRequest,
-    VoiceTierEnum,
 )
+from app.services.auth import decode_jwt_token
 from app.services.llm_client import LLMClient
-from app.services.voice_session import VoiceSession, create_voice_session
+from app.services.user_settings_store import UserSettingsStore, identity_key_for_user
+from app.services.voice_session import (
+    VoiceInterviewSession,
+    VoiceSession,
+    create_voice_session,
+)
+from app.routers import interview_sessions as interview_sessions_router
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
 _llm_client: LLMClient | None = None
+_user_settings_store: UserSettingsStore | None = None
+
+# Close code for a connection that exhausted its per-connection LLM turn budget.
+# Application-defined range (4000-4999), distinct from 4001 (unauthenticated).
+_TURN_BUDGET_CLOSE_CODE = 4429
 
 
-def init(llm_client: LLMClient):
-    global _llm_client
+def init(llm_client: LLMClient, user_settings_store: UserSettingsStore | None = None):
+    global _llm_client, _user_settings_store
     _llm_client = llm_client
+    _user_settings_store = user_settings_store
 
 
 # ── REST Endpoints ─────────────────────────────────────────
@@ -44,11 +60,21 @@ async def get_voice_config(user: dict = Depends(require_auth)):
     settings = get_settings()
     enabled_tiers = [t.strip() for t in settings.voice_tiers_enabled.split(",") if t.strip()]
 
+    # Per-user tier override: a saved preference wins when it names a
+    # tier that is currently enabled; otherwise the admin default applies.
+    user_tier = settings.voice_default_tier
+    if _user_settings_store is not None:
+        identity_key = identity_key_for_user(user)
+        prefs, _ = _user_settings_store.get_user_state(identity_key)
+        saved_tier = str(prefs.get("voice_tier") or "").strip()
+        if saved_tier and saved_tier in enabled_tiers:
+            user_tier = saved_tier
+
     return VoiceConfigResponse(
         enabled=settings.enable_voice_agent,
         available_tiers=enabled_tiers,
         default_tier=settings.voice_default_tier,
-        user_tier=settings.voice_default_tier,  # TODO: per-user override from UserSettingsStore
+        user_tier=user_tier,
         stt_provider=settings.voice_stt_provider,
         tts_provider=settings.voice_tts_provider,
     )
@@ -93,19 +119,24 @@ async def update_voice_settings(
 
 
 async def _ws_authenticate(token: str) -> dict | None:
-    """Validate session token from WebSocket query params.
+    """Validate a session token presented as a WebSocket query parameter.
 
-    Re-uses the same JWT validation logic as require_auth but works
-    outside of the Depends() chain.
+    Uses the same ``decode_jwt_token`` helper as the HTTP dependency chain so
+    the WebSocket and HTTP auth paths cannot diverge.
     """
     if not token:
         return None
     try:
-        import jwt as pyjwt
-        settings = get_settings()
-        payload = pyjwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-        return {"user": payload.get("sub", ""), "provider": payload.get("provider", "")}
-    except Exception:
+        payload = decode_jwt_token(token)
+        return {"user": payload["sub"], "provider": payload["provider"]}
+    except Exception as exc:
+        # WARNING + traceback: a swallowed auth failure here means every voice
+        # WebSocket silently rejects every user, which must never be invisible.
+        logger.warning(
+            "Voice WebSocket token validation failed: %s",
+            exc,
+            exc_info=True,
+        )
         return None
 
 
@@ -115,6 +146,36 @@ async def _ws_authenticate_from_cookie(websocket: WebSocket) -> dict | None:
     if not token:
         return None
     return await _ws_authenticate(token)
+
+
+async def _consume_turn_budget(
+    websocket: WebSocket,
+    *,
+    turns_used: int,
+    max_turns: int,
+) -> bool:
+    """Return True when the connection may spend another LLM turn.
+
+    WebSockets bypass the HTTP rate-limit middleware, so this is the only thing
+    bounding LLM spend per connection. On exhaustion it emits an error frame and
+    closes with :data:`_TURN_BUDGET_CLOSE_CODE`, and returns False so the caller
+    stops reading from a closed socket.
+    """
+    if max_turns <= 0 or turns_used < max_turns:
+        return True
+
+    await websocket.send_json({
+        "type": "error",
+        "message": (
+            f"Turn budget exhausted: this connection has used its limit of "
+            f"{max_turns} LLM turns. Reconnect to start a new session."
+        ),
+    })
+    await websocket.close(
+        code=_TURN_BUDGET_CLOSE_CODE,
+        reason="LLM turn budget exhausted",
+    )
+    return False
 
 
 @router.websocket("/stream")
@@ -127,7 +188,7 @@ async def voice_stream(
     Protocol:
         Client → Server:
             1. {"type": "start", "tier": "cloud", "session_type": "chat",
-                "session_id": "...", "system_prompt": "...",
+                "session_id": "...",
                 "llm_config": {"provider": "groq", "model": "..."}}
             2. {"type": "audio", "data": "<base64 audio>", "mime": "audio/webm"}
             3. {"type": "text", "content": "typed text fallback"}
@@ -139,6 +200,10 @@ async def voice_stream(
             3. {"type": "response", "text": "...", "audio": "<base64 mp3>",
                 "latency": {"stt_ms": .., "llm_ms": .., "tts_ms": .., "total_ms": ..}}
             4. {"type": "error", "message": "..."}
+
+    Each connection is limited to ``settings.voice_max_turns_per_connection``
+    LLM-producing turns; exceeding it sends ``{"type": "error"}`` and closes
+    with code 4429.
     """
     settings = get_settings()
 
@@ -149,9 +214,13 @@ async def voice_stream(
     # Auth: try token query param first, then cookie
     user_identity = await _ws_authenticate(token) or await _ws_authenticate_from_cookie(websocket)
 
-    # Dev bypass
-    if not user_identity and settings.environment.strip().lower() == "development":
-        user_identity = {"user": "dev-user", "provider": "dev"}
+    # Dev bypass — gated on the same four conditions as require_auth.
+    if not user_identity and is_dev_auth_bypass_enabled(
+        settings=settings,
+        request_host=websocket.url.hostname or "",
+        client_host=websocket.client.host if websocket.client else "",
+    ):
+        user_identity = {"user": "local-dev", "provider": "local"}
 
     if not user_identity:
         await websocket.close(code=4001, reason="Authentication required")
@@ -165,7 +234,13 @@ async def voice_stream(
         return
 
     session: VoiceSession | None = None
+    interview: VoiceInterviewSession | None = None
     session_id = ""
+    # HTTP middleware rate limiting does not cover WebSockets, so each connection
+    # carries its own budget of LLM-producing turns (audio + text). A value <= 0
+    # disables the budget.
+    llm_turns_used = 0
+    max_llm_turns = int(settings.voice_max_turns_per_connection or 0)
 
     try:
         while True:
@@ -190,7 +265,6 @@ async def voice_stream(
 
                 session_type = msg.get("session_type", "chat")
                 session_id = msg.get("session_id", str(uuid.uuid4()))
-                system_prompt = msg.get("system_prompt", "")
                 llm_config = None
                 if msg.get("llm_config"):
                     try:
@@ -198,6 +272,8 @@ async def voice_stream(
                     except Exception:
                         llm_config = None
 
+                # The persona is server-owned: a client-supplied system_prompt is
+                # ignored so the wire cannot redefine what the assistant is.
                 session = create_voice_session(
                     llm_client=_llm_client,
                     tier=tier,
@@ -205,7 +281,6 @@ async def voice_stream(
                     session_id=session_id,
                     user_identity=user_identity,
                     llm_config=llm_config,
-                    system_prompt=system_prompt,
                 )
 
                 await websocket.send_json({
@@ -214,13 +289,202 @@ async def voice_stream(
                     "tier": tier,
                 })
 
+            elif msg_type == "interview_start":
+                if not get_settings().enable_voice_interview_v1:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Voice interviews are disabled.",
+                    })
+                    continue
+
+                if not await _consume_turn_budget(
+                    websocket,
+                    turns_used=llm_turns_used,
+                    max_turns=max_llm_turns,
+                ):
+                    return
+                llm_turns_used += 1
+
+                services = interview_sessions_router.get_interview_services()
+                if services is None:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Interview services not initialised.",
+                    })
+                    continue
+                store, generator = services
+
+                config_payload = msg.get("config") or {}
+                try:
+                    config = CreateInterviewSessionRequestExtended(**config_payload)
+                except Exception as exc:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Invalid interview config: {exc}",
+                    })
+                    continue
+
+                resume_summary_text, focus_areas = (
+                    await interview_sessions_router.personalize_session_inputs(
+                        config,
+                        user_id=user_identity["user"],
+                        llm_config=config.llm_config,
+                        user_identity=user_identity,
+                    )
+                )
+                job_description_text = config.job_description_text.strip()
+                if not job_description_text:
+                    job_description_text = config.jd_text.strip()
+
+                session_row = store.create_session(
+                    user_id=user_identity["user"],
+                    track=config.track.value,
+                    level=config.level.value,
+                    interview_type=config.interview_type.value,
+                    turn_count=config.turn_count,
+                    target_role=config.target_role.strip(),
+                    interviewer_style=config.interviewer_style.value,
+                    feedback_mode=config.feedback_mode.value,
+                    job_description_text=job_description_text,
+                    resume_summary_text=resume_summary_text,
+                    focus_areas=focus_areas,
+                    company=config.company,
+                )
+
+                interview_tier = msg.get("tier", settings.voice_default_tier)
+                enabled_tiers = [
+                    t.strip() for t in settings.voice_tiers_enabled.split(",")
+                ]
+                if interview_tier not in enabled_tiers:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": (
+                            f"Tier '{interview_tier}' is not enabled. "
+                            f"Available: {enabled_tiers}"
+                        ),
+                    })
+                    continue
+
+                voice_session = create_voice_session(
+                    llm_client=_llm_client,
+                    tier=interview_tier,
+                    session_type="interview",
+                    session_id=session_row["session_id"],
+                    user_identity=user_identity,
+                    llm_config=config.llm_config,
+                )
+                interview = VoiceInterviewSession(
+                    voice_session=voice_session,
+                    store=store,
+                    generator=generator,
+                    session=session_row,
+                    user_id=user_identity["user"],
+                    user_identity=user_identity,
+                    llm_config=config.llm_config,
+                )
+
+                try:
+                    started = await interview.start()
+                except Exception as exc:
+                    logger.error(
+                        "Voice interview start failed: %s", exc, exc_info=True
+                    )
+                    interview = None
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Interview start failed: {exc}",
+                    })
+                    continue
+
+                started_audio_b64 = (
+                    base64.b64encode(started["audio_bytes"]).decode()
+                    if started["audio_bytes"]
+                    else ""
+                )
+                await websocket.send_json({
+                    "type": "interview_ready",
+                    "session_id": started["session_id"],
+                    "question": started["question"],
+                    "competency_focus": started["competency_focus"],
+                    "expected_signals": started["expected_signals"],
+                    "audio": started_audio_b64,
+                    "turn_count": interview.turn_count,
+                })
+
             elif msg_type == "audio":
+                if interview is not None:
+                    # Voice interview: a spoken answer is transcribed,
+                    # evaluated, recorded, and spoken back as feedback.
+                    if not await _consume_turn_budget(
+                        websocket,
+                        turns_used=llm_turns_used,
+                        max_turns=max_llm_turns,
+                    ):
+                        return
+                    llm_turns_used += 1
+
+                    audio_b64 = msg.get("data", "")
+                    mime = msg.get("mime", "audio/webm")
+                    try:
+                        audio_bytes = base64.b64decode(audio_b64)
+                    except Exception:
+                        await websocket.send_json({"type": "error", "message": "Invalid base64 audio"})
+                        continue
+
+                    if len(audio_bytes) < 100:
+                        await websocket.send_json({"type": "error", "message": "Audio too short"})
+                        continue
+
+                    answer_start = time.monotonic()
+                    result = await interview.answer(audio_bytes, mime_type=mime)
+                    answer_ms = int((time.monotonic() - answer_start) * 1000)
+
+                    if result["transcript"]:
+                        await websocket.send_json({
+                            "type": "transcript",
+                            "text": result["transcript"],
+                            "final": True,
+                        })
+
+                    answer_audio_b64 = (
+                        base64.b64encode(result["audio_bytes"]).decode()
+                        if result["audio_bytes"]
+                        else ""
+                    )
+                    await websocket.send_json({
+                        "type": "interview_response",
+                        "text": result["feedback_text"],
+                        "audio": answer_audio_b64,
+                        "rubric": result["rubric"],
+                        "degraded": result["degraded"],
+                        "completed": result["completed"],
+                        "latency": {"llm_ms": answer_ms, "total_ms": answer_ms},
+                    })
+
+                    if result["completed"] and result["report"]:
+                        await websocket.send_json({
+                            "type": "interview_completed",
+                            "session_id": interview.session_id,
+                            "report": result["report"],
+                        })
+                        interview = None
+                    continue
+
                 if session is None:
                     await websocket.send_json({
                         "type": "error",
                         "message": "Session not started. Send {type: 'start'} first.",
                     })
                     continue
+
+                if not await _consume_turn_budget(
+                    websocket,
+                    turns_used=llm_turns_used,
+                    max_turns=max_llm_turns,
+                ):
+                    return
+
+                llm_turns_used += 1
 
                 audio_b64 = msg.get("data", "")
                 mime = msg.get("mime", "audio/webm")
@@ -267,6 +531,47 @@ async def voice_stream(
 
             elif msg_type == "text":
                 # Text fallback — user typed instead of speaking
+                if interview is not None:
+                    text = msg.get("content", "").strip()
+                    if not text:
+                        continue
+
+                    if not await _consume_turn_budget(
+                        websocket,
+                        turns_used=llm_turns_used,
+                        max_turns=max_llm_turns,
+                    ):
+                        return
+                    llm_turns_used += 1
+
+                    answer_start = time.monotonic()
+                    result = await interview.answer_text(text)
+                    answer_ms = int((time.monotonic() - answer_start) * 1000)
+
+                    answer_audio_b64 = (
+                        base64.b64encode(result["audio_bytes"]).decode()
+                        if result["audio_bytes"]
+                        else ""
+                    )
+                    await websocket.send_json({
+                        "type": "interview_response",
+                        "text": result["feedback_text"],
+                        "audio": answer_audio_b64,
+                        "rubric": result["rubric"],
+                        "degraded": result["degraded"],
+                        "completed": result["completed"],
+                        "latency": {"llm_ms": answer_ms, "total_ms": answer_ms},
+                    })
+
+                    if result["completed"] and result["report"]:
+                        await websocket.send_json({
+                            "type": "interview_completed",
+                            "session_id": interview.session_id,
+                            "report": result["report"],
+                        })
+                        interview = None
+                    continue
+
                 if session is None:
                     await websocket.send_json({
                         "type": "error",
@@ -277,6 +582,15 @@ async def voice_stream(
                 text = msg.get("content", "").strip()
                 if not text:
                     continue
+
+                if not await _consume_turn_budget(
+                    websocket,
+                    turns_used=llm_turns_used,
+                    max_turns=max_llm_turns,
+                ):
+                    return
+
+                llm_turns_used += 1
 
                 session.conversation_history.append({"role": "user", "content": text})
 
@@ -334,6 +648,7 @@ async def voice_stream(
                 if session:
                     session.clear_history()
                     session = None
+                interview = None
                 await websocket.send_json({"type": "stopped", "session_id": session_id})
 
             else:

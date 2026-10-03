@@ -37,6 +37,15 @@ import type {
   OllamaTestResponse,
   LearningAttemptRequest,
   LearningAttemptResponse,
+  LearningReviewRequest,
+  LearningReviewResponse,
+  ForecastResponse,
+  CalibrationResponse,
+  DocumentUploadResponse,
+  DocumentDetail,
+  DocumentListResponse,
+  ChatAskRequest,
+  ChatAskResponse,
   ReviewQueueResponse,
   StudyPlanResponse,
   WeakAreasResponse,
@@ -69,6 +78,26 @@ import type {
   LLMMyAssignmentResponse,
   UserSettingsResponse,
   UserPreferences,
+  SaveProgressPayload,
+  TopicProgressDocument,
+  TopicProgressListResponse,
+  DeckCreateRequest,
+  DeckUpdateRequest,
+  DeckResponse,
+  DeckListResponse,
+  CardCreateRequest,
+  CardUpdateRequest,
+  FlashcardResponse,
+  FlashcardListResponse,
+  GenerateCardsRequest,
+  GenerateCardsResponse,
+  GenerateCardsJobResponse,
+  ImportDeckResponse,
+  FindDuplicatesRequest,
+  FindDuplicatesResponse,
+  DeckReviewRequest,
+  DeckReviewResponse,
+  StudySessionResponse,
 } from "@/types";
 
 const api = axios.create({
@@ -919,6 +948,59 @@ export async function fetchLearnerProfile(): Promise<LearnerProfile> {
   return data;
 }
 
+// ── Per-Topic Progress ────────────────────────────────────────
+
+export async function fetchTopicProgress(
+  topicId: string,
+): Promise<TopicProgressDocument> {
+  const { data } = await api.get<TopicProgressDocument>(`/progress/${topicId}`);
+  return data;
+}
+
+export async function fetchTopicProgressList(
+  limit = 50,
+): Promise<TopicProgressListResponse> {
+  const { data } = await api.get<TopicProgressListResponse>("/progress/topics", {
+    params: { limit },
+  });
+  return data;
+}
+
+export async function saveTopicProgress(
+  topicId: string,
+  payload: SaveProgressPayload,
+): Promise<TopicProgressDocument> {
+  const { data } = await api.post<TopicProgressDocument>(
+    `/progress/${topicId}/save`,
+    payload,
+  );
+  return data;
+}
+
+/**
+ * Fire the `pagehide` beacon. Uses `fetch(..., { keepalive: true })` rather than
+ * axios because XHR is cancelled on unload; keepalive bodies are capped by the
+ * browser at 64 KB, so callers must send a bounded question list.
+ */
+export function autosaveTopicProgress(
+  topicId: string,
+  payload: SaveProgressPayload,
+): Promise<TopicProgressDocument | null> {
+  const baseUrl = import.meta.env.VITE_API_URL || "/api";
+  return fetch(`${baseUrl}/progress/${encodeURIComponent(topicId)}/autosave`, {
+    method: "POST",
+    keepalive: true,
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then(async (response) => {
+      if (!response.ok) return null;
+      return (await response.json()) as TopicProgressDocument;
+    })
+    .catch(() => null);
+}
+
 export async function updateLearnerProfile(
   payload: LearnerProfileUpdateRequest,
 ): Promise<LearnerProfile> {
@@ -1404,6 +1486,348 @@ export function connectGeminiAccount(): string {
 export async function disconnectGeminiAccount(): Promise<UserSettingsResponse> {
   const { data } = await api.post<UserSettingsResponse>(
     "/user-settings/google/disconnect",
+  );
+  return data;
+}
+
+// ── FSRS Spaced Repetition ──────────────────────────
+export async function submitCardReview(
+  req: LearningReviewRequest,
+): Promise<LearningReviewResponse> {
+  const { data } = await api.post<LearningReviewResponse>(
+    "/learning/review",
+    req,
+  );
+  return data;
+}
+
+export async function fetchForecast(
+  days = 7,
+): Promise<ForecastResponse> {
+  const { data } = await api.get<ForecastResponse>(
+    "/learning/forecast",
+    { params: { days } },
+  );
+  return data;
+}
+
+export async function fetchCalibration(): Promise<CalibrationResponse> {
+  const { data } = await api.get<CalibrationResponse>(
+    "/learning/calibration",
+  );
+  return data;
+}
+
+// ── Documents + RAG Chat ─────────────────────────────
+export async function fetchDocuments(): Promise<DocumentListResponse> {
+  const { data } = await api.get<DocumentListResponse>("/documents");
+  return data;
+}
+
+export async function fetchDocument(
+  documentId: string,
+): Promise<DocumentDetail> {
+  const { data } = await api.get<DocumentDetail>(
+    `/documents/${encodeURIComponent(documentId)}`,
+  );
+  return data;
+}
+
+export async function uploadDocument(
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<DocumentUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post<DocumentUploadResponse>(
+    "/documents",
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (event) => {
+        if (!onProgress || !event.total) return;
+        onProgress(Math.round((event.loaded * 100) / event.total));
+      },
+    },
+  );
+  return data;
+}
+
+export async function deleteDocument(
+  documentId: string,
+): Promise<void> {
+  await api.delete(`/documents/${encodeURIComponent(documentId)}`);
+}
+
+export async function askDocumentQuestion(
+  payload: ChatAskRequest,
+): Promise<ChatAskResponse> {
+  const { data } = await api.post<ChatAskResponse>(
+    "/chat/ask",
+    payload,
+  );
+  return data;
+}
+
+// ── Flashcard Decks + Anki Interop ──────────
+export async function fetchDecks(): Promise<DeckListResponse> {
+  const { data } = await api.get<DeckListResponse>("/decks");
+  return data;
+}
+
+export async function createDeck(
+  req: DeckCreateRequest,
+): Promise<DeckResponse> {
+  const { data } = await api.post<DeckResponse>("/decks", req);
+  return data;
+}
+
+export async function fetchDeck(
+  deckId: string,
+): Promise<DeckResponse> {
+  const { data } = await api.get<DeckResponse>(
+    `/decks/${encodeURIComponent(deckId)}`,
+  );
+  return data;
+}
+
+export async function updateDeck(
+  deckId: string,
+  req: DeckUpdateRequest,
+): Promise<DeckResponse> {
+  const { data } = await api.put<DeckResponse>(
+    `/decks/${encodeURIComponent(deckId)}`,
+    req,
+  );
+  return data;
+}
+
+export async function deleteDeck(deckId: string): Promise<void> {
+  await api.delete(`/decks/${encodeURIComponent(deckId)}`);
+}
+
+export async function fetchDeckCards(
+  deckId: string,
+  dueOnly = false,
+  limit = 500,
+): Promise<FlashcardListResponse> {
+  const { data } = await api.get<FlashcardListResponse>(
+    `/decks/${encodeURIComponent(deckId)}/cards`,
+    { params: { due_only: dueOnly, limit } },
+  );
+  return data;
+}
+
+export async function addDeckCard(
+  deckId: string,
+  req: CardCreateRequest,
+): Promise<FlashcardResponse> {
+  const { data } = await api.post<FlashcardResponse>(
+    `/decks/${encodeURIComponent(deckId)}/cards`,
+    req,
+  );
+  return data;
+}
+
+export async function updateDeckCard(
+  cardId: string,
+  req: CardUpdateRequest,
+): Promise<FlashcardResponse> {
+  const { data } = await api.put<FlashcardResponse>(
+    `/cards/${encodeURIComponent(cardId)}`,
+    req,
+  );
+  return data;
+}
+
+export async function deleteDeckCard(
+  cardId: string,
+): Promise<void> {
+  await api.delete(`/cards/${encodeURIComponent(cardId)}`);
+}
+
+export async function fetchStudySession(
+  deckId: string,
+  limit = 50,
+): Promise<StudySessionResponse> {
+  const { data } = await api.get<StudySessionResponse>(
+    `/decks/${encodeURIComponent(deckId)}/study-session`,
+    { params: { limit } },
+  );
+  return data;
+}
+
+export async function reviewDeckCard(
+  deckId: string,
+  req: DeckReviewRequest,
+): Promise<DeckReviewResponse> {
+  const { data } = await api.post<DeckReviewResponse>(
+    `/decks/${encodeURIComponent(deckId)}/review`,
+    req,
+  );
+  return data;
+}
+
+export async function generateDeckCards(
+  deckId: string,
+  req: GenerateCardsRequest,
+): Promise<GenerateCardsResponse> {
+  const { data } = await api.post<GenerateCardsResponse>(
+    `/decks/${encodeURIComponent(deckId)}/generate`,
+    req,
+  );
+  return data;
+}
+
+export async function fetchCardGenerationJob(
+  jobId: string,
+): Promise<GenerateCardsJobResponse> {
+  const { data } = await api.get<GenerateCardsJobResponse>(
+    `/decks/generate/jobs/${encodeURIComponent(jobId)}`,
+  );
+  return data;
+}
+
+export async function importDeck(
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<ImportDeckResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post<ImportDeckResponse>(
+    "/decks/import",
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (event) => {
+        if (!onProgress || !event.total) return;
+        onProgress(Math.round((event.loaded * 100) / event.total));
+      },
+    },
+  );
+  return data;
+}
+
+// ── Interview Personalization ─────────────────────
+// (types imported below: this file is append-only, and
+// ES module imports are hoisted, so the trailing import
+// keeps every existing line untouched)
+import type {
+  CompanyPacksResponse,
+  HintRequest,
+  HintResponse,
+  JDAnalysisResponse,
+  LLMConfig,
+  ResumeUploadResponse,
+  StarStory,
+  StarStoryCreateRequest,
+  StarStoryListResponse,
+  StarStorySuggestionsResponse,
+  StarStoryUpdateRequest,
+} from "@/types";
+
+export async function uploadResume(
+  file: File,
+  llmConfig?: LLMConfig,
+): Promise<ResumeUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (llmConfig) {
+    formData.append("llm_config_json", JSON.stringify(llmConfig));
+  }
+  const { data } = await api.post<ResumeUploadResponse>(
+    "/interview-sessions/resume",
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data;
+}
+
+export function exportDeckApkgUrl(deckId: string): string {
+  const base = (import.meta.env.VITE_API_URL || "/api").replace(
+    /\/$/,
+    "",
+  );
+  return `${base}/decks/${encodeURIComponent(deckId)}/export`;
+}
+
+export async function findDuplicateCards(
+  req: FindDuplicatesRequest,
+): Promise<FindDuplicatesResponse> {
+  const { data } = await api.post<FindDuplicatesResponse>(
+    "/cards/find-duplicates",
+    req,
+  );
+  return data;
+}
+export async function deleteResume(): Promise<void> {
+  await api.delete("/interview-sessions/resume");
+}
+
+export async function analyzeJobDescription(
+  jdText: string,
+): Promise<JDAnalysisResponse> {
+  const { data } = await api.post<JDAnalysisResponse>(
+    "/interview-sessions/jd-analysis",
+    { jd_text: jdText },
+  );
+  return data;
+}
+
+export async function fetchCompanyPacks(): Promise<CompanyPacksResponse> {
+  const { data } = await api.get<CompanyPacksResponse>(
+    "/interview-sessions/companies",
+  );
+  return data;
+}
+
+export async function fetchHint(
+  questionId: string,
+  level: number,
+  payload?: HintRequest,
+): Promise<HintResponse> {
+  const { data } = await api.post<HintResponse>(
+    `/questions/${encodeURIComponent(questionId)}/hint`,
+    payload ?? {},
+    { params: { level } },
+  );
+  return data;
+}
+
+export async function fetchStarStories(): Promise<StarStoryListResponse> {
+  const { data } = await api.get<StarStoryListResponse>("/star-stories");
+  return data;
+}
+
+export async function createStarStory(
+  req: StarStoryCreateRequest,
+): Promise<StarStory> {
+  const { data } = await api.post<StarStory>("/star-stories", req);
+  return data;
+}
+
+export async function updateStarStory(
+  storyId: string,
+  req: StarStoryUpdateRequest,
+): Promise<StarStory> {
+  const { data } = await api.put<StarStory>(
+    `/star-stories/${encodeURIComponent(storyId)}`,
+    req,
+  );
+  return data;
+}
+
+export async function deleteStarStory(storyId: string): Promise<void> {
+  await api.delete(`/star-stories/${encodeURIComponent(storyId)}`);
+}
+
+export async function suggestStarStories(
+  query: string,
+  limit = 3,
+): Promise<StarStorySuggestionsResponse> {
+  const { data } = await api.get<StarStorySuggestionsResponse>(
+    "/star-stories/suggest",
+    { params: { q: query, limit } },
   );
   return data;
 }

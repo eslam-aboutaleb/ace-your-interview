@@ -5,54 +5,88 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+from difflib import SequenceMatcher
 from typing import Any, Optional
 
 from app.schemas.models import LLMConfigRequest
+from app.services.company_packs import CompanyPackStore
 from app.services.doc_parser import DocParser
-from app.services.llm_client import LLMClient
-from app.services.llm_policy import raise_if_policy_blocked_result
+from app.services.hint_service import apply_hint_penalty
+from app.services.llm_client import (
+    CALL_FAILED_CODE,
+    TERMINAL_ERROR_CODES,
+    LLMClient,
+    parse_json_object,
+)
+from app.services.llm_policy import (
+    APPROVAL_REQUIRED_CODE,
+    PERSONAL_CREDENTIAL_REQUIRED_CODE,
+    STUDY_APP_NOT_ASSIGNED_CODE,
+    raise_if_policy_blocked_result,
+)
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
 from app.services.prompt_blocks import render_contract
+from app.services.question_text import normalise_question
+from app.services.star_store import StarStore
 
 logger = logging.getLogger(__name__)
 
-_MAX_ATTEMPTS = 4
+_MAX_ATTEMPTS = 100
+_QUESTION_RETRY_TIMEOUT_SECONDS = 30.0
+_EVAL_RETRY_TIMEOUT_SECONDS = 60.0
+
+#: Outcomes a retry loop must not spin on. Re-sending the identical prompt at the
+#: identical caps cannot fix a budget rejection, a truncated response, a provider
+#: outage, or a policy block.
+_NON_RETRYABLE_ERROR_CODES: frozenset[str] = frozenset(
+    set(TERMINAL_ERROR_CODES)
+    | {
+        CALL_FAILED_CODE,
+        APPROVAL_REQUIRED_CODE,
+        STUDY_APP_NOT_ASSIGNED_CODE,
+        PERSONAL_CREDENTIAL_REQUIRED_CODE,
+    }
+)
+
+#: Shared JSON salvage parser (Stage 2.3). Kept as a module alias so the rest of
+#: this module keeps one spelling for "turn an LLM response into a dict".
+_extract_json = parse_json_object
+_normalise_question = normalise_question
+
+_DEGRADED_RUBRIC: dict[str, None] = {
+    "technical_accuracy": None,
+    "reasoning_depth": None,
+    "communication_clarity": None,
+    "completeness": None,
+    "confidence_signal": None,
+    "overall": None,
+    "independent_reasoning": None,
+}
+
+_FOLLOW_UP_NOTE_HEADINGS = (
+    "What strong interviewers wanted to hear",
+    "What to improve next",
+    "Stronger sample answer",
+)
 
 
-def _extract_json(raw: str) -> dict[str, Any]:
-    text = (raw or "").strip()
-    if not text:
-        return {}
-
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except json.JSONDecodeError:
-        pass
-
-    fenced = re.search(r"```(?:json)?\\s*\\n?(.*?)\\n?\\s*```", text, flags=re.DOTALL)
-    if fenced:
-        try:
-            data = json.loads(fenced.group(1))
-            return data if isinstance(data, dict) else {}
-        except json.JSONDecodeError:
-            pass
-
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        try:
-            data = json.loads(text[start : end + 1])
-            return data if isinstance(data, dict) else {}
-        except json.JSONDecodeError:
-            pass
-
-    return {}
+def _is_non_retryable_result(result: dict[str, Any]) -> bool:
+    """True when re-sending the same prompt cannot change the outcome."""
+    if result.get("success"):
+        return False
+    error_code = str(result.get("error_code", "")).strip().lower()
+    return error_code in _NON_RETRYABLE_ERROR_CODES
 
 
-def _normalise_question(text: str) -> str:
-    return re.sub(r"\\s+", " ", (text or "").strip().lower())
+def _is_degraded_turn(turn: dict[str, Any]) -> bool:
+    """A degraded turn has no usable rubric and must not affect any average."""
+    if not isinstance(turn, dict):
+        return False
+    if bool(turn.get("degraded")):
+        return True
+    return not any(isinstance(value, (int, float)) for value in (turn.get("rubric") or {}).values())
 
 
 def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
@@ -66,10 +100,19 @@ def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
 class InterviewGenerator:
     """Handles interview question creation, evaluation, and report synthesis."""
 
-    def __init__(self, llm: LLMClient, parser: DocParser, mcp_gateway: MCPGateway | None = None):
+    def __init__(
+        self,
+        llm: LLMClient,
+        parser: DocParser,
+        mcp_gateway: MCPGateway | None = None,
+        company_pack_store: CompanyPackStore | None = None,
+        star_store: StarStore | None = None,
+    ):
         self.llm = llm
         self.parser = parser
         self.mcp = mcp_gateway
+        self.company_packs = company_pack_store
+        self.star_store = star_store
 
     @staticmethod
     def _format_recent_turns(turns: list[dict[str, Any]]) -> str:
@@ -105,8 +148,37 @@ class InterviewGenerator:
         return "deep" if mode == "deep" else "concise"
 
     @staticmethod
+    def _token_set(text: str) -> set[str]:
+        cleaned = re.sub(r"[^a-z0-9\s]", " ", (text or "").lower())
+        return {token for token in cleaned.split() if token}
+
+    @staticmethod
+    def _is_near_duplicate_question(candidate: str, prior_questions: list[str]) -> bool:
+        candidate_norm = _normalise_question(candidate)
+        if not candidate_norm:
+            return False
+        candidate_tokens = InterviewGenerator._token_set(candidate_norm)
+        for prior in prior_questions:
+            prior_norm = _normalise_question(prior)
+            if not prior_norm:
+                continue
+            if candidate_norm == prior_norm:
+                return True
+            ratio = SequenceMatcher(None, candidate_norm, prior_norm).ratio()
+            if ratio >= 0.9:
+                return True
+            prior_tokens = InterviewGenerator._token_set(prior_norm)
+            if not candidate_tokens or not prior_tokens:
+                continue
+            overlap = len(candidate_tokens & prior_tokens)
+            union = len(candidate_tokens | prior_tokens)
+            if union > 0 and (overlap / union) >= 0.7:
+                return True
+        return False
+
+    @staticmethod
     def _turn_phase(session: dict[str, Any]) -> str:
-        total = _clamp_int(session.get("turn_count"), 1, 12, 3)
+        total = _clamp_int(session.get("turn_count"), 1, 100, 3)
         completed = _clamp_int(session.get("turns_completed"), 0, total, 0)
         upcoming_turn = min(total, completed + 1)
         if total <= 2:
@@ -188,6 +260,125 @@ class InterviewGenerator:
             out.append(line)
         return out
 
+    def _load_company_pack(self, session: dict[str, Any]) -> dict[str, Any] | None:
+        """Load the company pack named on the session, if any.
+
+        A missing pack falls back to the generic style (existing
+        behavior): the session simply carries no pack.
+        """
+        company = str(session.get("company") or "").strip().lower()
+        if not company or self.company_packs is None:
+            return None
+        try:
+            return self.company_packs.get_pack(company)
+        except Exception as exc:  # noqa: BLE001 - packs are optional context
+            logger.warning("Company pack load failed company=%s: %s", company, exc)
+            return None
+
+    def _suggest_star_stories(self, session: dict[str, Any]) -> list[dict[str, Any]]:
+        """Top-3 STAR stories for behavioral sessions.
+
+        Retrieval is Jaccard-over-tokens today; embeddings will
+        replace it when the RAG vector store lands.
+        """
+        if not InterviewGenerator._is_behavioral_session(session):
+            return []
+        if self.star_store is None:
+            return []
+        user_id = str(session.get("user_id") or "").strip()
+        if not user_id:
+            return []
+        query = " ".join(
+            [
+                str(session.get("target_role") or ""),
+                " ".join(session.get("focus_areas") or []),
+                "behavioral interview",
+            ]
+        ).strip()
+        try:
+            return self.star_store.suggest_stories(user_id, query, limit=3)
+        except Exception as exc:  # noqa: BLE001 - stories are optional context
+            logger.warning("STAR story suggestion failed: %s", exc)
+            return []
+
+    def _enrich_session_context(self, session: dict[str, Any]) -> dict[str, Any]:
+        """Attach company-pack style and STAR story context in place."""
+        if self.company_packs is not None and str(session.get("company") or "").strip():
+            pack = self._load_company_pack(session)
+            if pack:
+                session["company_pack"] = pack
+        if self.star_store is not None:
+            stories = self._suggest_star_stories(session)
+            if stories:
+                session["star_stories"] = stories
+        return session
+
+    @staticmethod
+    def _effective_interviewer_style(session: dict[str, Any]) -> str:
+        """Session style, overridden by the company pack when present."""
+        pack = session.get("company_pack")
+        if isinstance(pack, dict):
+            style_config = pack.get("style_config")
+            if isinstance(style_config, dict):
+                pack_style = str(style_config.get("interviewer_style") or "").strip().lower()
+                if pack_style in {"supportive", "challenging", "neutral"}:
+                    return pack_style
+        return InterviewGenerator._interviewer_style(session)
+
+    @staticmethod
+    def _company_pack_block(session: dict[str, Any]) -> str:
+        pack = session.get("company_pack")
+        if not isinstance(pack, dict):
+            return ""
+        style_config = pack.get("style_config")
+        if not isinstance(style_config, dict):
+            return ""
+        tendencies = style_config.get("question_tendencies")
+        tendency_line = ""
+        if isinstance(tendencies, list) and tendencies:
+            tendency_line = (
+                "- company_question_tendencies: "
+                + "; ".join(str(t) for t in tendencies[:5])
+            )
+        difficulty = str(style_config.get("difficulty_bias") or "").strip()
+        difficulty_line = (
+            f"- company_difficulty_bias: {difficulty}" if difficulty else ""
+        )
+        followup = str(style_config.get("followup_style") or "").strip()
+        followup_line = (
+            f"- company_followup_style: {followup}" if followup else ""
+        )
+        lines = [
+            f"- company: {pack.get('company')}",
+            tendency_line,
+            difficulty_line,
+            followup_line,
+        ]
+        return "\n".join(line for line in lines if line)
+
+    @staticmethod
+    def _star_story_block(session: dict[str, Any]) -> str:
+        stories = session.get("star_stories")
+        if not isinstance(stories, list) or not stories:
+            return ""
+        lines = [
+            "Optional STAR story context from the candidate's own story bank "
+            "(use to personalize follow-ups and recognize their experience; "
+            "never read these aloud as questions):"
+        ]
+        for story in stories[:3]:
+            if not isinstance(story, dict):
+                continue
+            tags = ", ".join(str(t) for t in (story.get("tags") or [])[:5])
+            tag_suffix = f" [tags: {tags}]" if tags else ""
+            lines.append(
+                f"- {str(story.get('title', ''))}{tag_suffix}: "
+                f"Situation: {str(story.get('situation', ''))[:200]} | "
+                f"Action: {str(story.get('action', ''))[:200]} | "
+                f"Result: {str(story.get('result', ''))[:200]}"
+            )
+        return "\n".join(lines)
+
     @staticmethod
     def _question_prompt(
         session: dict[str, Any],
@@ -196,9 +387,11 @@ class InterviewGenerator:
         asked = session.get("asked_questions") or []
         memory_summary = str(session.get("memory_summary", "")).strip()
         memory_block = memory_summary[:1200] if memory_summary else "(none)"
-        interviewer_style = InterviewGenerator._interviewer_style(session)
+        interviewer_style = InterviewGenerator._effective_interviewer_style(session)
         progression_phase = InterviewGenerator._turn_phase(session)
         progression_rules = InterviewGenerator._question_progression_rules(session)
+        company_pack_block = InterviewGenerator._company_pack_block(session)
+        star_story_block = InterviewGenerator._star_story_block(session)
         style_rule = (
             "Be encouraging and confidence-building while still assessing rigor."
             if interviewer_style == "supportive"
@@ -257,6 +450,8 @@ Session configuration:
 - job_description_text: {(session.get('job_description_text') or '')[:2500]}
 - resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
 - session_memory_summary: {memory_block}
+{company_pack_block}
+{star_story_block}
 
 Recent turns:
 {InterviewGenerator._format_recent_turns(turns)}
@@ -306,6 +501,8 @@ Session configuration:
 - job_description_text: {(session.get('job_description_text') or '')[:2500]}
 - resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
 - session_memory_summary: {memory_block}
+{company_pack_block}
+{star_story_block}
 
 Recent turns:
 {InterviewGenerator._format_recent_turns(turns)}
@@ -322,6 +519,7 @@ Already asked questions (do not repeat semantically):
         question: str,
         answer: str,
         turn_index: int,
+        hint_level: int = 0,
     ) -> str:
         feedback_mode = InterviewGenerator._feedback_mode(session)
         memory_summary = str(session.get("memory_summary", "")).strip()
@@ -345,6 +543,13 @@ Already asked questions (do not repeat semantically):
   - practical tradeoff discussion.
 - If the candidate provides code, reference concrete code-level strengths and fixes.
 """
+        hint_rule = ""
+        if hint_level and hint_level > 0:
+            hint_rule = (
+                f"- The candidate used a level-{hint_level} hint for this question. "
+                "Score reasoning_depth on the reasoning the candidate demonstrated "
+                "themselves; do not credit reasoning that came from the hint."
+            )
         contract = render_contract(
             schema_label="Return ONLY this JSON object",
             schema_block="""{
@@ -366,6 +571,7 @@ Already asked questions (do not repeat semantically):
                 "strengths/improvements must each have 1-4 concise bullets.",
                 "If answer is weak or vague, score low rather than guessing intent.",
                 "strengths/improvements should remain plain short strings.",
+                hint_rule,
                 "follow_up_note should read like a study guide the learner can review after the interview, not like evaluator instructions.",
                 "follow_up_note must include these markdown sections in order: `### What strong interviewers wanted to hear`, `### What to improve next`, `### Stronger sample answer`.",
                 "In `### What strong interviewers wanted to hear`, explain the missing or successful reasoning, tradeoffs, bottlenecks, edge cases, and scaling or consistency caveats when relevant.",
@@ -436,6 +642,8 @@ Candidate answer:
         asked_norm = {_normalise_question(x) for x in asked_questions}
         if q_norm in asked_norm:
             return False, "duplicate_question"
+        if InterviewGenerator._is_near_duplicate_question(q, asked_questions):
+            return False, "near_duplicate_question"
 
         return True, ""
 
@@ -471,20 +679,116 @@ Candidate answer:
         return True, ""
 
     @staticmethod
-    def _follow_up_note_has_required_sections(note: str) -> bool:
-        headings = (
-            "What strong interviewers wanted to hear",
-            "What to improve next",
-            "Stronger sample answer",
-        )
-        for heading in headings:
+    def _follow_up_note_missing_headings(note: str) -> list[str]:
+        """Required headings that the note does not contain at any level."""
+        text = str(note or "")
+        missing: list[str] = []
+        for heading in _FOLLOW_UP_NOTE_HEADINGS:
             if not re.search(
-                rf"^\s*###\s+{re.escape(heading)}\s*$",
-                note,
+                rf"^[ \t]*#{{1,6}}[ \t]+{re.escape(heading)}[ \t]*:?[ \t]*$",
+                text,
                 flags=re.IGNORECASE | re.MULTILINE,
             ):
-                return False
-        return True
+                missing.append(heading)
+        return missing
+
+    @classmethod
+    def _follow_up_note_has_required_sections(cls, note: str) -> bool:
+        return not cls._follow_up_note_missing_headings(note)
+
+    @staticmethod
+    def _normalise_follow_up_headings(note: str) -> tuple[str, bool]:
+        """Re-emit every required heading as ``###`` without touching content.
+
+        Models drift between ``##`` and ``###``; the section body is still good
+        prose, so normalising the marker is strictly better than discarding it.
+        Returns ``(note, repaired)``.
+        """
+        required = {heading.lower() for heading in _FOLLOW_UP_NOTE_HEADINGS}
+        lines = str(note or "").splitlines()
+        repaired = False
+        out: list[str] = []
+        for line in lines:
+            match = re.match(r"^[ \t]*(#{1,6})[ \t]+(.+?)[ \t]*$", line)
+            if match:
+                heading = match.group(2).strip()
+                normalised = heading.rstrip(":").strip()
+                if normalised.lower() in required:
+                    new_line = f"### {normalised}"
+                    repaired = repaired or new_line != line.strip()
+                    out.append(new_line)
+                    continue
+            out.append(line)
+        return "\n".join(out).strip(), repaired
+
+    @staticmethod
+    def _split_follow_up_note(note: str) -> tuple[str, dict[str, str]]:
+        """Split a coaching note into its preamble and its required sections."""
+        canonical = {heading.lower(): heading.lower() for heading in _FOLLOW_UP_NOTE_HEADINGS}
+        sections: dict[str, str] = {}
+        preamble: list[str] = []
+        current: str | None = None
+        for line in str(note or "").splitlines():
+            match = re.match(r"^[ \t]*(#{1,6})[ \t]+(.+?)[ \t]*$", line)
+            key = (
+                canonical.get(match.group(2).strip().rstrip(":").strip().lower())
+                if match
+                else None
+            )
+            if key:
+                current = key
+                sections.setdefault(key, "")
+                continue
+            if current is None:
+                preamble.append(line)
+            else:
+                sections[current] += ("\n" if sections[current] else "") + line
+        return "\n".join(preamble).strip(), {k: v.strip() for k, v in sections.items()}
+
+    @staticmethod
+    def _assemble_follow_up_note(preamble: str, sections: dict[str, str]) -> str:
+        blocks: list[str] = []
+        if str(preamble or "").strip():
+            blocks.append(preamble.strip())
+        for heading in _FOLLOW_UP_NOTE_HEADINGS:
+            key = heading.lower()
+            body = str(sections.get(key, "")).strip()
+            blocks.append(f"### {heading}\n{body}".strip())
+        return "\n\n".join(blocks)
+
+    def _follow_up_note_repair(
+        self,
+        note: str,
+        *,
+        session: dict[str, Any] | None,
+        strengths: list[str],
+        improvements: list[str],
+    ) -> tuple[str, bool]:
+        """Repair heading drift, then fill only the genuinely absent sections.
+
+        Returns ``(note, repaired)``; ``repaired`` is the drift signal the eval
+        harness needs to measure how often models miss the contract.
+        """
+        raw = str(note or "").strip()
+        repaired_note, repaired = self._normalise_follow_up_headings(raw)
+        if self._follow_up_note_has_required_sections(repaired_note):
+            return repaired_note, repaired
+
+        # A section is genuinely absent or empty: rebuild the note, keeping every
+        # section the model wrote and filling the rest from the default.
+        preamble, sections = self._split_follow_up_note(repaired_note)
+        default_note = self._build_default_follow_up_note(
+            session=session or {},
+            strengths=strengths,
+            improvements=improvements,
+            note_seed=raw,
+        )
+        _, default_sections = self._split_follow_up_note(default_note)
+        merged = dict(default_sections)
+        for key, body in sections.items():
+            if str(body).strip():
+                merged[key] = body
+        return self._assemble_follow_up_note(preamble, merged), True
 
     @staticmethod
     def _default_follow_up_focus_lines(session: dict[str, Any]) -> list[str]:
@@ -587,6 +891,7 @@ Candidate answer:
         payload: dict[str, Any],
         *,
         session: dict[str, Any] | None = None,
+        hint_level: int = 0,
     ) -> dict[str, Any]:
         rubric = payload.get("rubric") if isinstance(payload.get("rubric"), dict) else {}
         norm = {
@@ -597,6 +902,7 @@ Candidate answer:
             "confidence_signal": _clamp_int(rubric.get("confidence_signal"), 0, 5, 3),
             "overall": _clamp_int(rubric.get("overall"), 0, 100, 60),
         }
+        norm = apply_hint_penalty(norm, hint_level)
 
         strengths_raw = payload.get("strengths") if isinstance(payload.get("strengths"), list) else []
         improvements_raw = (
@@ -611,19 +917,20 @@ Candidate answer:
         ]
 
         note = str(payload.get("follow_up_note", "")).strip()
-        if not self._follow_up_note_has_required_sections(note):
-            note = self._build_default_follow_up_note(
-                session=session or {},
-                strengths=strengths,
-                improvements=improvements,
-                note_seed=note,
-            )
+        note, note_repaired = self._follow_up_note_repair(
+            note,
+            session=session,
+            strengths=strengths,
+            improvements=improvements,
+        )
 
         return {
             "rubric": norm,
             "strengths": strengths,
             "improvements": improvements,
             "follow_up_note": note,
+            "follow_up_note_repaired": bool(note_repaired),
+            "degraded": False,
         }
 
     async def generate_question(
@@ -634,6 +941,7 @@ Candidate answer:
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
     ) -> dict[str, Any]:
+        self._enrich_session_context(session)
         base_prompt = self._question_prompt(session, turns)
         if self.mcp is not None:
             mcp_context = await self.mcp.gather_context(
@@ -648,6 +956,8 @@ Candidate answer:
                     f"{mcp_context[:2200]}"
                 )
         asked = list(session.get("asked_questions") or [])
+        recent_turn_questions = [str(t.get("question", "")).strip() for t in turns if str(t.get("question", "")).strip()]
+        question_history = [*asked, *recent_turn_questions]
         prompt = base_prompt
         if self._is_coding_session(session):
             max_words = 65
@@ -656,17 +966,30 @@ Candidate answer:
         else:
             max_words = 45
 
-        for _ in range(_MAX_ATTEMPTS):
+        attempts = 0
+        start = time.monotonic()
+        while attempts < _MAX_ATTEMPTS and (time.monotonic() - start) < _QUESTION_RETRY_TIMEOUT_SECONDS:
+            attempts += 1
             result = await self.llm.completion(
                 prompt,
                 llm_config,
                 user_identity=user_identity,
             )
             raise_if_policy_blocked_result(result)
+            if _is_non_retryable_result(result):
+                logger.error(
+                    "Interview question generation aborted on terminal LLM outcome session=%s error_code=%s",
+                    session.get("session_id"),
+                    result.get("error_code"),
+                )
+                raise RuntimeError(
+                    "Interview question generation failed: "
+                    f"{result.get('error_code') or 'llm_call_failed'}."
+                )
             payload = _extract_json(result.get("analysis", "")) if result.get("success") else {}
             ok, issue = self._validate_question_payload(
                 payload,
-                asked,
+                question_history,
                 max_words=max_words,
             )
             if ok:
@@ -681,117 +1004,16 @@ Candidate answer:
                 f"{base_prompt}"
             )
 
-        logger.warning("Falling back to deterministic question for session=%s", session.get("session_id"))
-        track = session.get("track", "technical")
-        level = session.get("level", "mid")
-        phase = self._turn_phase(session)
-        if self._is_coding_session(session):
-            if phase == "opening":
-                question = (
-                    f"For a {level} coding round, implement an LRU cache with get/put operations in O(1), "
-                    "then explain edge cases and complexity tradeoffs."
-                )
-                focus = "coding correctness, invariants, and complexity analysis"
-                signals = [
-                    "Correct data-structure choice",
-                    "Edge-case handling",
-                    "Clear time/space complexity explanation",
-                ]
-            elif phase == "middle":
-                question = (
-                    f"For a {level} coding round, design and implement a token-bucket rate limiter, "
-                    "then explain concurrency and refill tradeoffs."
-                )
-                focus = "state management, complexity, and concurrency reasoning"
-                signals = [
-                    "Clear invariant for token updates",
-                    "Concurrency or synchronization awareness",
-                    "Tradeoff explanation",
-                ]
-            else:
-                question = (
-                    f"For a {level} coding round, extend an LRU cache to support TTL expiration and explain "
-                    "what gets harder under concurrency or high load."
-                )
-                focus = "advanced implementation tradeoffs and system-aware reasoning"
-                signals = [
-                    "Handling of expiration semantics",
-                    "Concurrency or performance caveats",
-                    "Maintainability and complexity awareness",
-                ]
-            return {
-                "question": question,
-                "competency_focus": focus,
-                "expected_signals": signals,
-            }
-        if self._is_behavioral_session(session):
-            if phase == "opening":
-                return {
-                    "question": f"For a {level} behavioral round, tell me about a time you had to make a tradeoff under deadline pressure.",
-                    "competency_focus": "ownership, prioritization, and communication clarity",
-                    "expected_signals": [
-                        "Clear situation and stakes",
-                        "Specific actions",
-                        "Measured result or lesson",
-                    ],
-                }
-            if phase == "middle":
-                return {
-                    "question": f"For a {level} behavioral round, describe a disagreement with a stakeholder and how you resolved it.",
-                    "competency_focus": "conflict resolution and decision quality",
-                    "expected_signals": [
-                        "Concrete conflict details",
-                        "Tradeoff or constraint reasoning",
-                        "Outcome and reflection",
-                    ],
-                }
-            return {
-                "question": f"For a {level} behavioral round, tell me about a decision you would handle differently now and why.",
-                "competency_focus": "reflection, judgment, and growth",
-                "expected_signals": [
-                    "Honest reflection",
-                    "Specific learning",
-                    "Concrete improvement path",
-                ],
-            }
-        if phase == "opening":
-            question = (
-                f"For a {level} {track} interview, how would you design API pagination for stable ordering, "
-                "and what tradeoff would you accept?"
-            )
-            focus = "structured reasoning and common tradeoff analysis"
-            signals = [
-                "Clear problem framing",
-                "Explicit constraints",
-                "Concrete tradeoff justification",
-            ]
-        elif phase == "middle":
-            question = (
-                f"For a {level} {track} interview, how would you make a write API safely retryable, "
-                "and what bottleneck or failure mode would you watch first?"
-            )
-            focus = "implementation tradeoffs and reliability reasoning"
-            signals = [
-                "Idempotency or deduplication reasoning",
-                "Failure-mode awareness",
-                "Operational tradeoff explanation",
-            ]
-        else:
-            question = (
-                f"For a {level} {track} interview, how would you design a multi-region rate limiter, "
-                "and which consistency tradeoff would you accept under partial failure?"
-            )
-            focus = "scale, consistency, and operational risk reasoning"
-            signals = [
-                "Consistency tradeoff awareness",
-                "Failure-path reasoning",
-                "Concrete mitigation discussion",
-            ]
-        return {
-            "question": question,
-            "competency_focus": focus,
-            "expected_signals": signals,
-        }
+        elapsed = round(time.monotonic() - start, 2)
+        logger.warning(
+            "Interview question generation exhausted retries session=%s attempts=%s elapsed_s=%s",
+            session.get("session_id"),
+            attempts,
+            elapsed,
+        )
+        raise RuntimeError(
+            "Unable to generate a fresh interview question that meets quality constraints before timeout."
+        )
 
     async def evaluate_answer(
         self,
@@ -802,8 +1024,11 @@ Candidate answer:
         turn_index: int,
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
+        hint_level: int = 0,
     ) -> dict[str, Any]:
-        base_prompt = self._evaluate_prompt(session, question, user_answer, turn_index)
+        base_prompt = self._evaluate_prompt(
+            session, question, user_answer, turn_index, hint_level=hint_level
+        )
         if self.mcp is not None:
             mcp_context = await self.mcp.gather_context(
                 flow="interview",
@@ -818,17 +1043,28 @@ Candidate answer:
                 )
         prompt = base_prompt
 
-        for _ in range(_MAX_ATTEMPTS):
+        attempts = 0
+        start = time.monotonic()
+        terminal_reason = "retries_exhausted"
+        while attempts < _MAX_ATTEMPTS and (time.monotonic() - start) < _EVAL_RETRY_TIMEOUT_SECONDS:
+            attempts += 1
             result = await self.llm.completion(
                 prompt,
                 llm_config,
                 user_identity=user_identity,
             )
             raise_if_policy_blocked_result(result)
+            if _is_non_retryable_result(result):
+                # Re-sending the identical prompt cannot fix a provider outage,
+                # an exhausted budget, or a truncated response.
+                terminal_reason = str(result.get("error_code") or "").strip() or "llm_call_failed"
+                break
             payload = _extract_json(result.get("analysis", "")) if result.get("success") else {}
             ok, issue = self._validate_eval_payload(payload)
             if ok:
-                normalized = self._normalise_eval_payload(payload, session=session)
+                normalized = self._normalise_eval_payload(
+                    payload, session=session, hint_level=hint_level
+                )
                 normalized["follow_up_note"] = format_markdown_readable(
                     normalized.get("follow_up_note", "")
                 )
@@ -838,22 +1074,22 @@ Candidate answer:
                 f"{base_prompt}"
             )
 
+        elapsed = round(time.monotonic() - start, 2)
         logger.warning(
-            "Falling back to deterministic rubric evaluation for session=%s turn=%s",
+            "Interview evaluation unavailable, returning degraded result session=%s turn=%s "
+            "attempts=%s elapsed_s=%s reason=%s",
             session.get("session_id"),
             turn_index,
+            attempts,
+            elapsed,
+            terminal_reason,
         )
         strengths = ["You attempted the question and provided a directionally relevant response."]
         improvements = ["Add clearer structure and include one concrete example, tradeoff, or metric."]
+        # No invented numbers: a degraded turn carries no rubric so it cannot be
+        # averaged into the report or written to the spaced-repetition store.
         return {
-            "rubric": {
-                "technical_accuracy": 3,
-                "reasoning_depth": 3,
-                "communication_clarity": 3,
-                "completeness": 3,
-                "confidence_signal": 3,
-                "overall": 60,
-            },
+            "rubric": dict(_DEGRADED_RUBRIC),
             "strengths": strengths,
             "improvements": improvements,
             "follow_up_note": self._build_default_follow_up_note(
@@ -862,6 +1098,7 @@ Candidate answer:
                 improvements=improvements,
                 note_seed="Use a tighter answer structure so the interviewer can hear the constraint, the tradeoff, and the concrete outcome.",
             ),
+            "degraded": True,
         }
 
     def build_report(
@@ -870,30 +1107,12 @@ Candidate answer:
         session: dict[str, Any],
         turns: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        if not turns:
-            return {
-                "overall_score": 0.0,
-                "readiness_label": "Not Started",
-                "completed_turns": 0,
-                "rubric_averages": {
-                    "technical_accuracy": 0.0,
-                    "reasoning_depth": 0.0,
-                    "communication_clarity": 0.0,
-                    "completeness": 0.0,
-                    "confidence_signal": 0.0,
-                    "overall": 0.0,
-                },
-                "weak_competencies": ["No answers submitted yet"],
-                "strengths": [],
-                "recommended_topic_ids": [],
-                "next_steps": ["Complete at least one interview turn to unlock a personalized report."],
-                "summary": (
-                    "### Interview Summary\n"
-                    "No interview data is available yet.\n\n"
-                    "- Complete at least one turn to generate a personalized readiness summary."
-                ),
-                "created_at": "",
-            }
+        scored_turns = [turn for turn in turns if not _is_degraded_turn(turn)]
+        if not scored_turns:
+            return self._empty_report(
+                completed_turns=len(turns),
+                created_at=str(turns[-1].get("created_at", "")) if turns else "",
+            )
 
         dims = [
             "technical_accuracy",
@@ -907,7 +1126,7 @@ Candidate answer:
         strengths: list[str] = []
         improvements: list[str] = []
 
-        for turn in turns:
+        for turn in scored_turns:
             rubric = turn.get("rubric", {}) or {}
             for key in dims:
                 value = rubric.get(key)
@@ -916,7 +1135,7 @@ Candidate answer:
             strengths.extend([str(s).strip() for s in turn.get("strengths", []) if str(s).strip()])
             improvements.extend([str(i).strip() for i in turn.get("improvements", []) if str(i).strip()])
 
-        count = max(1, len(turns))
+        count = max(1, len(scored_turns))
         avgs = {k: round(sums[k] / count, 2) for k in dims}
         overall = avgs["overall"]
 
@@ -959,15 +1178,24 @@ Candidate answer:
                 break
 
         weak_labels = [w.replace("_", " ") for w in weak_dims] or ["No major weak competency detected"]
+        degraded_count = len(turns) - len(scored_turns)
         summary_lines = [
             "### Interview Summary",
             (
-                f"You completed **{len(turns)}** turns with an overall readiness score of "
+                f"You completed **{len(scored_turns)}** scored turns with an overall readiness score of "
                 f"**{overall}** ({readiness})."
             ),
-            "",
-            "#### Focus Areas",
         ]
+        if degraded_count:
+            summary_lines.append(
+                f"- {degraded_count} turn(s) could not be evaluated and are excluded from this score."
+            )
+        summary_lines.extend(
+            [
+                "",
+                "#### Focus Areas",
+            ]
+        )
         for label in weak_labels[:3]:
             summary_lines.append(f"- {label}")
         summary_lines.extend(
@@ -997,4 +1225,30 @@ Candidate answer:
             "next_steps": next_steps,
             "summary": summary,
             "created_at": turns[-1].get("created_at", ""),
+        }
+
+    @staticmethod
+    def _empty_report(*, completed_turns: int = 0, created_at: str = "") -> dict[str, Any]:
+        return {
+            "overall_score": 0.0,
+            "readiness_label": "Not Started",
+            "completed_turns": completed_turns,
+            "rubric_averages": {
+                "technical_accuracy": 0.0,
+                "reasoning_depth": 0.0,
+                "communication_clarity": 0.0,
+                "completeness": 0.0,
+                "confidence_signal": 0.0,
+                "overall": 0.0,
+            },
+            "weak_competencies": ["No answers submitted yet"],
+            "strengths": [],
+            "recommended_topic_ids": [],
+            "next_steps": ["Complete at least one interview turn to unlock a personalized report."],
+            "summary": (
+                "### Interview Summary\n"
+                "No interview data is available yet.\n\n"
+                "- Complete at least one turn to generate a personalized readiness summary."
+            ),
+            "created_at": created_at,
         }

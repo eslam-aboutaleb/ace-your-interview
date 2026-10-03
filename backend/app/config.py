@@ -3,6 +3,7 @@
 from functools import lru_cache
 from typing import Any
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -29,7 +30,15 @@ class Settings(BaseSettings):
     learning_db_path: str = "/tmp/study_hub_learning.db"
     enable_v2_generation: bool = True
     enable_adaptive_learning: bool = True
+    enable_fsrs_v1: bool = True
+    enable_flashcards_v1: bool = True
     enable_mock_interview_v1: bool = True
+    # Interview personalization: resume/JD parsing, hints, STAR bank,
+    # company packs (rollout flag, default on).
+    enable_interview_plus_v1: bool = True
+    # Voice-to-voice mock interviews (rollout flag, default off until the
+    # null-provider E2E passes).
+    enable_voice_interview_v1: bool = False
     enable_topic_videos: bool = False
     youtube_api_key: str = ""
     topic_videos_default_limit: int = 3
@@ -56,6 +65,7 @@ class Settings(BaseSettings):
     user_settings_file: str = "user_llm_settings.json"
     llm_service_users_file: str = "llm_service_users.json"
     llm_assignments_file: str = "llm_assignments.json"
+    allowed_users_file: str = "allowed_users.json"
     enable_rate_limiting: bool = True
     oauth_rate_limit_requests: int = 20
     oauth_rate_limit_window_seconds: int = 300
@@ -63,6 +73,29 @@ class Settings(BaseSettings):
     session_rate_limit_window_seconds: int = 60
     llm_rate_limit_requests: int = 30
     llm_rate_limit_window_seconds: int = 60
+    # Per-LLM-call budget: bounds provider calls per user identity, so one
+    # permitted HTTP request cannot fan out unbounded (0 disables the limit).
+    llm_user_call_budget: int = 120
+    llm_user_call_budget_window_seconds: int = 60
+    llm_user_max_concurrency: int = 4
+    # Trust X-Forwarded-For only when running behind a known proxy.
+    trusted_proxy_enabled: bool = False
+
+    # Pluggable rate limiter backend: "memory" (default, per-replica
+    # state) or "redis" (shared sliding-window state across replicas,
+    # via REDIS_URL). Strict mode fails startup when Redis is
+    # unreachable instead of silently degrading to in-memory state.
+    rate_limit_backend: str = "memory"
+    rate_limit_strict: bool = False
+    redis_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("STUDY_REDIS_URL", "REDIS_URL"),
+    )
+
+    # Interview memory (Stage 3.2)
+    memory_summary_max_chars: int = 3000
+    memory_verbatim_turns: int = 4
+    memory_answer_excerpt_chars: int = 320
 
     # MCP gateway
     enable_mcp_gateway: bool = False
@@ -92,15 +125,34 @@ class Settings(BaseSettings):
 
     # Voice agent
     enable_voice_agent: bool = False
-    voice_tiers_enabled: str = "browser"  # comma-separated: browser,cloud,realtime
+    voice_tiers_enabled: str = "browser"  # comma-separated: browser,cloud
     voice_default_tier: str = "browser"
     voice_stt_provider: str = "groq"       # groq or openai
     voice_stt_model: str = "whisper-large-v3"
     voice_tts_provider: str = "edge"       # edge (free) or openai
     voice_tts_voice: str = "en-US-AriaNeural"
-    voice_openai_realtime_model: str = "gpt-4o-realtime-preview"
+    # Per-connection LLM turn budget for the voice WebSocket.
+    voice_max_turns_per_connection: int = 40
 
-    model_config = {"env_prefix": "STUDY_", "env_file": ".env", "extra": "ignore"}
+    # Document ingestion + citation-grounded RAG (rollout flag, default off
+    # until sqlite-vec is verified in the Docker image)
+    enable_rag_v1: bool = False
+    documents_daily_cap: int = 20          # per-user daily upload cap (embedding cost)
+    embedding_provider: str = "openai"     # openai (text-embedding-3-small) or google (gemini-embedding)
+    embedding_model: str = ""              # empty → provider default
+
+    # gRPC analysis backends (llm-chain / cli-agent services)
+    grpc_llm_chain_host: str = "localhost"
+    grpc_llm_chain_port: int = 50051
+    grpc_cli_agent_host: str = "localhost"
+    grpc_cli_agent_port: int = 50052
+
+    model_config = {
+        "env_prefix": "STUDY_",
+        "env_file": ".env",
+        "extra": "ignore",
+        "populate_by_name": True,
+    }
 
 
 @lru_cache()

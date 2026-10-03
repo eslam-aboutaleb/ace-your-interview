@@ -10,6 +10,8 @@ import TopicStudy from "@/pages/TopicStudy";
 import QuizMode from "@/pages/QuizMode";
 import ReviewQueue from "@/pages/ReviewQueue";
 import StudyPlan from "@/pages/StudyPlan";
+import DocumentsPage from "@/pages/DocumentsPage";
+import DecksPage from "@/pages/DecksPage";
 import Settings from "@/pages/Settings";
 import UserSettings from "@/pages/UserSettings";
 import LoginPage from "@/pages/LoginPage";
@@ -17,6 +19,7 @@ import InterviewSetup from "@/pages/InterviewSetup";
 import InterviewSessionPage from "@/pages/InterviewSessionPage";
 import InterviewReportPage from "@/pages/InterviewReportPage";
 import InterviewTrendsPage from "@/pages/InterviewTrends";
+import StarStoriesPage from "@/pages/StarStoriesPage";
 import { fetchUserSettings, updateUserPreferences } from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -40,7 +43,7 @@ function PublicRoute() {
   return <Outlet />;
 }
 
-function ProtectedRoute() {
+export function ProtectedRoute() {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const hydratedRef = useRef(false);
   const hydrateFromServer = useSettingsStore((s) => s.hydrateFromServer);
@@ -167,6 +170,8 @@ export default function App() {
             <Route path="quiz/:topicId" element={<QuizMode />} />
             <Route path="review" element={<ReviewQueue />} />
             <Route path="study-plan" element={<StudyPlan />} />
+            <Route path="documents" element={<DocumentsPage />} />
+            <Route path="decks" element={<DecksPage />} />
             <Route path="interview" element={<InterviewSetup />} />
             <Route path="interview/trends" element={<InterviewTrendsPage />} />
             <Route
@@ -177,6 +182,7 @@ export default function App() {
               path="interview/:sessionId/report"
               element={<InterviewReportPage />}
             />
+            <Route path="star-stories" element={<StarStoriesPage />} />
             <Route path="user-settings" element={<UserSettings />} />
             <Route
               path="settings"

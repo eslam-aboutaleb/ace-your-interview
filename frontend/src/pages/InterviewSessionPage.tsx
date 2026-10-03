@@ -3,16 +3,19 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
+  Lightbulb,
   Loader2,
+  Mic,
+  MicOff,
+  Radio,
   Send,
   SkipForward,
   FileText,
-  Mic,
-  MicOff,
   Volume2,
 } from "lucide-react";
 import { pageVariants, pageTransition } from "@/utils/animations";
 import {
+  fetchHint,
   fetchInterviewSession,
   generateNextInterviewQuestion,
   generateNextInterviewQuestionStream,
@@ -24,7 +27,19 @@ import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
 import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
 import { useVoice } from "@/hooks/useVoice";
-import type { InterviewSessionResponse, InterviewTurnResponse } from "@/types";
+import type {
+  HintResponse,
+  InterviewSessionResponse,
+  InterviewTurnResponse,
+} from "@/types";
+
+function questionIdFor(question: string): string {
+  let hash = 0;
+  for (let i = 0; i < question.length; i += 1) {
+    hash = (hash * 31 + question.charCodeAt(i)) | 0;
+  }
+  return `iq-${Math.abs(hash).toString(36)}`;
+}
 
 export default function InterviewSessionPage() {
   const { sessionId = "" } = useParams();
@@ -41,8 +56,23 @@ export default function InterviewSessionPage() {
   const [startedAt, setStartedAt] = useState<number>(Date.now());
   const [lastTurn, setLastTurn] = useState<InterviewTurnResponse | null>(null);
 
+  // Hint state
+  const [hintLevel, setHintLevel] = useState(1);
+  const [hintResult, setHintResult] = useState<HintResponse | null>(null);
+  const [hintLoading, setHintLoading] = useState(false);
+  const [hintError, setHintError] = useState("");
+  const [hintLevelUsed, setHintLevelUsed] = useState(0);
+
   // Voice integration
   const voice = useVoice();
+
+  // Reset hint state when the current question changes
+  useEffect(() => {
+    setHintResult(null);
+    setHintError("");
+    setHintLevelUsed(0);
+    setHintLevel(1);
+  }, [data?.session.current_question]);
 
   // Auto-fill answer draft from voice transcript
   useEffect(() => {
@@ -78,6 +108,36 @@ export default function InterviewSessionPage() {
   useEffect(() => {
     loadSession();
   }, [loadSession]);
+
+  const handleLoadHint = async () => {
+    const question = data?.session.current_question;
+    if (!sessionId || !question) return;
+    setHintLoading(true);
+    setHintError("");
+    try {
+      const res = await fetchHint(
+        questionIdFor(question),
+        hintLevel,
+        { question_text: question },
+      );
+      setHintResult(res);
+      setHintLevelUsed((prev) => Math.max(prev, res.level));
+    } catch (err) {
+      const detail = (
+        err as {
+          response?: { data?: { detail?: unknown } };
+          message?: string;
+        }
+      )?.response?.data?.detail;
+      setHintError(
+        typeof detail === "string"
+          ? detail
+          : "Could not load a hint for this question.",
+      );
+    } finally {
+      setHintLoading(false);
+    }
+  };
 
   const ensureNextQuestion = useCallback(async () => {
     if (!sessionId || !data || data.session.status !== "active") return;
@@ -160,6 +220,10 @@ export default function InterviewSessionPage() {
     const payload = {
       user_answer: answerDraft.trim(),
       response_time_ms: Math.max(0, Date.now() - startedAt),
+      question_id: data.session.current_question
+        ? questionIdFor(data.session.current_question)
+        : undefined,
+      hint_level: hintLevelUsed > 0 ? hintLevelUsed : undefined,
       llm_config: {
         provider: settings.provider,
         model: settings.model,
@@ -398,6 +462,64 @@ export default function InterviewSessionPage() {
               {voice.isSpeaking ? "Speaking..." : "Read aloud"}
             </button>
           )}
+
+          <div className="mt-4 pt-4 border-t border-udemy-border">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5 text-sm font-medium">
+                <Lightbulb className="w-4 h-4 text-udemy-purple" />
+                Hints
+              </div>
+              <select
+                value={hintLevel}
+                onChange={(e) => setHintLevel(Number(e.target.value))}
+                disabled={hintLoading}
+                className="border border-udemy-border rounded px-2 py-1.5 text-sm"
+              >
+                <option value={1}>Level 1 — gentle nudge</option>
+                <option value={2}>Level 2 — approach</option>
+                <option value={3}>Level 3 — partial solution</option>
+                <option value={4}>Level 4 — full solution</option>
+              </select>
+              <button
+                onClick={handleLoadHint}
+                disabled={hintLoading || !data.session.current_question}
+                className="btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
+              >
+                {hintLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Lightbulb className="w-3.5 h-3.5" />
+                )}
+                Get hint
+              </button>
+              {hintResult && (
+                <span className="text-xs text-udemy-text-muted">
+                  {hintResult.hints_used} hint
+                  {hintResult.hints_used === 1 ? "" : "s"} used ·{" "}
+                  {hintResult.hints_remaining} remaining
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-udemy-text-muted mt-1.5">
+              Using hints lowers the reasoning-depth score for this answer.
+            </p>
+            {hintError && (
+              <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                {hintError}
+              </p>
+            )}
+            {hintResult && (
+              <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                <p className="text-xs font-medium text-amber-700 mb-1">
+                  Hint — level {hintResult.level}
+                </p>
+                <p className="text-sm whitespace-pre-line">
+                  {hintResult.hint}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="udemy-card p-6">
@@ -428,11 +550,8 @@ export default function InterviewSessionPage() {
                   } else {
                     // Start a voice session for interview if not already active
                     if (!voice.sessionActive) {
-                      await voice.startSession("interview", {
-                        sessionId,
-                        systemPrompt:
-                          "Transcribe the user's spoken interview answer. Return only the transcription.",
-                      });
+                      // No system prompt: the server owns the interview-coach persona.
+                      await voice.startSession("interview", { sessionId });
                     }
                     voice.startRecording();
                   }
@@ -511,43 +630,57 @@ export default function InterviewSessionPage() {
             <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-3">
               Rubric Feedback
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-              {Object.entries(lastTurn.turn.rubric).map(([k, v]) => (
-                <div key={k} className="bg-udemy-bg rounded px-3 py-2">
-                  <p className="text-[11px] text-udemy-text-muted uppercase">
-                    {k.replace(/_/g, " ")}
-                  </p>
-                  <p className="font-bold">{v}</p>
+            {lastTurn.turn.degraded ? (
+              <div className="flex items-start gap-2 text-sm text-udemy-text-muted">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <p>
+                  Evaluation unavailable — your answer was saved. Submit the next
+                  question or repeat this turn to get scored feedback.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                  {Object.entries(lastTurn.turn.rubric)
+                    .filter(([k]) => k !== "degraded")
+                    .map(([k, v]) => (
+                      <div key={k} className="bg-udemy-bg rounded px-3 py-2">
+                        <p className="text-[11px] text-udemy-text-muted uppercase">
+                          {k.replace(/_/g, " ")}
+                        </p>
+                        <p className="font-bold">{v}</p>
+                      </div>
+                    ))}
                 </div>
-              ))}
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Strengths</h3>
-                <ul className="text-sm text-udemy-text-muted list-disc pl-5 space-y-1">
-                  {lastTurn.turn.strengths.map((s, i) => (
-                    <li key={`${s}-${i}`}>{s}</li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Improvements</h3>
-                <ul className="text-sm text-udemy-text-muted list-disc pl-5 space-y-1">
-                  {lastTurn.turn.improvements.map((s, i) => (
-                    <li key={`${s}-${i}`}>{s}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">Strengths</h3>
+                    <ul className="text-sm text-udemy-text-muted list-disc pl-5 space-y-1">
+                      {lastTurn.turn.strengths.map((s, i) => (
+                        <li key={`${s}-${i}`}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">Improvements</h3>
+                    <ul className="text-sm text-udemy-text-muted list-disc pl-5 space-y-1">
+                      {lastTurn.turn.improvements.map((s, i) => (
+                        <li key={`${s}-${i}`}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
 
-            <div className="mt-4">
-              <MarkdownRenderer
-                content={lastTurn.turn.follow_up_note}
-                className="text-sm"
-                compact
-              />
-            </div>
+                <div className="mt-4">
+                  <MarkdownRenderer
+                    content={lastTurn.turn.follow_up_note}
+                    className="text-sm"
+                    compact
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
