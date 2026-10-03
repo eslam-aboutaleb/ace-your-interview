@@ -127,6 +127,13 @@ class Settings(BaseSettings):
     # Per-connection LLM turn budget for the voice WebSocket.
     voice_max_turns_per_connection: int = 40
 
+    # Document ingestion + citation-grounded RAG (rollout flag, default off
+    # until sqlite-vec is verified in the Docker image)
+    enable_rag_v1: bool = False
+    documents_daily_cap: int = 20          # per-user daily upload cap (embedding cost)
+    embedding_provider: str = "openai"     # openai (text-embedding-3-small) or google (gemini-embedding)
+    embedding_model: str = ""              # empty → provider default
+
     model_config = {
         "env_prefix": "STUDY_",
         "env_file": ".env",

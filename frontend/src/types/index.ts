@@ -1105,6 +1105,23 @@ export interface FSRSCardResponse {
   scheduled_days: number;
   elapsed_days: number;
   suspended: number;
+/* ── Documents + RAG Chat Types ────────────────────── */
+
+export type DocumentStatus = "uploaded" | "processing" | "ready" | "failed";
+
+export interface DocumentUploadResponse {
+  document_id: string;
+  status: string;
+}
+
+export interface DocumentDetail {
+  document_id: string;
+  filename: string;
+  mime_type: string;
+  title: string;
+  status: DocumentStatus;
+  error: string;
+  chunk_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -1145,4 +1162,26 @@ export interface CalibrationResponse {
   within_band: boolean;
   good_rating_pct: number;
   low_signal: boolean;
+export interface DocumentListResponse {
+  documents: DocumentDetail[];
+}
+
+export interface Citation {
+  document_id: string;
+  chunk_index: number;
+  quote: string;
+}
+
+export interface ChatAskRequest {
+  message: string;
+  document_ids?: string[];
+  topic_id?: string;
+  conversation_id?: string;
+  llm_config?: LLMConfig;
+}
+
+export interface ChatAskResponse {
+  answer: string;
+  citations: Citation[];
+  conversation_id: string;
 }

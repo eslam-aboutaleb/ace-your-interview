@@ -16,6 +16,7 @@ from app.dependencies import require_auth
 from app.routers import (
     auth,
     chat,
+    documents,
     interview_sessions,
     learning,
     llm_settings,
@@ -26,6 +27,9 @@ from app.routers import (
     voice,
 )
 from app.services.doc_parser import DocParser
+from app.services.document_pipeline import DocumentPipeline
+from app.services.document_store import DocumentStore
+from app.services.embedding_client import EmbeddingClient
 from app.services.llm_assignments_store import LLMAssignmentsStore
 from app.services.http_clients import close_http_clients
 from app.services.llm_policy import (
@@ -41,6 +45,7 @@ from app.services.llm_client import LLMClient
 from app.services.mcp_gateway import MCPGateway
 from app.services.progress_summarizer import ProgressSummarizer
 from app.services.progress_store import ProgressStore
+from app.services.rag_service import RagService
 from app.services.rate_limit import (
     InMemoryRateLimiter,
     RateLimiterBackend,
@@ -174,6 +179,17 @@ async def lifespan(application: FastAPI):
     _progress_store = ProgressStore(settings.learning_db_path)
     _progress_summarizer = ProgressSummarizer(_llm_client)
     parser = DocParser(curriculum_path=settings.curriculum_path)
+    document_store = DocumentStore(settings.learning_db_path)
+    embedding_client = EmbeddingClient(user_settings_store=_user_settings_store)
+    document_pipeline = DocumentPipeline(
+        document_store=document_store,
+        embedding_client=embedding_client,
+    )
+    rag_service = RagService(
+        document_store=document_store,
+        llm_client=_llm_client,
+        embedding_client=embedding_client,
+    )
 
     # Wire routers to shared instances
     questions.init(_llm_client, parser, _learning_store, _mcp_gateway, _progress_store)
@@ -184,6 +200,12 @@ async def lifespan(application: FastAPI):
     auth.init_llm_service_access(_llm_service_access)
     auth.init_llm_assignments_store(_llm_assignments_store)
     chat.init(_llm_client, parser, _learning_store, _mcp_gateway)
+    chat.init_rag_service(rag_service)
+    documents.init(
+        document_store=document_store,
+        pipeline=document_pipeline,
+        learning_store=_learning_store,
+    )
     learning.init(_learning_store, _learning_planner)
     interview_sessions.init(
         _llm_client,
@@ -282,6 +304,7 @@ def create_app() -> FastAPI:
     application.include_router(llm_settings.router, dependencies=auth_dep)
     application.include_router(user_settings.router, dependencies=auth_dep)
     application.include_router(chat.router, dependencies=auth_dep)
+    application.include_router(documents.router, dependencies=auth_dep)
     application.include_router(learning.router)
     application.include_router(progress.router, dependencies=auth_dep)
     application.include_router(interview_sessions.router, dependencies=auth_dep)

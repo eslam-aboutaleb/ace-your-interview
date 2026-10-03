@@ -20,6 +20,10 @@ dependencies = [
     "edge-tts>=6.1.0",
     "websockets>=12.0",
     "fsrs>=4.1,<4.2",
+    "pypdf",
+    "mammoth",
+    "sqlite-vec>=0.1.9",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]

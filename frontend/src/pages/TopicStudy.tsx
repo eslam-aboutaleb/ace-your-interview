@@ -44,6 +44,7 @@ import DifficultyBadge from "@/components/common/DifficultyBadge";
 import ProgressBar from "@/components/common/ProgressBar";
 import WordHighlightChat from "@/components/common/WordHighlightChat";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
+import ChatAskPanel from "@/components/ChatAskPanel";
 import {
   normalizeEscapedMultilineText,
   normalizeEscapedSingleLineText,
@@ -1912,6 +1913,8 @@ export default function TopicStudy() {
                 </AnimatePresence>
               </motion.div>
             )}
+
+            <ChatAskPanel topicId={topicId} className="mt-6" />
           </div>
         </div>
       </div>
