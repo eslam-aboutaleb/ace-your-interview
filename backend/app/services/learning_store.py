@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable, TypeVar
 
+from app.services import fsrs_scheduler
 from app.services.topic_catalog import (
     PROBLEM_SOLVING_DEFAULT_LANGUAGE,
     PROBLEM_SOLVING_LANGUAGE_OPTIONS,
@@ -257,6 +258,52 @@ class LearningStore:
                 ON feature_events(feature_key, event_name, created_at DESC)
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fsrs_cards (
+                    user_id TEXT NOT NULL,
+                    card_id TEXT NOT NULL,
+                    topic_id TEXT NOT NULL,
+                    source_type TEXT NOT NULL CHECK(source_type IN ('question','flashcard','interview','exam')),
+                    state TEXT NOT NULL DEFAULT 'new' CHECK(state IN ('new','learning','review','relearning')),
+                    stability REAL, difficulty REAL,
+                    due_at TEXT NOT NULL,
+                    last_review_at TEXT,
+                    reps INTEGER NOT NULL DEFAULT 0,
+                    lapses INTEGER NOT NULL DEFAULT 0,
+                    scheduled_days INTEGER NOT NULL DEFAULT 0,
+                    elapsed_days INTEGER NOT NULL DEFAULT 0,
+                    suspended INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, card_id)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_fsrs_due
+                ON fsrs_cards(user_id, due_at) WHERE suspended = 0
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fsrs_review_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL, card_id TEXT NOT NULL,
+                    rating TEXT NOT NULL CHECK(rating IN ('again','hard','good','easy')),
+                    state TEXT NOT NULL, review_duration_ms INTEGER NOT NULL,
+                    scheduled_days INTEGER, elapsed_days INTEGER,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_fsrs_review_log_user_time
+                ON fsrs_review_log(user_id, created_at DESC)
+                """
+            )
 
     @staticmethod
     def _event_score(is_correct: bool, confidence: int) -> float:
@@ -419,6 +466,419 @@ class LearningStore:
             for row in rows
         ]
         return {"items": items, "total_due": len(items)}
+
+    # ── FSRS spaced repetition (STUDY_ENABLE_FSRS_V1) ────────────
+
+    _FSRS_CARD_COLUMNS = (
+        "user_id, card_id, topic_id, source_type, state, stability, "
+        "difficulty, due_at, last_review_at, reps, lapses, "
+        "scheduled_days, elapsed_days, suspended, created_at, updated_at"
+    )
+
+    @staticmethod
+    def _fsrs_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "card_id": str(row["card_id"]),
+            "topic_id": str(row["topic_id"]),
+            "source_type": str(row["source_type"]),
+            "state": str(row["state"]),
+            "stability": (
+                float(row["stability"])
+                if row["stability"] is not None
+                else None
+            ),
+            "difficulty": (
+                float(row["difficulty"])
+                if row["difficulty"] is not None
+                else None
+            ),
+            "due_at": str(row["due_at"]),
+            "last_review_at": (
+                str(row["last_review_at"])
+                if row["last_review_at"] is not None
+                else None
+            ),
+            "reps": int(row["reps"]),
+            "lapses": int(row["lapses"]),
+            "scheduled_days": int(row["scheduled_days"]),
+            "elapsed_days": int(row["elapsed_days"]),
+            "suspended": int(row["suspended"]),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def record_review(
+        self,
+        *,
+        user_id: str,
+        card_id: str,
+        topic_id: str,
+        rating: str,
+        response_time_ms: int,
+        source_type: str = "question",
+    ) -> dict:
+        """Apply an FSRS review to a card and persist card + log row."""
+        if rating not in fsrs_scheduler.RATINGS:
+            raise ValueError(f"unknown FSRS rating: {rating!r}")
+        now = _utc_now()
+        now_iso = _to_iso(now)
+        with self._lock:
+            with self._conn:
+                existing = self._conn.execute(
+                    f"""
+                    SELECT {self._FSRS_CARD_COLUMNS}
+                    FROM fsrs_cards
+                    WHERE user_id = ? AND card_id = ?
+                    """,
+                    (user_id, card_id),
+                ).fetchone()
+                if existing:
+                    card_data = self._fsrs_row_to_dict(existing)
+                    topic_id = str(existing["topic_id"])
+                    source_type = str(existing["source_type"])
+                    suspended = int(existing["suspended"])
+                    created_at = str(existing["created_at"])
+                else:
+                    card_data = fsrs_scheduler.create_card(now)
+                    suspended = 0
+                    created_at = now_iso
+
+                new_card, log_entry = fsrs_scheduler.review(
+                    card_data,
+                    rating,
+                    now,
+                    response_time_ms,
+                )
+                new_card["card_id"] = card_id
+                new_card["topic_id"] = topic_id
+                new_card["source_type"] = source_type
+                new_card["suspended"] = suspended
+                new_card["created_at"] = created_at
+                new_card["updated_at"] = now_iso
+
+                self._conn.execute(
+                    """
+                    INSERT INTO fsrs_cards(
+                        user_id, card_id, topic_id, source_type, state,
+                        stability, difficulty, due_at, last_review_at,
+                        reps, lapses, scheduled_days, elapsed_days,
+                        suspended, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, card_id) DO UPDATE SET
+                        topic_id = excluded.topic_id,
+                        source_type = excluded.source_type,
+                        state = excluded.state,
+                        stability = excluded.stability,
+                        difficulty = excluded.difficulty,
+                        due_at = excluded.due_at,
+                        last_review_at = excluded.last_review_at,
+                        reps = excluded.reps,
+                        lapses = excluded.lapses,
+                        scheduled_days = excluded.scheduled_days,
+                        elapsed_days = excluded.elapsed_days,
+                        suspended = excluded.suspended,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        user_id,
+                        card_id,
+                        new_card["topic_id"],
+                        new_card["source_type"],
+                        new_card["state"],
+                        new_card["stability"],
+                        new_card["difficulty"],
+                        new_card["due_at"],
+                        new_card["last_review_at"],
+                        new_card["reps"],
+                        new_card["lapses"],
+                        new_card["scheduled_days"],
+                        new_card["elapsed_days"],
+                        new_card["suspended"],
+                        new_card["created_at"],
+                        new_card["updated_at"],
+                    ),
+                )
+                self._conn.execute(
+                    """
+                    INSERT INTO fsrs_review_log(
+                        user_id, card_id, rating, state, review_duration_ms,
+                        scheduled_days, elapsed_days, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        card_id,
+                        log_entry["rating"],
+                        log_entry["state"],
+                        log_entry["review_duration_ms"],
+                        log_entry["scheduled_days"],
+                        log_entry["elapsed_days"],
+                        log_entry["created_at"],
+                    ),
+                )
+                log_id = int(
+                    self._conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                )
+
+        log_entry = dict(log_entry)
+        log_entry["id"] = log_id
+        log_entry["card_id"] = card_id
+        return {
+            "card": new_card,
+            "log": log_entry,
+            "leech": fsrs_scheduler.is_leech(new_card),
+        }
+
+    def get_due_cards(
+        self, *, user_id: str, limit: int = 50
+    ) -> list[dict]:
+        now_iso = _to_iso(_utc_now())
+        rows = self._conn.execute(
+            f"""
+            SELECT {self._FSRS_CARD_COLUMNS}
+            FROM fsrs_cards
+            WHERE user_id = ? AND suspended = 0 AND due_at <= ?
+            ORDER BY due_at ASC, card_id ASC
+            LIMIT ?
+            """,
+            (user_id, now_iso, limit),
+        ).fetchall()
+        return [self._fsrs_row_to_dict(row) for row in rows]
+
+    def get_fsrs_review_queue(
+        self, *, user_id: str, limit: int = 50
+    ) -> dict:
+        cards = self.get_due_cards(user_id=user_id, limit=limit)
+        items = []
+        for card in cards:
+            items.append(
+                {
+                    "topic_id": card["topic_id"],
+                    "question_id": card["card_id"],
+                    "due_at": card["due_at"],
+                    "mastery_score": round(
+                        fsrs_scheduler.retention_estimate(card), 4
+                    ),
+                    "last_confidence": 0,
+                    "review_bucket": 0,
+                    "attempts": card["reps"],
+                    "state": card["state"],
+                    "lapses": card["lapses"],
+                    "suspended": card["suspended"],
+                    "leech": fsrs_scheduler.is_leech(card),
+                }
+            )
+        return {"items": items, "total_due": len(items)}
+
+    def get_forecast(self, *, user_id: str, days: int = 7) -> dict:
+        horizon_days = max(1, min(int(days), 31))
+        now = _utc_now()
+        horizon_iso = _to_iso(now + timedelta(days=horizon_days))
+        rows = self._conn.execute(
+            """
+            SELECT due_at
+            FROM fsrs_cards
+            WHERE user_id = ? AND suspended = 0 AND due_at <= ?
+            ORDER BY due_at ASC
+            """,
+            (user_id, horizon_iso),
+        ).fetchall()
+        counts: dict[str, int] = {
+            (now + timedelta(days=offset)).date().isoformat(): 0
+            for offset in range(horizon_days)
+        }
+        total_due = 0
+        today = now.date()
+        for row in rows:
+            due_date = _from_iso(str(row["due_at"])).date()
+            bucket = max(due_date, today).isoformat()
+            if bucket in counts:
+                counts[bucket] += 1
+                total_due += 1
+        due_counts = [
+            {"date": date, "count": counts[date]} for date in sorted(counts)
+        ]
+        return {"due_counts": due_counts, "total_due": total_due}
+
+    def get_calibration(self, *, user_id: str) -> dict:
+        rows = self._conn.execute(
+            """
+            SELECT rating
+            FROM fsrs_review_log
+            WHERE user_id = ? AND elapsed_days >= 1
+            """,
+            (user_id,),
+        ).fetchall()
+        eligible = len(rows)
+        successful = 0
+        good_count = 0
+        for row in rows:
+            rating = str(row["rating"])
+            if rating in (fsrs_scheduler.RATING_GOOD, fsrs_scheduler.RATING_EASY):
+                successful += 1
+            if rating == fsrs_scheduler.RATING_GOOD:
+                good_count += 1
+        true_retention = (successful / eligible) if eligible else 0.0
+        good_rating_pct = (good_count / eligible) if eligible else 0.0
+        within_band = eligible > 0 and (
+            0.8 <= true_retention <= 0.9
+        )
+        low_signal = eligible < 50 or good_rating_pct > 0.8
+        return {
+            "eligible_reviews": eligible,
+            "successful_reviews": successful,
+            "true_retention": round(true_retention, 4),
+            "target_band_low": 0.8,
+            "target_band_high": 0.9,
+            "within_band": within_band,
+            "good_rating_pct": round(good_rating_pct, 4),
+            "low_signal": low_signal,
+        }
+
+    def get_fsrs_topic_mastery(
+        self, *, user_id: str, limit: int = 500
+    ) -> dict:
+        rows = self._conn.execute(
+            """
+            SELECT topic_id, card_id, stability, difficulty,
+                   due_at, last_review_at
+            FROM fsrs_cards
+            WHERE user_id = ?
+            ORDER BY topic_id ASC, card_id ASC
+            """,
+            (user_id,),
+        ).fetchall()
+        totals: dict[str, list[float]] = {}
+        for row in rows:
+            card = {
+                "stability": (
+                    float(row["stability"])
+                    if row["stability"] is not None
+                    else None
+                ),
+                "last_review_at": (
+                    str(row["last_review_at"])
+                    if row["last_review_at"] is not None
+                    else None
+                ),
+            }
+            topic_id = str(row["topic_id"])
+            totals.setdefault(topic_id, []).append(
+                fsrs_scheduler.retention_estimate(card)
+            )
+        topics = [
+            {
+                "topic_id": topic_id,
+                "mastery_score": round(
+                    sum(scores) / len(scores), 4
+                ) if scores else 0.0,
+                "attempts": len(scores),
+            }
+            for topic_id, scores in sorted(totals.items())
+        ]
+        return {"topics": topics[: max(0, int(limit))]}
+
+    def backfill_fsrs_from_progress(
+        self, *, batch_size: int = 500
+    ) -> dict:
+        """Migrate legacy ``question_progress`` rows into ``fsrs_cards``.
+
+        Idempotent: skips when ``fsrs_cards`` is already populated and
+        uses ``INSERT OR IGNORE`` on ``(user_id, card_id)`` per row.
+        """
+        batch = max(1, int(batch_size))
+        card_count = int(
+            self._conn.execute(
+                "SELECT COUNT(*) FROM fsrs_cards"
+            ).fetchone()[0]
+        )
+        total_rows = int(
+            self._conn.execute(
+                "SELECT COUNT(*) FROM question_progress"
+            ).fetchone()[0]
+        )
+        if card_count > 0 or total_rows == 0:
+            return {
+                "skipped": card_count > 0,
+                "question_progress_rows": total_rows,
+                "inserted": 0,
+            }
+
+        inserted = 0
+        offset = 0
+        while True:
+            rows = self._conn.execute(
+                """
+                SELECT user_id, question_id, topic_id, mastery_score,
+                       due_at, review_bucket, attempts, correct_attempts,
+                       updated_at
+                FROM question_progress
+                ORDER BY user_id, question_id, topic_id
+                LIMIT ? OFFSET ?
+                """,
+                (batch, offset),
+            ).fetchall()
+            if not rows:
+                break
+            with self._lock:
+                with self._conn:
+                    for row in rows:
+                        mastery = max(
+                            0.0, min(1.0, float(row["mastery_score"] or 0.0))
+                        )
+                        bucket = int(row["review_bucket"] or 0)
+                        attempts = int(row["attempts"] or 0)
+                        correct_attempts = int(row["correct_attempts"] or 0)
+                        if bucket <= 0:
+                            state = fsrs_scheduler.STATE_LEARNING
+                        elif mastery < 0.3:
+                            state = fsrs_scheduler.STATE_RELEARNING
+                        else:
+                            state = fsrs_scheduler.STATE_REVIEW
+                        stability = round(max(0.2, mastery * 20.0), 4)
+                        difficulty = round(
+                            max(1.0, min(10.0, 10.0 - mastery * 5.0)), 4
+                        )
+                        interval_days = self._INTERVAL_DAYS[
+                            min(bucket, len(self._INTERVAL_DAYS) - 1)
+                        ]
+                        updated_at = str(row["updated_at"] or "")
+                        cursor = self._conn.execute(
+                            """
+                            INSERT OR IGNORE INTO fsrs_cards(
+                                user_id, card_id, topic_id, source_type, state,
+                                stability, difficulty, due_at, last_review_at,
+                                reps, lapses, scheduled_days, elapsed_days,
+                                suspended, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                str(row["user_id"]),
+                                str(row["question_id"]),
+                                str(row["topic_id"]),
+                                "question",
+                                state,
+                                stability,
+                                difficulty,
+                                str(row["due_at"] or updated_at or _to_iso(_utc_now())),
+                                updated_at or None,
+                                attempts,
+                                max(0, attempts - correct_attempts),
+                                interval_days,
+                                0,
+                                0,
+                                updated_at or _to_iso(_utc_now()),
+                                updated_at or _to_iso(_utc_now()),
+                            ),
+                        )
+                        if cursor.rowcount:
+                            inserted += 1
+            offset += batch
+        return {
+            "skipped": False,
+            "question_progress_rows": total_rows,
+            "inserted": inserted,
+        }
 
     def get_weak_areas(self, *, user_id: str, limit: int = 10) -> dict:
         rows = self._conn.execute(
