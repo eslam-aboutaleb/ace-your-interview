@@ -207,6 +207,208 @@ class UnsupportedVoiceTierError(ValueError):
     """Raised when a voice tier is not one of the implemented tiers."""
 
 
+class VoiceInterviewSession:
+    """Voice-to-voice mock interview orchestrator.
+
+    Wraps a :class:`VoiceSession` (STT/TTS) with the interview
+    store and generator: the first question is generated and
+    spoken on start, and each spoken answer is transcribed,
+    evaluated, recorded, and spoken back as feedback. The
+    session is capped at the configured ``turn_count``; when
+    the last turn is recorded the report is built and saved.
+    """
+
+    def __init__(
+        self,
+        *,
+        voice_session: "VoiceSession",
+        store: Any,
+        generator: Any,
+        session: dict[str, Any],
+        user_id: str,
+        user_identity: dict | None = None,
+        llm_config: LLMConfigRequest | None = None,
+    ):
+        self.voice = voice_session
+        self.store = store
+        self.generator = generator
+        self.session = dict(session)
+        self.user_identity = user_identity or {}
+        self.llm_config = llm_config
+        # ``create_session`` does not echo user_id back, so the
+        # caller (which authenticated the user) supplies it.
+        self.user_id = str(user_id or "")
+        self.session_id = str(self.session.get("session_id") or "")
+        self.turn_count = int(self.session.get("turn_count") or 0)
+        self.completed = False
+
+    @property
+    def turns_completed(self) -> int:
+        return int(self.session.get("turns_completed") or 0)
+
+    @property
+    def turn_limit_reached(self) -> bool:
+        return self.turn_count > 0 and self.turns_completed >= self.turn_count
+
+    async def start(self) -> dict[str, Any]:
+        """Generate the first question and speak it aloud."""
+        context = self.store.get_session_context(
+            user_id=self.user_id,
+            session_id=self.session_id,
+        )
+        if not context:
+            raise RuntimeError("Interview session context unavailable")
+        self.session = context
+        question = await self.generator.generate_question(
+            session=self.session,
+            turns=[],
+            llm_config=self.llm_config,
+            user_identity=self.user_identity,
+        )
+        self.store.set_current_question(
+            user_id=self.user_id,
+            session_id=self.session_id,
+            question=question["question"],
+        )
+        self.session["current_question"] = question["question"]
+        audio = await self.voice.generate_speech(question["question"])
+        return {
+            "session_id": self.session_id,
+            "question": question["question"],
+            "competency_focus": question.get("competency_focus", ""),
+            "expected_signals": question.get("expected_signals", []),
+            "audio_bytes": audio,
+        }
+
+    async def answer(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/webm",
+    ) -> dict[str, Any]:
+        """Transcribe a spoken answer, evaluate it, speak feedback."""
+        transcript = await self.voice.transcribe_audio(audio_bytes, mime_type=mime_type)
+        if not transcript.strip():
+            return {
+                "transcript": "",
+                "feedback_text": "",
+                "audio_bytes": b"",
+                "rubric": None,
+                "degraded": False,
+                "completed": False,
+                "report": None,
+            }
+        return await self._evaluate_answer(transcript)
+
+    async def answer_text(self, text: str) -> dict[str, Any]:
+        """Evaluate a typed answer (text fallback for the interview)."""
+        if not str(text or "").strip():
+            return {
+                "transcript": "",
+                "feedback_text": "",
+                "audio_bytes": b"",
+                "rubric": None,
+                "degraded": False,
+                "completed": False,
+                "report": None,
+            }
+        return await self._evaluate_answer(str(text).strip())
+
+    async def _evaluate_answer(self, user_answer: str) -> dict[str, Any]:
+        question = str(self.session.get("current_question") or "").strip()
+        turn_index = self.turns_completed + 1
+        eval_payload = await self.generator.evaluate_answer(
+            session=self.session,
+            question=question,
+            user_answer=user_answer,
+            turn_index=turn_index,
+            llm_config=self.llm_config,
+            user_identity=self.user_identity,
+        )
+        # Internal drift signal for the eval harness; never spoken.
+        eval_payload.pop("follow_up_note_repaired", None)
+        degraded = bool(eval_payload.get("degraded"))
+
+        _turn_dict, updated_session = self.store.record_turn(
+            user_id=self.user_id,
+            session_id=self.session_id,
+            turn_index=turn_index,
+            question=question,
+            user_answer=user_answer,
+            rubric=eval_payload["rubric"],
+            strengths=eval_payload["strengths"],
+            improvements=eval_payload["improvements"],
+            follow_up_note=eval_payload["follow_up_note"],
+            response_time_ms=0,
+            degraded=degraded,
+        )
+        if updated_session:
+            self.session = updated_session
+        self.session["turns_completed"] = turn_index
+
+        prior_memory = str(self.session.get("memory_summary") or "").strip()
+        memory_update = (
+            f"{prior_memory}\n"
+            f"Turn {turn_index} question: {question[:220]}\n"
+            f"Candidate answer summary: {user_answer[:320]}\n"
+            f"Strengths: {'; '.join(eval_payload['strengths'][:2])}\n"
+            f"Improvements: {'; '.join(eval_payload['improvements'][:2])}"
+        ).strip()
+        self.store.set_memory_summary(
+            user_id=self.user_id,
+            session_id=self.session_id,
+            summary=memory_update[:2400],
+        )
+        self.session["memory_summary"] = memory_update[:2400]
+
+        feedback_text = self._feedback_text(eval_payload)
+        audio = await self.voice.generate_speech(feedback_text)
+
+        report = None
+        if self.turn_limit_reached:
+            self.completed = True
+            turns = self.store.get_turns(
+                user_id=self.user_id,
+                session_id=self.session_id,
+            )
+            report = self.generator.build_report(session=self.session, turns=turns)
+            self.store.save_report(
+                user_id=self.user_id,
+                session_id=self.session_id,
+                report=report,
+            )
+
+        return {
+            "transcript": user_answer,
+            "feedback_text": feedback_text,
+            "audio_bytes": audio,
+            "rubric": eval_payload["rubric"],
+            "degraded": degraded,
+            "completed": self.completed,
+            "report": report,
+        }
+
+    @staticmethod
+    def _feedback_text(eval_payload: dict[str, Any]) -> str:
+        rubric = eval_payload.get("rubric") or {}
+        parts: list[str] = []
+        overall = rubric.get("overall")
+        if isinstance(overall, (int, float)):
+            parts.append(f"Overall score: {overall} out of 100.")
+        strengths = [
+            str(s) for s in (eval_payload.get("strengths") or []) if str(s).strip()
+        ]
+        if strengths:
+            parts.append("Strengths: " + " ".join(strengths[:2]))
+        improvements = [
+            str(i)
+            for i in (eval_payload.get("improvements") or [])
+            if str(i).strip()
+        ]
+        if improvements:
+            parts.append("To improve: " + " ".join(improvements[:2]))
+        return " ".join(parts) if parts else "Thanks for your answer."
+
+
 def create_voice_session(
     llm_client: LLMClient,
     tier: str,

@@ -1000,3 +1000,143 @@ class ChatAskResponse(BaseModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)
     conversation_id: str
+
+
+# ── Interview Personalization Models ─────────────────
+class ResumeProfile(BaseModel):
+    """Extracted resume profile. Raw resume text is never persisted."""
+
+    user_id: str = ""
+    skills: list[str] = Field(default_factory=list, max_length=200)
+    projects: list[str] = Field(default_factory=list, max_length=100)
+    experience_years: Optional[float] = None
+    roles: list[str] = Field(default_factory=list, max_length=50)
+    strengths: list[str] = Field(default_factory=list, max_length=50)
+    weak_spots: list[str] = Field(default_factory=list, max_length=50)
+    raw_text_hash: str = ""
+    updated_at: str = ""
+
+
+class ResumeUploadResponse(BaseModel):
+    profile: ResumeProfile
+    source: str = "llm"
+
+
+class JDAnalysisRequest(BaseModel):
+    jd_text: str = Field(..., min_length=1, max_length=20000)
+
+
+class JDAnalysisResponse(BaseModel):
+    matched: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    weak_spots: list[str] = Field(default_factory=list)
+    likely_followups: list[str] = Field(default_factory=list)
+    recommended_focus_areas: list[str] = Field(default_factory=list)
+
+
+class HintResponse(BaseModel):
+    question_id: str
+    level: int
+    hint: str
+    hints_used: int = 0
+    hints_remaining: int = 0
+
+
+class HintRequest(BaseModel):
+    question_text: str = Field(default="", max_length=8000)
+    answer_context: str = Field(default="", max_length=4000)
+
+
+class StarStory(BaseModel):
+    story_id: str
+    title: str
+    situation: str
+    task: str
+    action: str
+    result: str
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class StarStoryCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    situation: str = Field(..., min_length=1, max_length=5000)
+    task: str = Field(..., min_length=1, max_length=5000)
+    action: str = Field(..., min_length=1, max_length=5000)
+    result: str = Field(..., min_length=1, max_length=5000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class StarStoryUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=200)
+    situation: Optional[str] = Field(default=None, max_length=5000)
+    task: Optional[str] = Field(default=None, max_length=5000)
+    action: Optional[str] = Field(default=None, max_length=5000)
+    result: Optional[str] = Field(default=None, max_length=5000)
+    tags: Optional[list[str]] = Field(default=None, max_length=20)
+
+
+class StarStoryListResponse(BaseModel):
+    stories: list[StarStory] = Field(default_factory=list)
+    total: int = 0
+
+
+class StarStorySuggestionsResponse(BaseModel):
+    stories: list[StarStory] = Field(default_factory=list)
+
+
+class CompanyPackInfo(BaseModel):
+    company: str
+    track: str
+    style_config: dict[str, Any] = Field(default_factory=dict)
+    updated_at: str = ""
+
+
+class CompanyPacksResponse(BaseModel):
+    packs: list[CompanyPackInfo] = Field(default_factory=list)
+
+
+class CreateInterviewSessionRequestExtended(CreateInterviewSessionRequest):
+    """CreateInterviewSessionRequest plus interview-personalization fields."""
+
+    company: str = Field(default="", max_length=100)
+    resume_profile: bool = False
+    jd_text: str = Field(default="", max_length=20000)
+
+
+class SubmitInterviewAnswerRequestWithHints(SubmitInterviewAnswerRequest):
+    """SubmitInterviewAnswerRequest plus hint-usage disclosure."""
+
+    hint_level: int = Field(default=0, ge=0, le=4)
+    question_id: str = Field(default="", max_length=200)
+
+
+class RubricScoreExtended(RubricScore):
+    """RubricScore plus the independent_reasoning sub-score.
+
+    ``independent_reasoning`` is ``None`` when the turn was evaluated in
+    degraded mode; otherwise it equals ``reasoning_depth`` when the
+    candidate answered without hints, and is reduced by a level-dependent
+    penalty when hints were used.
+    """
+
+    independent_reasoning: Optional[int] = Field(default=None, ge=0, le=5)
+
+
+class InterviewTurnExtended(InterviewTurn):
+    """InterviewTurn whose rubric carries the independent_reasoning sub-score."""
+
+    rubric: RubricScoreExtended
+
+
+class InterviewTurnResponseExtended(InterviewTurnResponse):
+    """InterviewTurnResponse exposing the extended rubric on the turn."""
+
+    turn: InterviewTurnExtended
+
+
+class InterviewSessionResponseExtended(InterviewSessionResponse):
+    """InterviewSessionResponse whose turns carry the extended rubric."""
+
+    turns: list[InterviewTurnExtended] = Field(default_factory=list)

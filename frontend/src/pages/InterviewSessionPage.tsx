@@ -3,16 +3,19 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
+  Lightbulb,
   Loader2,
+  Mic,
+  MicOff,
+  Radio,
   Send,
   SkipForward,
   FileText,
-  Mic,
-  MicOff,
   Volume2,
 } from "lucide-react";
 import { pageVariants, pageTransition } from "@/utils/animations";
 import {
+  fetchHint,
   fetchInterviewSession,
   generateNextInterviewQuestion,
   generateNextInterviewQuestionStream,
@@ -24,7 +27,19 @@ import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
 import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
 import { useVoice } from "@/hooks/useVoice";
-import type { InterviewSessionResponse, InterviewTurnResponse } from "@/types";
+import type {
+  HintResponse,
+  InterviewSessionResponse,
+  InterviewTurnResponse,
+} from "@/types";
+
+function questionIdFor(question: string): string {
+  let hash = 0;
+  for (let i = 0; i < question.length; i += 1) {
+    hash = (hash * 31 + question.charCodeAt(i)) | 0;
+  }
+  return `iq-${Math.abs(hash).toString(36)}`;
+}
 
 export default function InterviewSessionPage() {
   const { sessionId = "" } = useParams();
@@ -41,8 +56,23 @@ export default function InterviewSessionPage() {
   const [startedAt, setStartedAt] = useState<number>(Date.now());
   const [lastTurn, setLastTurn] = useState<InterviewTurnResponse | null>(null);
 
+  // Hint state
+  const [hintLevel, setHintLevel] = useState(1);
+  const [hintResult, setHintResult] = useState<HintResponse | null>(null);
+  const [hintLoading, setHintLoading] = useState(false);
+  const [hintError, setHintError] = useState("");
+  const [hintLevelUsed, setHintLevelUsed] = useState(0);
+
   // Voice integration
   const voice = useVoice();
+
+  // Reset hint state when the current question changes
+  useEffect(() => {
+    setHintResult(null);
+    setHintError("");
+    setHintLevelUsed(0);
+    setHintLevel(1);
+  }, [data?.session.current_question]);
 
   // Auto-fill answer draft from voice transcript
   useEffect(() => {
@@ -78,6 +108,36 @@ export default function InterviewSessionPage() {
   useEffect(() => {
     loadSession();
   }, [loadSession]);
+
+  const handleLoadHint = async () => {
+    const question = data?.session.current_question;
+    if (!sessionId || !question) return;
+    setHintLoading(true);
+    setHintError("");
+    try {
+      const res = await fetchHint(
+        questionIdFor(question),
+        hintLevel,
+        { question_text: question },
+      );
+      setHintResult(res);
+      setHintLevelUsed((prev) => Math.max(prev, res.level));
+    } catch (err) {
+      const detail = (
+        err as {
+          response?: { data?: { detail?: unknown } };
+          message?: string;
+        }
+      )?.response?.data?.detail;
+      setHintError(
+        typeof detail === "string"
+          ? detail
+          : "Could not load a hint for this question.",
+      );
+    } finally {
+      setHintLoading(false);
+    }
+  };
 
   const ensureNextQuestion = useCallback(async () => {
     if (!sessionId || !data || data.session.status !== "active") return;
@@ -160,6 +220,10 @@ export default function InterviewSessionPage() {
     const payload = {
       user_answer: answerDraft.trim(),
       response_time_ms: Math.max(0, Date.now() - startedAt),
+      question_id: data.session.current_question
+        ? questionIdFor(data.session.current_question)
+        : undefined,
+      hint_level: hintLevelUsed > 0 ? hintLevelUsed : undefined,
       llm_config: {
         provider: settings.provider,
         model: settings.model,
@@ -398,6 +462,64 @@ export default function InterviewSessionPage() {
               {voice.isSpeaking ? "Speaking..." : "Read aloud"}
             </button>
           )}
+
+          <div className="mt-4 pt-4 border-t border-udemy-border">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5 text-sm font-medium">
+                <Lightbulb className="w-4 h-4 text-udemy-purple" />
+                Hints
+              </div>
+              <select
+                value={hintLevel}
+                onChange={(e) => setHintLevel(Number(e.target.value))}
+                disabled={hintLoading}
+                className="border border-udemy-border rounded px-2 py-1.5 text-sm"
+              >
+                <option value={1}>Level 1 — gentle nudge</option>
+                <option value={2}>Level 2 — approach</option>
+                <option value={3}>Level 3 — partial solution</option>
+                <option value={4}>Level 4 — full solution</option>
+              </select>
+              <button
+                onClick={handleLoadHint}
+                disabled={hintLoading || !data.session.current_question}
+                className="btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
+              >
+                {hintLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Lightbulb className="w-3.5 h-3.5" />
+                )}
+                Get hint
+              </button>
+              {hintResult && (
+                <span className="text-xs text-udemy-text-muted">
+                  {hintResult.hints_used} hint
+                  {hintResult.hints_used === 1 ? "" : "s"} used ·{" "}
+                  {hintResult.hints_remaining} remaining
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-udemy-text-muted mt-1.5">
+              Using hints lowers the reasoning-depth score for this answer.
+            </p>
+            {hintError && (
+              <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                {hintError}
+              </p>
+            )}
+            {hintResult && (
+              <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                <p className="text-xs font-medium text-amber-700 mb-1">
+                  Hint — level {hintResult.level}
+                </p>
+                <p className="text-sm whitespace-pre-line">
+                  {hintResult.hint}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="udemy-card p-6">

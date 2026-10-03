@@ -489,6 +489,7 @@ class DegradedEvaluationTests(unittest.TestCase):
                 "completeness",
                 "confidence_signal",
                 "overall",
+                "independent_reasoning",
             },
         )
         for key, value in out["rubric"].items():

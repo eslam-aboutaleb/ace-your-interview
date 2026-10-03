@@ -5,7 +5,7 @@
  * voice interactions regardless of the active tier (browser / cloud).
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useVoiceStore } from "../store/voiceStore";
 import { useSettingsStore } from "../store/settingsStore";
 import {
@@ -19,7 +19,14 @@ import {
   stopPlayback,
 } from "../services/voiceService";
 import type { VoiceCallbacks } from "../services/voiceService";
-import type { VoiceSessionType, VoiceTier } from "../types";
+import type {
+  VoiceInterviewCompletedEvent,
+  VoiceInterviewReadyEvent,
+  VoiceInterviewResponseEvent,
+  VoiceInterviewStartMessage,
+  VoiceSessionType,
+  VoiceTier,
+} from "../types";
 
 export function useVoice() {
   const store = useVoiceStore();
@@ -28,6 +35,13 @@ export function useVoice() {
   const wsServiceRef = useRef<WebSocketVoiceService | null>(null);
   const browserServiceRef = useRef<BrowserVoiceService | null>(null);
   const micRef = useRef<MicRecorder | null>(null);
+
+  const [interviewReady, setInterviewReady] =
+    useState<VoiceInterviewReadyEvent | null>(null);
+  const [interviewResponse, setInterviewResponse] =
+    useState<VoiceInterviewResponseEvent | null>(null);
+  const [interviewCompleted, setInterviewCompleted] =
+    useState<VoiceInterviewCompletedEvent | null>(null);
 
   // ── Load config on mount ─────────────────────────────────
   useEffect(() => {
@@ -76,6 +90,9 @@ export function useVoice() {
       store.setConnected(false);
       store.setSessionActive(false);
     },
+    onInterviewReady: (event) => setInterviewReady(event),
+    onInterviewResponse: (event) => setInterviewResponse(event),
+    onInterviewCompleted: (event) => setInterviewCompleted(event),
   };
 
   // ── Initialize services lazily ───────────────────────────
@@ -134,6 +151,29 @@ export function useVoice() {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [provider, model, store.preferredTier],
+  );
+
+  // ── Start a voice interview (dedicated WS flow) ─────
+  const startInterview = useCallback(
+    async (config: VoiceInterviewStartMessage["config"]) => {
+      const ws = getWsService();
+      if (!ws.connected) {
+        try {
+          await ws.connect();
+          store.setConnected(true);
+        } catch (err: any) {
+          store.setError(err.message || "Failed to connect");
+          return;
+        }
+      }
+      setInterviewReady(null);
+      setInterviewResponse(null);
+      setInterviewCompleted(null);
+      store.setError(null);
+      ws.startInterview(config);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store],
   );
 
   // ── Start recording (mic) ───────────────────────────────
@@ -290,15 +330,20 @@ export function useVoice() {
     preferredTier: store.preferredTier,
     autoPlayResponses: store.autoPlayResponses,
     browserSpeechSupported: isBrowserSpeechSupported(),
+    interviewReady,
+    interviewResponse,
+    interviewCompleted,
 
     // Actions
     startSession,
+    startInterview,
     stopSession,
     startRecording,
     stopRecording,
     sendText,
     speak,
     setPreferredTier: store.setPreferredTier,
+    setCurrentTier: store.setCurrentTier,
     setVoiceEnabled: store.setVoiceEnabled,
     setAutoPlayResponses: store.setAutoPlayResponses,
     clearError: () => store.setError(null),
