@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     learning_db_path: str = "/tmp/study_hub_learning.db"
     enable_v2_generation: bool = True
     enable_adaptive_learning: bool = True
+    enable_fsrs_v1: bool = True
     enable_mock_interview_v1: bool = True
     enable_topic_videos: bool = False
     youtube_api_key: str = ""

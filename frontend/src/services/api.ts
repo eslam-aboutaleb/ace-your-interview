@@ -37,6 +37,10 @@ import type {
   OllamaTestResponse,
   LearningAttemptRequest,
   LearningAttemptResponse,
+  LearningReviewRequest,
+  LearningReviewResponse,
+  ForecastResponse,
+  CalibrationResponse,
   ReviewQueueResponse,
   StudyPlanResponse,
   WeakAreasResponse,
@@ -1460,6 +1464,34 @@ export function connectGeminiAccount(): string {
 export async function disconnectGeminiAccount(): Promise<UserSettingsResponse> {
   const { data } = await api.post<UserSettingsResponse>(
     "/user-settings/google/disconnect",
+  );
+  return data;
+}
+
+// ── FSRS Spaced Repetition ──────────────────────────
+export async function submitCardReview(
+  req: LearningReviewRequest,
+): Promise<LearningReviewResponse> {
+  const { data } = await api.post<LearningReviewResponse>(
+    "/learning/review",
+    req,
+  );
+  return data;
+}
+
+export async function fetchForecast(
+  days = 7,
+): Promise<ForecastResponse> {
+  const { data } = await api.get<ForecastResponse>(
+    "/learning/forecast",
+    { params: { days } },
+  );
+  return data;
+}
+
+export async function fetchCalibration(): Promise<CalibrationResponse> {
+  const { data } = await api.get<CalibrationResponse>(
+    "/learning/calibration",
   );
   return data;
 }

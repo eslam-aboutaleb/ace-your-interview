@@ -595,6 +595,10 @@ export interface ReviewQueueItem {
   last_confidence: number;
   review_bucket: number;
   attempts: number;
+  state?: string;
+  lapses?: number;
+  suspended?: number;
+  leech?: boolean;
 }
 
 export interface ReviewQueueResponse {
@@ -1069,3 +1073,76 @@ export type VoiceClientMessage =
   | { type: "text"; content: string; speak?: boolean }
   | { type: "synthesize"; text: string }
   | { type: "stop" };
+
+// ── FSRS Spaced Repetition ──────────────────────────
+export type LearningReviewRating = "again" | "hard" | "good" | "easy";
+
+export type LearningReviewSourceType =
+  | "question"
+  | "flashcard"
+  | "interview"
+  | "exam";
+
+export interface LearningReviewRequest {
+  card_id: string;
+  topic_id: string;
+  rating: LearningReviewRating;
+  response_time_ms?: number;
+  source_type?: LearningReviewSourceType;
+}
+
+export interface FSRSCardResponse {
+  card_id: string;
+  topic_id: string;
+  source_type: string;
+  state: string;
+  stability: number | null;
+  difficulty: number | null;
+  due_at: string;
+  last_review_at: string | null;
+  reps: number;
+  lapses: number;
+  scheduled_days: number;
+  elapsed_days: number;
+  suspended: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FSRSReviewLogResponse {
+  id: number;
+  card_id: string;
+  rating: string;
+  state: string;
+  review_duration_ms: number;
+  scheduled_days: number | null;
+  elapsed_days: number | null;
+  created_at: string;
+}
+
+export interface LearningReviewResponse {
+  card: FSRSCardResponse;
+  log: FSRSReviewLogResponse;
+  leech: boolean;
+}
+
+export interface ForecastDayItem {
+  date: string;
+  count: number;
+}
+
+export interface ForecastResponse {
+  due_counts: ForecastDayItem[];
+  total_due: number;
+}
+
+export interface CalibrationResponse {
+  eligible_reviews: number;
+  successful_reviews: number;
+  true_retention: number;
+  target_band_low: number;
+  target_band_high: number;
+  within_band: boolean;
+  good_rating_pct: number;
+  low_signal: boolean;
+}

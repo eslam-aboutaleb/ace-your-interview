@@ -497,6 +497,10 @@ class ReviewQueueItem(BaseModel):
     last_confidence: int
     review_bucket: int
     attempts: int
+    state: str = "new"
+    lapses: int = 0
+    suspended: int = 0
+    leech: bool = False
 
 
 class ReviewQueueResponse(BaseModel):
@@ -878,3 +882,84 @@ class VoiceTurnRecord(BaseModel):
     tts_provider: str = ""
     latency_ms: int = 0
     created_at: str = ""
+
+
+# ── FSRS Spaced Repetition Models ─────────────────
+class LearningReviewRating(str, Enum):
+    AGAIN = "again"
+    HARD = "hard"
+    GOOD = "good"
+    EASY = "easy"
+
+
+class LearningReviewSourceType(str, Enum):
+    QUESTION = "question"
+    FLASHCARD = "flashcard"
+    INTERVIEW = "interview"
+    EXAM = "exam"
+
+
+class LearningReviewRequest(BaseModel):
+    card_id: str = Field(..., min_length=1, max_length=200)
+    topic_id: str = Field(..., min_length=1, max_length=200)
+    rating: LearningReviewRating
+    response_time_ms: int = Field(default=0, ge=0)
+    source_type: LearningReviewSourceType = (
+        LearningReviewSourceType.QUESTION
+    )
+
+
+class FSRSCardResponse(BaseModel):
+    card_id: str
+    topic_id: str
+    source_type: str
+    state: str
+    stability: Optional[float] = None
+    difficulty: Optional[float] = None
+    due_at: str
+    last_review_at: Optional[str] = None
+    reps: int = 0
+    lapses: int = 0
+    scheduled_days: int = 0
+    elapsed_days: int = 0
+    suspended: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class FSRSReviewLogResponse(BaseModel):
+    id: int
+    card_id: str
+    rating: str
+    state: str
+    review_duration_ms: int
+    scheduled_days: Optional[int] = None
+    elapsed_days: Optional[int] = None
+    created_at: str = ""
+
+
+class LearningReviewResponse(BaseModel):
+    card: FSRSCardResponse
+    log: FSRSReviewLogResponse
+    leech: bool = False
+
+
+class ForecastDayItem(BaseModel):
+    date: str
+    count: int = 0
+
+
+class ForecastResponse(BaseModel):
+    due_counts: list[ForecastDayItem] = Field(default_factory=list)
+    total_due: int = 0
+
+
+class CalibrationResponse(BaseModel):
+    eligible_reviews: int = 0
+    successful_reviews: int = 0
+    true_retention: float = 0.0
+    target_band_low: float = 0.8
+    target_band_high: float = 0.9
+    within_band: bool = False
+    good_rating_pct: float = 0.0
+    low_signal: bool = True
