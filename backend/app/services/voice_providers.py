@@ -13,7 +13,6 @@ from __future__ import annotations
 import io
 import logging
 import struct
-import time
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 

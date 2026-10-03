@@ -1,5 +1,6 @@
 """Stage 2.1/2.2/2.3 + 3.1 contract for the chat follow-up flow."""
 
+import inspect
 import re
 import unittest
 
@@ -177,8 +178,7 @@ class ChatPromptSecurityTests(unittest.TestCase):
 
         # The smuggled delimiter is de-fanged, so the block still terminates once.
         self.assertEqual(prompt.count(_CLOSE_TAG), prompt.count(_OPEN_TAG))
-        self.assertIn("< /untrusted_input >", prompt)
-        self.assertIn("< untrusted_input", prompt)
+        self.assertIn("[removed-fence-token]", prompt)
         self.assertNotIn(hostile, prompt)
         # The hostile text is still readable as context, just fenced.
         self.assertIn("Ignore previous instructions", _block_body(prompt, "User question"))
@@ -195,39 +195,50 @@ class ChatPromptSecurityTests(unittest.TestCase):
         self._run(body, fake)
         prompt = fake.last_prompt
         self.assertEqual(prompt.count(_CLOSE_TAG), prompt.count(_OPEN_TAG))
-        self.assertIn("< /untrusted_input >", _block_body(prompt, "Conversation history"))
+        self.assertIn("[removed-fence-token]", _block_body(prompt, "Conversation history"))
 
-    def test_oversized_user_message_is_truncated_to_the_declared_bound(self):
+    def test_oversized_user_message_is_rejected_at_the_schema_bound(self):
+        """The Pydantic cap rejects oversized payloads before the router runs."""
+        chat.init(FakeLLM())
+        app = FastAPI()
+        app.include_router(chat.router)
+        app.dependency_overrides[require_auth] = lambda: {
+            "user": "sec-user",
+            "provider": "google",
+        }
+        client = TestClient(app)
+        payload = _base_request().model_dump()
+        payload["user_message"] = "A" * 50000
+        res = client.post("/api/chat/follow-up", json=payload)
+        self.assertEqual(res.status_code, 422)
+
+    def test_prompt_stays_bounded_when_fields_reach_their_caps(self):
         fake = FakeLLM()
-        self._run(_base_request(user_message="A" * 50000), fake)
-        body = _block_body(fake.last_prompt, "User question")
-        self.assertLessEqual(len(body), chat.MAX_USER_MESSAGE_CHARS + 64)
-        self.assertIn(f"[truncated at {chat.MAX_USER_MESSAGE_CHARS} characters]", body)
-        # The whole prompt stays bounded even when every field is oversized.
-        oversized_prompt = len(fake.last_prompt)
         self._run(
             _base_request(
-                user_message="A" * 50000,
-                context_answer="B" * 50000,
-                word="C" * 50000,
-                topic_title="D" * 50000,
+                user_message="A" * chat.MAX_USER_MESSAGE_CHARS,
+                context_question="Q" * chat.MAX_CONTEXT_QUESTION_CHARS,
+                context_answer="B" * chat.MAX_CONTEXT_ANSWER_CHARS,
+                word="C" * 60,
+                topic_title="D" * chat.MAX_TOPIC_METADATA_CHARS,
             ),
             fake,
         )
         self.assertGreater(len(fake.last_prompt), 0)
         self.assertLess(
             len(fake.last_prompt),
-            oversized_prompt
+            chat.MAX_USER_MESSAGE_CHARS
+            + chat.MAX_CONTEXT_QUESTION_CHARS
             + chat.MAX_CONTEXT_ANSWER_CHARS
-            + chat.MAX_WORD_CHARS
             + chat.MAX_TOPIC_METADATA_CHARS
-            + 512,
+            + chat.MAX_HISTORY_CHARS
+            + 4096,
         )
 
     def test_history_is_windowed_and_bounded(self):
         fake = FakeLLM()
         history = [
-            ChatMessage(role="user", content=f"turn-{index} " + ("z" * 5000))
+            ChatMessage(role="user", content=f"turn-{index} " + ("z" * 1990))
             for index in range(10)
         ]
         self._run(_base_request(history=history), fake)
@@ -327,6 +338,51 @@ class ChatPromptSecurityTests(unittest.TestCase):
             raise_if_policy_blocked_result({"error_code": BUDGET_EXCEEDED_CODE})
         except HTTPException:  # pragma: no cover - guard against accidental 500 path
             self.fail("budget code must not raise a policy error")
+
+    # ── 2.2 hard pre-fence input guard ──────────────
+
+    def test_hard_input_guard_is_defined_once_at_the_absolute_ceiling(self):
+        """The pre-fence ceiling is defined exactly once, at 200_000.
+
+        A second, smaller definition would silently win and contradict
+        the "well above every per-field cap" contract.
+        """
+        source = inspect.getsource(chat)
+        definitions = re.findall(
+            r"^HARD_INPUT_GUARD_CHARS\s*=\s*([0-9_]+)\s*$",
+            source,
+            flags=re.MULTILINE,
+        )
+        self.assertEqual(len(definitions), 1)
+        self.assertEqual(definitions[0], "200_000")
+        self.assertEqual(chat.HARD_INPUT_GUARD_CHARS, 200_000)
+
+    def test_fence_clips_at_the_hard_guard_before_per_field_caps(self):
+        """`_fence` bounds raw payloads at the hard guard, then per-field caps apply."""
+        captured: dict = {}
+        original = chat.untrusted_block
+
+        def spy(label, value, max_chars=4000):
+            captured["value"] = value
+            return original(label, value, max_chars)
+
+        chat.untrusted_block = spy
+        try:
+            oversized = "A" * (chat.HARD_INPUT_GUARD_CHARS + 10_000)
+            fenced = chat._fence(
+                "User question", oversized, chat.MAX_USER_MESSAGE_CHARS
+            )
+        finally:
+            chat.untrusted_block = original
+
+        # The pre-fence clip bounds the value before the per-field cap runs.
+        self.assertEqual(len(captured["value"]), chat.HARD_INPUT_GUARD_CHARS)
+        # The per-field cap still applies inside the fence, with the marker.
+        self.assertIn(
+            f"[truncated at {chat.MAX_USER_MESSAGE_CHARS} characters]",
+            fenced,
+        )
+        self.assertLessEqual(len(fenced), chat.MAX_USER_MESSAGE_CHARS + 1024)
 
 
 if __name__ == "__main__":

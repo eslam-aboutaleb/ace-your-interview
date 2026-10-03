@@ -1,17 +1,23 @@
 """Tests for voice module — providers, session, tiers, config endpoint."""
 
 import asyncio
-import json
 import os
+import tempfile
 import unittest
 from unittest import mock
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.config import get_settings
+from app.dependencies import require_auth
+from app.routers import voice
 from app.schemas.models import (
     VoiceConfigResponse,
     VoiceSettingsUpdateRequest,
     VoiceTierEnum,
 )
+from app.services.user_settings_store import UserSettingsStore, identity_key_for_user
 from app.services.voice_providers import (
     EdgeTTSProvider,
     GroqSTTProvider,
@@ -416,6 +422,104 @@ class TestServerOwnedPersona(unittest.TestCase):
         self.assertIn("ASSISTANT: turn-39", prompt)
         # 20 history messages only.
         self.assertEqual(len(prompt.splitlines()), 20)
+
+
+class VoiceConfigEndpointTests(unittest.TestCase):
+    """GET /api/voice/config returns the per-user tier override."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.prev_env = {
+            "STUDY_USER_SETTINGS_FILE": os.environ.get("STUDY_USER_SETTINGS_FILE"),
+            "STUDY_LLM_SERVICE_USERS_FILE": os.environ.get("STUDY_LLM_SERVICE_USERS_FILE"),
+            "STUDY_LLM_ASSIGNMENTS_FILE": os.environ.get("STUDY_LLM_ASSIGNMENTS_FILE"),
+            "STUDY_CREDENTIALS_ENCRYPTION_KEY": os.environ.get("STUDY_CREDENTIALS_ENCRYPTION_KEY"),
+            "STUDY_VOICE_TIERS_ENABLED": os.environ.get("STUDY_VOICE_TIERS_ENABLED"),
+            "STUDY_VOICE_DEFAULT_TIER": os.environ.get("STUDY_VOICE_DEFAULT_TIER"),
+            "STUDY_ENABLE_VOICE_AGENT": os.environ.get("STUDY_ENABLE_VOICE_AGENT"),
+            "STUDY_VOICE_STT_PROVIDER": os.environ.get("STUDY_VOICE_STT_PROVIDER"),
+            "STUDY_VOICE_TTS_PROVIDER": os.environ.get("STUDY_VOICE_TTS_PROVIDER"),
+        }
+        os.environ["STUDY_USER_SETTINGS_FILE"] = os.path.join(
+            self.tmpdir.name, "user_settings.json"
+        )
+        os.environ["STUDY_LLM_SERVICE_USERS_FILE"] = os.path.join(
+            self.tmpdir.name, "llm_service_users.json"
+        )
+        os.environ["STUDY_LLM_ASSIGNMENTS_FILE"] = os.path.join(
+            self.tmpdir.name, "llm_assignments.json"
+        )
+        os.environ["STUDY_CREDENTIALS_ENCRYPTION_KEY"] = "voice-test-encryption-secret"
+        os.environ["STUDY_VOICE_TIERS_ENABLED"] = "browser,cloud"
+        os.environ["STUDY_VOICE_DEFAULT_TIER"] = "browser"
+        os.environ["STUDY_ENABLE_VOICE_AGENT"] = "true"
+        os.environ["STUDY_VOICE_STT_PROVIDER"] = "groq"
+        os.environ["STUDY_VOICE_TTS_PROVIDER"] = "edge"
+        get_settings.cache_clear()
+
+        self.store = UserSettingsStore()
+        self.prev_llm = voice._llm_client
+        self.prev_user_store = voice._user_settings_store
+        voice.init(FakeLLM(), self.store)
+
+        self.app = FastAPI()
+        self.app.include_router(voice.router)
+        self.app.dependency_overrides[require_auth] = lambda: {
+            "user": "learner@example.com",
+            "provider": "google",
+        }
+        self.client = TestClient(self.app)
+
+    def tearDown(self):
+        voice._llm_client = self.prev_llm
+        voice._user_settings_store = self.prev_user_store
+        self.app.dependency_overrides.clear()
+        self.tmpdir.cleanup()
+        for key, value in self.prev_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        get_settings.cache_clear()
+
+    def _identity_key(self) -> str:
+        return identity_key_for_user(
+            {"user": "learner@example.com", "provider": "google"}
+        )
+
+    def test_user_tier_defaults_to_the_admin_default(self):
+        res = self.client.get("/api/voice/config")
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["default_tier"], "browser")
+        self.assertEqual(payload["user_tier"], "browser")
+        self.assertEqual(payload["available_tiers"], ["browser", "cloud"])
+        self.assertEqual(payload["stt_provider"], "groq")
+        self.assertEqual(payload["tts_provider"], "edge")
+
+    def test_saved_voice_tier_is_returned_as_user_tier(self):
+        self.store.save_preferences(self._identity_key(), {"voice_tier": "cloud"})
+
+        res = self.client.get("/api/voice/config")
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["user_tier"], "cloud")
+        self.assertEqual(payload["default_tier"], "browser")
+
+    def test_saved_tier_outside_enabled_tiers_falls_back(self):
+        # "realtime" is a valid tier but is not enabled in this fixture.
+        self.store.save_preferences(self._identity_key(), {"voice_tier": "realtime"})
+
+        res = self.client.get("/api/voice/config")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["user_tier"], "browser")
+
+    def test_config_works_without_a_user_settings_store(self):
+        voice.init(FakeLLM())
+
+        res = self.client.get("/api/voice/config")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["user_tier"], "browser")
 
 
 if __name__ == "__main__":

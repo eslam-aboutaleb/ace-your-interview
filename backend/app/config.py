@@ -3,6 +3,7 @@
 from functools import lru_cache
 from typing import Any
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -72,6 +73,17 @@ class Settings(BaseSettings):
     # Trust X-Forwarded-For only when running behind a known proxy.
     trusted_proxy_enabled: bool = False
 
+    # Pluggable rate limiter backend: "memory" (default, per-replica
+    # state) or "redis" (shared sliding-window state across replicas,
+    # via REDIS_URL). Strict mode fails startup when Redis is
+    # unreachable instead of silently degrading to in-memory state.
+    rate_limit_backend: str = "memory"
+    rate_limit_strict: bool = False
+    redis_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("STUDY_REDIS_URL", "REDIS_URL"),
+    )
+
     # Interview memory (Stage 3.2)
     memory_summary_max_chars: int = 3000
     memory_verbatim_turns: int = 4
@@ -114,7 +126,12 @@ class Settings(BaseSettings):
     # Per-connection LLM turn budget for the voice WebSocket.
     voice_max_turns_per_connection: int = 40
 
-    model_config = {"env_prefix": "STUDY_", "env_file": ".env", "extra": "ignore"}
+    model_config = {
+        "env_prefix": "STUDY_",
+        "env_file": ".env",
+        "extra": "ignore",
+        "populate_by_name": True,
+    }
 
 
 @lru_cache()

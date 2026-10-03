@@ -2,13 +2,19 @@ import os
 import tempfile
 import unittest
 
-from fastapi import FastAPI, Request
+from fastapi import Request
 from fastapi.testclient import TestClient
 
-from app.config import get_settings
-from app.main import _rate_limiter, create_app
+from app.config import Settings, get_settings
+from app.main import _init_rate_limiter, _rate_limiter, create_app
 from app.services.auth import create_jwt_token
-from app.services.rate_limit import classify_rate_limit_scope, request_ip
+from app.services.rate_limit import (
+    InMemoryRateLimiter,
+    RedisBackend,
+    classify_rate_limit_scope,
+    create_rate_limiter,
+    request_ip,
+)
 
 
 def _build_request(path: str, headers: dict, client_host: str):
@@ -242,6 +248,212 @@ class RateLimitingTests(unittest.TestCase):
         os.environ["STUDY_TRUSTED_PROXY_ENABLED"] = "true"
         get_settings.cache_clear()
         self.assertEqual(request_ip(request), "203.0.113.7")
+
+
+# ── Pluggable backend: parity, factory, startup wiring ──────
+
+
+class _FakeClock:
+    """Deterministic clock shared by both backends under test."""
+
+    def __init__(self, start: float = 1_700_000_000.0):
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class FakeRedis:
+    """Minimal sorted-set client covering the commands RedisBackend uses."""
+
+    def __init__(self):
+        self.sets: dict[str, dict[str, float]] = {}
+        self.expirations: dict[str, int] = {}
+
+    @staticmethod
+    def _as_score(value) -> float:
+        if isinstance(value, str):
+            if value == "-inf":
+                return float("-inf")
+            if value == "+inf":
+                return float("inf")
+            return float(value)
+        return float(value)
+
+    def zremrangebyscore(self, key, min_score, max_score):
+        low = self._as_score(min_score)
+        high = self._as_score(max_score)
+        bucket = self.sets.setdefault(key, {})
+        stale = [
+            member for member, score in bucket.items() if low <= score <= high
+        ]
+        for member in stale:
+            del bucket[member]
+        return len(stale)
+
+    def zcard(self, key):
+        return len(self.sets.get(key, {}))
+
+    def zrange(self, key, start, stop, withscores=False):
+        items = sorted(
+            self.sets.get(key, {}).items(),
+            key=lambda item: (item[1], item[0]),
+        )
+        selected = items[start : stop + 1]
+        return selected if withscores else [member for member, _ in selected]
+
+    def zadd(self, key, mapping):
+        self.sets.setdefault(key, {}).update(mapping)
+        return len(mapping)
+
+    def expire(self, key, seconds):
+        self.expirations[key] = seconds
+        return True
+
+    def ping(self):
+        return True
+
+
+class RateLimiterBackendParityTests(unittest.TestCase):
+    """The same request sequence yields the same decisions in both backends."""
+
+    _SCOPE = "llm"
+    _KEY = "user:parity"
+
+    def _check(self, backend, *, limit=3, window_seconds=60):
+        return backend.check(
+            scope=self._SCOPE,
+            key=self._KEY,
+            limit=limit,
+            window_seconds=window_seconds,
+        )
+
+    def test_backends_agree_on_allow_deny_and_retry(self):
+        clock = _FakeClock()
+        memory = InMemoryRateLimiter(clock=clock)
+        redis = RedisBackend(client=FakeRedis(), clock=clock)
+
+        memory_decisions = [self._check(memory) for _ in range(5)]
+        redis_decisions = [self._check(redis) for _ in range(5)]
+
+        self.assertEqual(
+            [(d.allowed, d.retry_after_seconds) for d in memory_decisions],
+            [(d.allowed, d.retry_after_seconds) for d in redis_decisions],
+        )
+        for decision in memory_decisions[:3]:
+            self.assertTrue(decision.allowed)
+            self.assertEqual(decision.retry_after_seconds, 0)
+        for decision in memory_decisions[3:]:
+            self.assertFalse(decision.allowed)
+            self.assertEqual(decision.retry_after_seconds, 60)
+
+    def test_backends_agree_after_partial_window_expiry(self):
+        clock = _FakeClock()
+        memory = InMemoryRateLimiter(clock=clock)
+        redis = RedisBackend(client=FakeRedis(), clock=clock)
+
+        for _ in range(3):
+            self._check(memory)
+            self._check(redis)
+
+        clock.advance(30)
+        denied_memory = self._check(memory)
+        denied_redis = self._check(redis)
+        self.assertFalse(denied_memory.allowed)
+        self.assertFalse(denied_redis.allowed)
+        self.assertEqual(denied_memory.retry_after_seconds, 30)
+        self.assertEqual(denied_redis.retry_after_seconds, 30)
+
+        # Once the window fully elapses, both backends allow again.
+        clock.advance(31)
+        self.assertTrue(self._check(memory).allowed)
+        self.assertTrue(self._check(redis).allowed)
+
+    def test_backends_agree_per_scope_and_key(self):
+        clock = _FakeClock()
+        memory = InMemoryRateLimiter(clock=clock)
+        redis = RedisBackend(client=FakeRedis(), clock=clock)
+
+        for backend in (memory, redis):
+            # Exhaust the llm scope for one key.
+            for _ in range(2):
+                backend.check(
+                    scope="llm", key="user:a", limit=2, window_seconds=60
+                )
+            # A different key in the same scope is unaffected.
+            self.assertTrue(
+                backend.check(
+                    scope="llm", key="user:b", limit=2, window_seconds=60
+                ).allowed
+            )
+            # A different scope is unaffected.
+            self.assertTrue(
+                backend.check(
+                    scope="session", key="user:a", limit=2, window_seconds=60
+                ).allowed
+            )
+            # The exhausted bucket denies.
+            self.assertFalse(
+                backend.check(
+                    scope="llm", key="user:a", limit=2, window_seconds=60
+                ).allowed
+            )
+
+    def test_redis_backend_uses_sorted_set_commands(self):
+        fake = FakeRedis()
+        backend = RedisBackend(client=fake, clock=_FakeClock())
+
+        decision = backend.check(
+            scope="oauth", key="ip:10.0.0.1", limit=5, window_seconds=120
+        )
+
+        self.assertTrue(decision.allowed)
+        bucket = "ratelimit:oauth:ip:10.0.0.1"
+        self.assertIn(bucket, fake.sets)
+        self.assertEqual(fake.zcard(bucket), 1)
+        self.assertEqual(fake.expirations.get(bucket), 120)
+
+    def test_redis_backend_clear_is_a_safe_no_op(self):
+        backend = RedisBackend(client=FakeRedis(), clock=_FakeClock())
+        backend.clear()  # must not raise
+
+
+class RateLimiterFactoryTests(unittest.TestCase):
+    def test_default_backend_is_in_memory(self):
+        self.assertIsInstance(create_rate_limiter(Settings()), InMemoryRateLimiter)
+
+    def test_explicit_memory_backend_is_in_memory(self):
+        settings = Settings(rate_limit_backend="memory")
+        self.assertIsInstance(create_rate_limiter(settings), InMemoryRateLimiter)
+
+    def test_unknown_backend_name_is_rejected(self):
+        settings = Settings(rate_limit_backend="memcached")
+        with self.assertRaises(ValueError):
+            create_rate_limiter(settings)
+
+    def test_redis_backend_requires_a_url(self):
+        settings = Settings(rate_limit_backend="redis", redis_url="")
+        with self.assertRaises(RuntimeError):
+            create_rate_limiter(settings)
+
+
+class RateLimiterInitTests(unittest.TestCase):
+    """main._init_rate_limiter wires the configured backend at startup."""
+
+    def test_memory_backend_keeps_the_shared_instance(self):
+        self.assertIs(_init_rate_limiter(Settings()), _rate_limiter)
+
+    def test_redis_strict_mode_fails_fast(self):
+        settings = Settings(rate_limit_backend="redis", rate_limit_strict=True)
+        with self.assertRaises(RuntimeError):
+            _init_rate_limiter(settings)
+
+    def test_redis_non_strict_falls_back_to_in_memory(self):
+        settings = Settings(rate_limit_backend="redis", rate_limit_strict=False)
+        self.assertIs(_init_rate_limiter(settings), _rate_limiter)
 
 
 if __name__ == "__main__":

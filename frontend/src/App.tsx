@@ -40,7 +40,7 @@ function PublicRoute() {
   return <Outlet />;
 }
 
-function ProtectedRoute() {
+export function ProtectedRoute() {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const hydratedRef = useRef(false);
   const hydrateFromServer = useSettingsStore((s) => s.hydrateFromServer);
