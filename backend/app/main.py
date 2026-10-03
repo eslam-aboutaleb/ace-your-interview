@@ -18,11 +18,13 @@ from app.routers import (
     cards,
     chat,
     documents,
+    hints,
     interview_sessions,
     learning,
     llm_settings,
     progress,
     questions,
+    star_stories,
     topics,
     user_settings,
     voice,
@@ -40,6 +42,7 @@ from app.services.llm_policy import (
     policy_error_detail,
 )
 from app.services.llm_service_access import LLMServiceAccess
+from app.services.hint_service import HintService
 from app.services.learning_planner import LearningPlannerStore
 from app.services.learning_store import LearningStore
 from app.services.llm_client import LLMClient
@@ -226,6 +229,7 @@ async def lifespan(application: FastAPI):
         settings.learning_db_path,
         _mcp_gateway,
     )
+    hints.init(HintService(_llm_client, settings.learning_db_path))
     voice.init(_llm_client, _user_settings_store)
 
     logger.info("Loaded %d topics from curriculum %s", len(parser.list_topics()), parser.source_path)
@@ -322,6 +326,8 @@ def create_app() -> FastAPI:
     application.include_router(cards.cards_router)
     application.include_router(progress.router, dependencies=auth_dep)
     application.include_router(interview_sessions.router, dependencies=auth_dep)
+    application.include_router(hints.router, dependencies=auth_dep)
+    application.include_router(star_stories.router, dependencies=auth_dep)
     application.include_router(voice.router)  # WebSocket handles its own auth
 
     @application.exception_handler(LLMServiceApprovalRequiredError)

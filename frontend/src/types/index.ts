@@ -1058,7 +1058,10 @@ export type VoiceServerMessage =
   | { type: "response"; text: string; audio: string; latency: VoiceLatency }
   | { type: "audio"; audio: string; text: string }
   | { type: "stopped"; session_id: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | VoiceInterviewReadyEvent
+  | VoiceInterviewResponseEvent
+  | VoiceInterviewCompletedEvent;
 
 /** Messages TO the server over WebSocket */
 export type VoiceClientMessage =
@@ -1072,7 +1075,8 @@ export type VoiceClientMessage =
   | { type: "audio"; data: string; mime: string }
   | { type: "text"; content: string; speak?: boolean }
   | { type: "synthesize"; text: string }
-  | { type: "stop" };
+  | { type: "stop" }
+  | VoiceInterviewStartMessage;
 
 // ── FSRS Spaced Repetition ──────────────────────────
 export type LearningReviewRating = "again" | "hard" | "good" | "easy";
@@ -1343,4 +1347,164 @@ export interface StudySessionResponse {
   deck_id: string;
   cards: FlashcardResponse[];
   total_due: number;
+}
+/* ── Interview Personalization ────────────────────── */
+
+export interface ResumeSkillProfile {
+  user_id: string;
+  skills: string[];
+  projects: string[];
+  experience_years: number | null;
+  roles: string[];
+  strengths: string[];
+  weak_spots: string[];
+  raw_text_hash: string;
+  updated_at: string;
+}
+
+export interface ResumeUploadResponse {
+  profile: ResumeSkillProfile;
+  source: string;
+}
+
+export interface JDAnalysisResponse {
+  matched: string[];
+  gaps: string[];
+  weak_spots: string[];
+  likely_followups: string[];
+  recommended_focus_areas: string[];
+}
+
+export interface CompanyPackInfo {
+  company: string;
+  track: string;
+  style_config: Record<string, unknown>;
+  updated_at: string;
+}
+
+export interface CompanyPacksResponse {
+  packs: CompanyPackInfo[];
+}
+
+export interface HintRequest {
+  question_text?: string;
+  answer_context?: string;
+}
+
+export interface HintResponse {
+  question_id: string;
+  level: number;
+  hint: string;
+  hints_used: number;
+  hints_remaining: number;
+}
+
+export interface StarStory {
+  story_id: string;
+  title: string;
+  situation: string;
+  task: string;
+  action: string;
+  result: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StarStoryCreateRequest {
+  title: string;
+  situation: string;
+  task: string;
+  action: string;
+  result: string;
+  tags?: string[];
+}
+
+export interface StarStoryUpdateRequest {
+  title?: string;
+  situation?: string;
+  task?: string;
+  action?: string;
+  result?: string;
+  tags?: string[];
+}
+
+export interface StarStoryListResponse {
+  stories: StarStory[];
+  total: number;
+}
+
+export interface StarStorySuggestionsResponse {
+  stories: StarStory[];
+}
+
+export interface CreateInterviewSessionRequestExtended
+  extends CreateInterviewSessionRequest {
+  company?: string;
+  resume_profile?: boolean;
+  jd_text?: string;
+}
+
+export interface SubmitInterviewAnswerRequestWithHints
+  extends SubmitInterviewAnswerRequest {
+  hint_level?: number;
+  question_id?: string;
+}
+
+export interface InterviewRubricScoreExtended extends InterviewRubricScore {
+  independent_reasoning: number | null;
+}
+
+export interface InterviewTurnExtended extends InterviewTurn {
+  rubric: InterviewRubricScoreExtended;
+}
+
+export interface InterviewTurnResponseExtended extends Omit<InterviewTurnResponse, "turn"> {
+  turn: InterviewTurnExtended;
+}
+
+export interface InterviewSessionResponseExtended
+  extends Omit<InterviewSessionResponse, "turns"> {
+  turns: InterviewTurnExtended[];
+}
+
+// ── Voice interview WebSocket ──────────────────────
+
+export interface VoiceInterviewReadyEvent {
+  type: "interview_ready";
+  session_id: string;
+  question: string;
+  competency_focus: string;
+  expected_signals: string[];
+  audio: string;
+  turn_count: number;
+}
+
+export interface VoiceInterviewResponseEvent {
+  type: "interview_response";
+  text: string;
+  audio: string;
+  rubric: InterviewRubricScoreExtended | null;
+  degraded: boolean;
+  completed: boolean;
+  latency: { llm_ms: number; total_ms: number };
+}
+
+export interface VoiceInterviewCompletedEvent {
+  type: "interview_completed";
+  session_id: string;
+  report: InterviewReport;
+}
+
+export type VoiceInterviewStreamEvent =
+  | { type: "transcript"; text: string; final: boolean }
+  | VoiceInterviewReadyEvent
+  | VoiceInterviewResponseEvent
+  | VoiceInterviewCompletedEvent
+  | { type: "error"; message: string }
+  | { type: "stopped"; session_id: string };
+
+export interface VoiceInterviewStartMessage {
+  type: "interview_start";
+  config: CreateInterviewSessionRequestExtended;
 }

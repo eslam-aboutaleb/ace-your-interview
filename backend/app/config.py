@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     enable_fsrs_v1: bool = True
     enable_flashcards_v1: bool = True
     enable_mock_interview_v1: bool = True
+    # Interview personalization: resume/JD parsing, hints, STAR bank,
+    # company packs (rollout flag, default on).
+    enable_interview_plus_v1: bool = True
+    # Voice-to-voice mock interviews (rollout flag, default off until the
+    # null-provider E2E passes).
+    enable_voice_interview_v1: bool = False
     enable_topic_videos: bool = False
     youtube_api_key: str = ""
     topic_videos_default_limit: int = 3

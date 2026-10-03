@@ -19,6 +19,7 @@ import InterviewSetup from "@/pages/InterviewSetup";
 import InterviewSessionPage from "@/pages/InterviewSessionPage";
 import InterviewReportPage from "@/pages/InterviewReportPage";
 import InterviewTrendsPage from "@/pages/InterviewTrends";
+import StarStoriesPage from "@/pages/StarStoriesPage";
 import { fetchUserSettings, updateUserPreferences } from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -181,6 +182,7 @@ export default function App() {
               path="interview/:sessionId/report"
               element={<InterviewReportPage />}
             />
+            <Route path="star-stories" element={<StarStoriesPage />} />
             <Route path="user-settings" element={<UserSettings />} />
             <Route
               path="settings"

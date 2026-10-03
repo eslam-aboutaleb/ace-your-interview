@@ -10,7 +10,9 @@ from difflib import SequenceMatcher
 from typing import Any, Optional
 
 from app.schemas.models import LLMConfigRequest
+from app.services.company_packs import CompanyPackStore
 from app.services.doc_parser import DocParser
+from app.services.hint_service import apply_hint_penalty
 from app.services.llm_client import (
     CALL_FAILED_CODE,
     TERMINAL_ERROR_CODES,
@@ -27,6 +29,7 @@ from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
 from app.services.prompt_blocks import render_contract
 from app.services.question_text import normalise_question
+from app.services.star_store import StarStore
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,7 @@ _DEGRADED_RUBRIC: dict[str, None] = {
     "completeness": None,
     "confidence_signal": None,
     "overall": None,
+    "independent_reasoning": None,
 }
 
 _FOLLOW_UP_NOTE_HEADINGS = (
@@ -96,10 +100,19 @@ def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
 class InterviewGenerator:
     """Handles interview question creation, evaluation, and report synthesis."""
 
-    def __init__(self, llm: LLMClient, parser: DocParser, mcp_gateway: MCPGateway | None = None):
+    def __init__(
+        self,
+        llm: LLMClient,
+        parser: DocParser,
+        mcp_gateway: MCPGateway | None = None,
+        company_pack_store: CompanyPackStore | None = None,
+        star_store: StarStore | None = None,
+    ):
         self.llm = llm
         self.parser = parser
         self.mcp = mcp_gateway
+        self.company_packs = company_pack_store
+        self.star_store = star_store
 
     @staticmethod
     def _format_recent_turns(turns: list[dict[str, Any]]) -> str:
@@ -247,6 +260,125 @@ class InterviewGenerator:
             out.append(line)
         return out
 
+    def _load_company_pack(self, session: dict[str, Any]) -> dict[str, Any] | None:
+        """Load the company pack named on the session, if any.
+
+        A missing pack falls back to the generic style (existing
+        behavior): the session simply carries no pack.
+        """
+        company = str(session.get("company") or "").strip().lower()
+        if not company or self.company_packs is None:
+            return None
+        try:
+            return self.company_packs.get_pack(company)
+        except Exception as exc:  # noqa: BLE001 - packs are optional context
+            logger.warning("Company pack load failed company=%s: %s", company, exc)
+            return None
+
+    def _suggest_star_stories(self, session: dict[str, Any]) -> list[dict[str, Any]]:
+        """Top-3 STAR stories for behavioral sessions.
+
+        Retrieval is Jaccard-over-tokens today; embeddings will
+        replace it when the RAG vector store lands.
+        """
+        if not InterviewGenerator._is_behavioral_session(session):
+            return []
+        if self.star_store is None:
+            return []
+        user_id = str(session.get("user_id") or "").strip()
+        if not user_id:
+            return []
+        query = " ".join(
+            [
+                str(session.get("target_role") or ""),
+                " ".join(session.get("focus_areas") or []),
+                "behavioral interview",
+            ]
+        ).strip()
+        try:
+            return self.star_store.suggest_stories(user_id, query, limit=3)
+        except Exception as exc:  # noqa: BLE001 - stories are optional context
+            logger.warning("STAR story suggestion failed: %s", exc)
+            return []
+
+    def _enrich_session_context(self, session: dict[str, Any]) -> dict[str, Any]:
+        """Attach company-pack style and STAR story context in place."""
+        if self.company_packs is not None and str(session.get("company") or "").strip():
+            pack = self._load_company_pack(session)
+            if pack:
+                session["company_pack"] = pack
+        if self.star_store is not None:
+            stories = self._suggest_star_stories(session)
+            if stories:
+                session["star_stories"] = stories
+        return session
+
+    @staticmethod
+    def _effective_interviewer_style(session: dict[str, Any]) -> str:
+        """Session style, overridden by the company pack when present."""
+        pack = session.get("company_pack")
+        if isinstance(pack, dict):
+            style_config = pack.get("style_config")
+            if isinstance(style_config, dict):
+                pack_style = str(style_config.get("interviewer_style") or "").strip().lower()
+                if pack_style in {"supportive", "challenging", "neutral"}:
+                    return pack_style
+        return InterviewGenerator._interviewer_style(session)
+
+    @staticmethod
+    def _company_pack_block(session: dict[str, Any]) -> str:
+        pack = session.get("company_pack")
+        if not isinstance(pack, dict):
+            return ""
+        style_config = pack.get("style_config")
+        if not isinstance(style_config, dict):
+            return ""
+        tendencies = style_config.get("question_tendencies")
+        tendency_line = ""
+        if isinstance(tendencies, list) and tendencies:
+            tendency_line = (
+                "- company_question_tendencies: "
+                + "; ".join(str(t) for t in tendencies[:5])
+            )
+        difficulty = str(style_config.get("difficulty_bias") or "").strip()
+        difficulty_line = (
+            f"- company_difficulty_bias: {difficulty}" if difficulty else ""
+        )
+        followup = str(style_config.get("followup_style") or "").strip()
+        followup_line = (
+            f"- company_followup_style: {followup}" if followup else ""
+        )
+        lines = [
+            f"- company: {pack.get('company')}",
+            tendency_line,
+            difficulty_line,
+            followup_line,
+        ]
+        return "\n".join(line for line in lines if line)
+
+    @staticmethod
+    def _star_story_block(session: dict[str, Any]) -> str:
+        stories = session.get("star_stories")
+        if not isinstance(stories, list) or not stories:
+            return ""
+        lines = [
+            "Optional STAR story context from the candidate's own story bank "
+            "(use to personalize follow-ups and recognize their experience; "
+            "never read these aloud as questions):"
+        ]
+        for story in stories[:3]:
+            if not isinstance(story, dict):
+                continue
+            tags = ", ".join(str(t) for t in (story.get("tags") or [])[:5])
+            tag_suffix = f" [tags: {tags}]" if tags else ""
+            lines.append(
+                f"- {str(story.get('title', ''))}{tag_suffix}: "
+                f"Situation: {str(story.get('situation', ''))[:200]} | "
+                f"Action: {str(story.get('action', ''))[:200]} | "
+                f"Result: {str(story.get('result', ''))[:200]}"
+            )
+        return "\n".join(lines)
+
     @staticmethod
     def _question_prompt(
         session: dict[str, Any],
@@ -255,9 +387,11 @@ class InterviewGenerator:
         asked = session.get("asked_questions") or []
         memory_summary = str(session.get("memory_summary", "")).strip()
         memory_block = memory_summary[:1200] if memory_summary else "(none)"
-        interviewer_style = InterviewGenerator._interviewer_style(session)
+        interviewer_style = InterviewGenerator._effective_interviewer_style(session)
         progression_phase = InterviewGenerator._turn_phase(session)
         progression_rules = InterviewGenerator._question_progression_rules(session)
+        company_pack_block = InterviewGenerator._company_pack_block(session)
+        star_story_block = InterviewGenerator._star_story_block(session)
         style_rule = (
             "Be encouraging and confidence-building while still assessing rigor."
             if interviewer_style == "supportive"
@@ -316,6 +450,8 @@ Session configuration:
 - job_description_text: {(session.get('job_description_text') or '')[:2500]}
 - resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
 - session_memory_summary: {memory_block}
+{company_pack_block}
+{star_story_block}
 
 Recent turns:
 {InterviewGenerator._format_recent_turns(turns)}
@@ -365,6 +501,8 @@ Session configuration:
 - job_description_text: {(session.get('job_description_text') or '')[:2500]}
 - resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
 - session_memory_summary: {memory_block}
+{company_pack_block}
+{star_story_block}
 
 Recent turns:
 {InterviewGenerator._format_recent_turns(turns)}
@@ -381,6 +519,7 @@ Already asked questions (do not repeat semantically):
         question: str,
         answer: str,
         turn_index: int,
+        hint_level: int = 0,
     ) -> str:
         feedback_mode = InterviewGenerator._feedback_mode(session)
         memory_summary = str(session.get("memory_summary", "")).strip()
@@ -404,6 +543,13 @@ Already asked questions (do not repeat semantically):
   - practical tradeoff discussion.
 - If the candidate provides code, reference concrete code-level strengths and fixes.
 """
+        hint_rule = ""
+        if hint_level and hint_level > 0:
+            hint_rule = (
+                f"- The candidate used a level-{hint_level} hint for this question. "
+                "Score reasoning_depth on the reasoning the candidate demonstrated "
+                "themselves; do not credit reasoning that came from the hint."
+            )
         contract = render_contract(
             schema_label="Return ONLY this JSON object",
             schema_block="""{
@@ -425,6 +571,7 @@ Already asked questions (do not repeat semantically):
                 "strengths/improvements must each have 1-4 concise bullets.",
                 "If answer is weak or vague, score low rather than guessing intent.",
                 "strengths/improvements should remain plain short strings.",
+                hint_rule,
                 "follow_up_note should read like a study guide the learner can review after the interview, not like evaluator instructions.",
                 "follow_up_note must include these markdown sections in order: `### What strong interviewers wanted to hear`, `### What to improve next`, `### Stronger sample answer`.",
                 "In `### What strong interviewers wanted to hear`, explain the missing or successful reasoning, tradeoffs, bottlenecks, edge cases, and scaling or consistency caveats when relevant.",
@@ -744,6 +891,7 @@ Candidate answer:
         payload: dict[str, Any],
         *,
         session: dict[str, Any] | None = None,
+        hint_level: int = 0,
     ) -> dict[str, Any]:
         rubric = payload.get("rubric") if isinstance(payload.get("rubric"), dict) else {}
         norm = {
@@ -754,6 +902,7 @@ Candidate answer:
             "confidence_signal": _clamp_int(rubric.get("confidence_signal"), 0, 5, 3),
             "overall": _clamp_int(rubric.get("overall"), 0, 100, 60),
         }
+        norm = apply_hint_penalty(norm, hint_level)
 
         strengths_raw = payload.get("strengths") if isinstance(payload.get("strengths"), list) else []
         improvements_raw = (
@@ -792,6 +941,7 @@ Candidate answer:
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
     ) -> dict[str, Any]:
+        self._enrich_session_context(session)
         base_prompt = self._question_prompt(session, turns)
         if self.mcp is not None:
             mcp_context = await self.mcp.gather_context(
@@ -874,8 +1024,11 @@ Candidate answer:
         turn_index: int,
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
+        hint_level: int = 0,
     ) -> dict[str, Any]:
-        base_prompt = self._evaluate_prompt(session, question, user_answer, turn_index)
+        base_prompt = self._evaluate_prompt(
+            session, question, user_answer, turn_index, hint_level=hint_level
+        )
         if self.mcp is not None:
             mcp_context = await self.mcp.gather_context(
                 flow="interview",
@@ -909,7 +1062,9 @@ Candidate answer:
             payload = _extract_json(result.get("analysis", "")) if result.get("success") else {}
             ok, issue = self._validate_eval_payload(payload)
             if ok:
-                normalized = self._normalise_eval_payload(payload, session=session)
+                normalized = self._normalise_eval_payload(
+                    payload, session=session, hint_level=hint_level
+                )
                 normalized["follow_up_note"] = format_markdown_readable(
                     normalized.get("follow_up_note", "")
                 )

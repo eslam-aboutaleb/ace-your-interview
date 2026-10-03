@@ -1708,6 +1708,41 @@ export async function importDeck(
   return data;
 }
 
+// ── Interview Personalization ─────────────────────
+// (types imported below: this file is append-only, and
+// ES module imports are hoisted, so the trailing import
+// keeps every existing line untouched)
+import type {
+  CompanyPacksResponse,
+  HintRequest,
+  HintResponse,
+  JDAnalysisResponse,
+  LLMConfig,
+  ResumeUploadResponse,
+  StarStory,
+  StarStoryCreateRequest,
+  StarStoryListResponse,
+  StarStorySuggestionsResponse,
+  StarStoryUpdateRequest,
+} from "@/types";
+
+export async function uploadResume(
+  file: File,
+  llmConfig?: LLMConfig,
+): Promise<ResumeUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (llmConfig) {
+    formData.append("llm_config_json", JSON.stringify(llmConfig));
+  }
+  const { data } = await api.post<ResumeUploadResponse>(
+    "/interview-sessions/resume",
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data;
+}
+
 export function exportDeckApkgUrl(deckId: string): string {
   const base = (import.meta.env.VITE_API_URL || "/api").replace(
     /\/$/,
@@ -1722,6 +1757,77 @@ export async function findDuplicateCards(
   const { data } = await api.post<FindDuplicatesResponse>(
     "/cards/find-duplicates",
     req,
+  );
+  return data;
+}
+export async function deleteResume(): Promise<void> {
+  await api.delete("/interview-sessions/resume");
+}
+
+export async function analyzeJobDescription(
+  jdText: string,
+): Promise<JDAnalysisResponse> {
+  const { data } = await api.post<JDAnalysisResponse>(
+    "/interview-sessions/jd-analysis",
+    { jd_text: jdText },
+  );
+  return data;
+}
+
+export async function fetchCompanyPacks(): Promise<CompanyPacksResponse> {
+  const { data } = await api.get<CompanyPacksResponse>(
+    "/interview-sessions/companies",
+  );
+  return data;
+}
+
+export async function fetchHint(
+  questionId: string,
+  level: number,
+  payload?: HintRequest,
+): Promise<HintResponse> {
+  const { data } = await api.post<HintResponse>(
+    `/questions/${encodeURIComponent(questionId)}/hint`,
+    payload ?? {},
+    { params: { level } },
+  );
+  return data;
+}
+
+export async function fetchStarStories(): Promise<StarStoryListResponse> {
+  const { data } = await api.get<StarStoryListResponse>("/star-stories");
+  return data;
+}
+
+export async function createStarStory(
+  req: StarStoryCreateRequest,
+): Promise<StarStory> {
+  const { data } = await api.post<StarStory>("/star-stories", req);
+  return data;
+}
+
+export async function updateStarStory(
+  storyId: string,
+  req: StarStoryUpdateRequest,
+): Promise<StarStory> {
+  const { data } = await api.put<StarStory>(
+    `/star-stories/${encodeURIComponent(storyId)}`,
+    req,
+  );
+  return data;
+}
+
+export async function deleteStarStory(storyId: string): Promise<void> {
+  await api.delete(`/star-stories/${encodeURIComponent(storyId)}`);
+}
+
+export async function suggestStarStories(
+  query: string,
+  limit = 3,
+): Promise<StarStorySuggestionsResponse> {
+  const { data } = await api.get<StarStorySuggestionsResponse>(
+    "/star-stories/suggest",
+    { params: { q: query, limit } },
   );
   return data;
 }
