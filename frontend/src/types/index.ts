@@ -1191,3 +1191,156 @@ export interface ChatAskResponse {
   citations: Citation[];
   conversation_id: string;
 }
+
+/* ── Flashcard Decks + Anki Interop ────────── */
+
+export interface DeckCreateRequest {
+  name: string;
+  description?: string;
+}
+
+export interface DeckUpdateRequest {
+  name: string;
+  description?: string;
+}
+
+export interface DeckResponse {
+  deck_id: string;
+  name: string;
+  description: string;
+  card_count: number;
+  due_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeckListResponse {
+  decks: DeckResponse[];
+}
+
+export interface CardCreateRequest {
+  front: string;
+  back: string;
+  tags?: string[];
+}
+
+export interface CardUpdateRequest {
+  front: string;
+  back: string;
+  tags?: string[];
+}
+
+export interface FSRSCardState {
+  state: string;
+  stability: number | null;
+  difficulty: number | null;
+  due_at: string;
+  last_review_at: string | null;
+  reps: number;
+  lapses: number;
+  scheduled_days: number;
+  elapsed_days: number;
+  suspended: number;
+}
+
+export interface FlashcardResponse {
+  card_id: string;
+  deck_id: string;
+  front: string;
+  back: string;
+  source_ref: string;
+  tags: string[];
+  fsrs_card_id: string;
+  suspended: number;
+  created_at: string;
+  updated_at: string;
+  fsrs: FSRSCardState | null;
+}
+
+export interface FlashcardListResponse {
+  cards: FlashcardResponse[];
+  total: number;
+}
+
+export type GenerateCardsSourceType = "topic" | "section" | "document";
+
+export interface GenerateCardsRequest {
+  source_type: GenerateCardsSourceType;
+  topic_id?: string;
+  section_title?: string;
+  document_id?: string;
+  count: number;
+  llm_config?: LLMConfig;
+}
+
+export interface GenerateCardsResponse {
+  job_id: string;
+  status: string;
+}
+
+export interface GeneratedCardItem {
+  card_id: string;
+  front: string;
+  back: string;
+  source_section: string;
+  source_quote: string;
+}
+
+export interface GenerateCardsJobResponse {
+  job_id: string;
+  status: string;
+  cards: GeneratedCardItem[];
+  retries_used: number;
+  malformed_items_dropped: number;
+  error: string;
+}
+
+export interface ImportDeckResponse {
+  deck_id: string;
+  deck_name: string;
+  imported: number;
+  skipped_duplicates: number;
+  errors: string[];
+}
+
+export interface FindDuplicatesRequest {
+  deck_id?: string;
+  threshold?: number;
+}
+
+export interface DuplicateCardRef {
+  card_id: string;
+  deck_id: string;
+  front: string;
+}
+
+export interface DuplicatePair {
+  card_a: DuplicateCardRef;
+  card_b: DuplicateCardRef;
+  similarity: number;
+  jaccard: number;
+  cosine: number | null;
+}
+
+export interface FindDuplicatesResponse {
+  pairs: DuplicatePair[];
+  threshold: number;
+}
+
+export interface DeckReviewRequest {
+  card_id: string;
+  rating: LearningReviewRating;
+  response_time_ms?: number;
+}
+
+export interface DeckReviewResponse {
+  card: FlashcardResponse;
+  log: FSRSReviewLogResponse;
+  leech: boolean;
+}
+
+export interface StudySessionResponse {
+  deck_id: string;
+  cards: FlashcardResponse[];
+  total_due: number;
+}

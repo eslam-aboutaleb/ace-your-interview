@@ -304,6 +304,33 @@ class LearningStore:
                 ON fsrs_review_log(user_id, created_at DESC)
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS decks (
+                    user_id TEXT NOT NULL, deck_id TEXT NOT NULL,
+                    name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, deck_id)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cards (
+                    user_id TEXT NOT NULL, card_id TEXT NOT NULL,
+                    deck_id TEXT NOT NULL, front TEXT NOT NULL, back TEXT NOT NULL,
+                    source_ref TEXT NOT NULL DEFAULT '',
+                    tags_json TEXT NOT NULL DEFAULT '[]',
+                    fsrs_card_id TEXT NOT NULL,
+                    suspended INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, card_id)
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cards_deck ON cards(user_id, deck_id)"
+            )
 
     @staticmethod
     def _event_score(is_correct: bool, confidence: int) -> float:

@@ -4670,3 +4670,241 @@ class QuestionGenerator:
             retries_used=stats.get("retries_used", 0),
             malformed_items_dropped=stats.get("malformed_items_dropped", 0),
         )
+
+    async def generate_cards(
+        self,
+        topic_id: str,
+        topic_title: str,
+        doc_content: str,
+        count: int = 10,
+        section_title: Optional[str] = None,
+        section_content: Optional[str] = None,
+        response_detail: str = "very_detailed",
+        existing_cards: Optional[list[str]] = None,
+        llm_config: Optional[LLMConfigRequest] = None,
+        user_identity: Optional[dict] = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Generate flashcards ``{front, back, source_quote, source_section}``.
+
+        Reuses the v2 question machinery: the same
+        grounding-anchor validation, the same
+        ``_collect_with_retries`` retry/repair loop, and
+        the same ``LLMClient`` budget policy. ``count`` is
+        capped at ``MAX_CARD_GENERATION_COUNT``.
+        """
+        target_count = max(1, min(int(count or 10), MAX_CARD_GENERATION_COUNT))
+        mcp_context = await self._mcp_context_for_flow(
+            flow="questions",
+            query=f"{topic_title} {section_title or ''} flashcards",
+            topic_id=topic_id,
+            topic_title=topic_title,
+        )
+        grounding_anchors = _grounding_anchor_phrases(
+            topic_title=topic_title,
+            section_title=section_title,
+            content=section_content if (section_title and section_content) else doc_content,
+        )
+        prompt = _build_card_prompt(
+            topic_id=topic_id,
+            topic_title=topic_title,
+            doc_content=doc_content,
+            count=target_count,
+            section_title=section_title,
+            section_content=section_content,
+            response_detail=response_detail,
+            existing_cards=existing_cards,
+            mcp_context=mcp_context,
+        )
+
+        def validator(item: dict[str, Any]) -> tuple[bool, str]:
+            return _validate_card_item(
+                item,
+                topic_title=topic_title,
+                grounding_anchors=grounding_anchors,
+            )
+
+        raw_items, stats = await _collect_with_retries(
+            llm=self.llm,
+            base_prompt=prompt,
+            llm_config=llm_config,
+            user_identity=user_identity,
+            target_count=target_count,
+            validator=validator,
+            existing_questions=existing_cards,
+            system_prompt=_CARD_SYSTEM_PROMPT,
+        )
+
+        cards: list[dict[str, Any]] = []
+        seen_fronts: set[str] = set()
+        for item in raw_items:
+            front = str(item.get("front", "")).strip()
+            norm = _normalise_question(front)
+            if not norm or norm in seen_fronts:
+                continue
+            seen_fronts.add(norm)
+            cards.append(
+                {
+                    "card_id": _card_id(topic_id, front),
+                    "front": front,
+                    "back": str(item.get("back", "")).strip(),
+                    "source_section": str(
+                        item.get("source_section", "")
+                    ).strip(),
+                    "source_quote": str(
+                        item.get("source_quote", "")
+                    ).strip(),
+                }
+            )
+        return cards[:target_count], stats
+
+
+# ── Flashcard generation (STUDY_ENABLE_FLASHCARDS_V1) ──
+
+#: Hard cap on cards generated per request (plan decision).
+MAX_CARD_GENERATION_COUNT = 50
+
+_CARD_SYSTEM_PROMPT = (
+    "You are an expert technical educator. You write interview-grade "
+    "flashcards: a concise question on the front and a direct, detailed "
+    "answer on the back, both grounded in the supplied course material. "
+    "You always respond with a single JSON array and never with prose."
+)
+
+
+def _build_card_prompt(
+    topic_id: str,
+    topic_title: str,
+    doc_content: str,
+    count: int = 10,
+    section_title: Optional[str] = None,
+    section_content: Optional[str] = None,
+    response_detail: str = "very_detailed",
+    existing_cards: Optional[list[str]] = None,
+    mcp_context: str = "",
+) -> str:
+    """Build the flashcard generation user turn."""
+    if section_title and section_content:
+        scope = f'the "{section_title}" section of "{topic_title}"'
+        content = _clamp_content(section_content)
+    else:
+        scope = f'"{topic_title}"'
+        content = _clamp_content(doc_content)
+    grounding_anchors = _grounding_anchor_phrases(
+        topic_title=topic_title,
+        section_title=section_title,
+        content=section_content if (section_title and section_content) else doc_content,
+    )
+    grounding_block = _render_grounding_anchors_block(grounding_anchors)
+    detail_clause = (
+        "Keep back answers concise but complete: the direct answer first, "
+        "then the key mechanism, tradeoff, or failure mode an interviewer "
+        "would probe."
+        if response_detail != "very_detailed"
+        else "Be maximally detailed on the back: the direct answer first, "
+        "then layered explanation, concrete examples, edge cases, and the "
+        "tradeoff or failure mode an interviewer would probe."
+    )
+    uniqueness_block = ""
+    seed = _normalise_existing_questions(existing_cards)
+    if seed:
+        existing_blob = "\n".join([f"- {q}" for q in seed[:60]])
+        uniqueness_block = (
+            "\nAlready generated cards for this topic. Do NOT repeat or "
+            f"rephrase these:\n{existing_blob}\n"
+        )
+    mcp_block = untrusted_block("external_context", mcp_context, 2500)
+    untrusted_blocks = "\n\n".join(
+        block
+        for block in (
+            untrusted_block("topic_title", topic_title),
+            untrusted_block("section_title", section_title or ""),
+            untrusted_block(
+                "section_content" if (section_title and section_content) else "documentation",
+                content,
+                _MAX_DOC_CONTEXT,
+            ),
+        )
+        if block
+    )
+    prompt_contract = render_contract(
+        schema_label="Return ONLY valid JSON in this shape",
+        schema_block="""[
+  {
+    "front": "Concise flashcard question",
+    "back": "Direct, detailed answer",
+    "source_section": "Section name",
+    "source_quote": "short direct quote from course content"
+  }
+]""",
+        rules=[
+            f"Return exactly {count} items; never return fewer.",
+            "Front text must be a self-contained question that names the topic concept.",
+            "Back text must directly answer the front; no meta-guidance about how to answer.",
+            "Each card must be explicitly grounded to the current topic, section, or one of the grounding anchors below.",
+            "Do not ask generic questions that could fit many unrelated topics with only minor wording changes.",
+            "Front and back must stay aligned to the same concept.",
+            detail_clause,
+            "source_quote must be factual text from the provided course content.",
+            "Because output must be valid JSON, escape newlines, quotes, and backslashes correctly inside string values.",
+            "Do not wrap JSON with prose; return raw JSON only.",
+            UNTRUSTED_CLAUSE,
+        ],
+    )
+    return f"""Generate exactly {count} interview-grade flashcards for {scope}.
+{uniqueness_block}
+{grounding_block}
+
+{prompt_contract}
+
+{untrusted_blocks}{mcp_block}"""
+
+
+def _validate_card_item(
+    item: dict[str, Any],
+    *,
+    topic_title: str,
+    grounding_anchors: list[str],
+) -> tuple[bool, str]:
+    """Validate one generated flashcard item.
+
+    Mirrors ``front`` into ``question`` so the shared
+    retry machinery's near-duplicate detection works
+    unchanged on the card front text.
+    """
+    front = str(item.get("front", "")).strip()
+    back = str(item.get("back", "")).strip()
+    if not front:
+        return False, "missing_or_empty_front"
+    if len(front) < 8:
+        return False, "front_too_short"
+    if not back:
+        return False, "missing_or_empty_back"
+    if len(back) < 15:
+        return False, "back_too_short"
+    source_quote = str(item.get("source_quote", "")).strip()
+    if not source_quote:
+        return False, "missing_source_quote"
+    source_section = str(item.get("source_section", "")).strip()
+    if not source_section:
+        return False, "missing_source_section"
+    item["question"] = front
+    item["front"] = front
+    item["back"] = back
+    item["source_quote"] = source_quote
+    item["source_section"] = source_section
+    if topic_title or grounding_anchors:
+        if not _question_is_grounded_to_anchors(
+            front,
+            topic_title=topic_title,
+            anchors=grounding_anchors,
+            problem_solving_mode=False,
+        ):
+            return False, "card_not_grounded_to_topic"
+    return True, ""
+
+
+def _card_id(topic_id: str, front: str) -> str:
+    digest = hashlib.sha1(
+        f"card:{topic_id}:{front.strip().lower()}".encode("utf-8")
+    ).hexdigest()
+    return f"{topic_id}:{digest[:14]}"

@@ -81,6 +81,23 @@ import type {
   SaveProgressPayload,
   TopicProgressDocument,
   TopicProgressListResponse,
+  DeckCreateRequest,
+  DeckUpdateRequest,
+  DeckResponse,
+  DeckListResponse,
+  CardCreateRequest,
+  CardUpdateRequest,
+  FlashcardResponse,
+  FlashcardListResponse,
+  GenerateCardsRequest,
+  GenerateCardsResponse,
+  GenerateCardsJobResponse,
+  ImportDeckResponse,
+  FindDuplicatesRequest,
+  FindDuplicatesResponse,
+  DeckReviewRequest,
+  DeckReviewResponse,
+  StudySessionResponse,
 } from "@/types";
 
 const api = axios.create({
@@ -1548,6 +1565,163 @@ export async function askDocumentQuestion(
   const { data } = await api.post<ChatAskResponse>(
     "/chat/ask",
     payload,
+  );
+  return data;
+}
+
+// ── Flashcard Decks + Anki Interop ──────────
+export async function fetchDecks(): Promise<DeckListResponse> {
+  const { data } = await api.get<DeckListResponse>("/decks");
+  return data;
+}
+
+export async function createDeck(
+  req: DeckCreateRequest,
+): Promise<DeckResponse> {
+  const { data } = await api.post<DeckResponse>("/decks", req);
+  return data;
+}
+
+export async function fetchDeck(
+  deckId: string,
+): Promise<DeckResponse> {
+  const { data } = await api.get<DeckResponse>(
+    `/decks/${encodeURIComponent(deckId)}`,
+  );
+  return data;
+}
+
+export async function updateDeck(
+  deckId: string,
+  req: DeckUpdateRequest,
+): Promise<DeckResponse> {
+  const { data } = await api.put<DeckResponse>(
+    `/decks/${encodeURIComponent(deckId)}`,
+    req,
+  );
+  return data;
+}
+
+export async function deleteDeck(deckId: string): Promise<void> {
+  await api.delete(`/decks/${encodeURIComponent(deckId)}`);
+}
+
+export async function fetchDeckCards(
+  deckId: string,
+  dueOnly = false,
+  limit = 500,
+): Promise<FlashcardListResponse> {
+  const { data } = await api.get<FlashcardListResponse>(
+    `/decks/${encodeURIComponent(deckId)}/cards`,
+    { params: { due_only: dueOnly, limit } },
+  );
+  return data;
+}
+
+export async function addDeckCard(
+  deckId: string,
+  req: CardCreateRequest,
+): Promise<FlashcardResponse> {
+  const { data } = await api.post<FlashcardResponse>(
+    `/decks/${encodeURIComponent(deckId)}/cards`,
+    req,
+  );
+  return data;
+}
+
+export async function updateDeckCard(
+  cardId: string,
+  req: CardUpdateRequest,
+): Promise<FlashcardResponse> {
+  const { data } = await api.put<FlashcardResponse>(
+    `/cards/${encodeURIComponent(cardId)}`,
+    req,
+  );
+  return data;
+}
+
+export async function deleteDeckCard(
+  cardId: string,
+): Promise<void> {
+  await api.delete(`/cards/${encodeURIComponent(cardId)}`);
+}
+
+export async function fetchStudySession(
+  deckId: string,
+  limit = 50,
+): Promise<StudySessionResponse> {
+  const { data } = await api.get<StudySessionResponse>(
+    `/decks/${encodeURIComponent(deckId)}/study-session`,
+    { params: { limit } },
+  );
+  return data;
+}
+
+export async function reviewDeckCard(
+  deckId: string,
+  req: DeckReviewRequest,
+): Promise<DeckReviewResponse> {
+  const { data } = await api.post<DeckReviewResponse>(
+    `/decks/${encodeURIComponent(deckId)}/review`,
+    req,
+  );
+  return data;
+}
+
+export async function generateDeckCards(
+  deckId: string,
+  req: GenerateCardsRequest,
+): Promise<GenerateCardsResponse> {
+  const { data } = await api.post<GenerateCardsResponse>(
+    `/decks/${encodeURIComponent(deckId)}/generate`,
+    req,
+  );
+  return data;
+}
+
+export async function fetchCardGenerationJob(
+  jobId: string,
+): Promise<GenerateCardsJobResponse> {
+  const { data } = await api.get<GenerateCardsJobResponse>(
+    `/decks/generate/jobs/${encodeURIComponent(jobId)}`,
+  );
+  return data;
+}
+
+export async function importDeck(
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<ImportDeckResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post<ImportDeckResponse>(
+    "/decks/import",
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (event) => {
+        if (!onProgress || !event.total) return;
+        onProgress(Math.round((event.loaded * 100) / event.total));
+      },
+    },
+  );
+  return data;
+}
+
+export function exportDeckApkgUrl(deckId: string): string {
+  const base = (import.meta.env.VITE_API_URL || "/api").replace(
+    /\/$/,
+    "",
+  );
+  return `${base}/decks/${encodeURIComponent(deckId)}/export`;
+}
+
+export async function findDuplicateCards(
+  req: FindDuplicatesRequest,
+): Promise<FindDuplicatesResponse> {
+  const { data } = await api.post<FindDuplicatesResponse>(
+    "/cards/find-duplicates",
+    req,
   );
   return data;
 }
