@@ -1,6 +1,8 @@
 services:
   - type: web
-    name: ace-your-interview-backend
+    # NOTE: Render blueprint service names are immutable — renaming
+    # this field breaks the blueprint sync. Keep the original name.
+    name: study-app-backend
     runtime: python
     region: oregon
     plan: free
