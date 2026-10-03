@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: study-app-backend
+    name: ace-your-interview-backend
     runtime: python
     region: oregon
     plan: free

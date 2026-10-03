@@ -1,4 +1,4 @@
-"""Study-app backend configuration."""
+"""Ace Your Interview backend configuration."""
 
 from functools import lru_cache
 from typing import Any

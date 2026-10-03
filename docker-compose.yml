@@ -1,11 +1,11 @@
 services:
-  study-backend:
+  ace-your-interview-backend:
     build: ./backend
     ports:
       - "8001:8001"
     volumes:
       - ./backend/docs:/app/docs:ro
-      - study_data:/app/data
+      - ace_data:/app/data
     env_file:
       - ./backend/.env
     environment:
@@ -18,13 +18,13 @@ services:
       STUDY_ALLOWED_USERS_FILE: /app/data/allowed_users.json
     restart: unless-stopped
 
-  study-frontend:
+  ace-your-interview-frontend:
     build: ./frontend
     ports:
       - "5174:5174"
     depends_on:
-      - study-backend
+      - ace-your-interview-backend
     restart: unless-stopped
 
 volumes:
-  study_data:
+  ace_data:

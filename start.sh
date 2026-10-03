@@ -38,5 +38,5 @@ if [ "$LLM_CHAIN_OK" = false ] && [ "$CLI_AGENT_OK" = false ]; then
 fi
 
 echo ""
-echo "Starting study-app services..."
+echo "Starting ace-your-interview services..."
 docker compose up --build "$@"

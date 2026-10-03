@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "study-app-backend"
+name = "ace-your-interview-backend"
 version = "2.0.0"
 description = "Ace Your Interview backend – generates interview Q&A via LiteLLM"
 requires-python = ">=3.11"
