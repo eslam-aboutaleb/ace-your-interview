@@ -55,10 +55,6 @@ CHAT_SYSTEM_PROMPT = (
     f"{UNTRUSTED_CLAUSE}"
 )
 
-#: Hard clip applied before fencing, so a hostile multi-megabyte payload is
-#: bounded before any regex runs over it.
-HARD_INPUT_GUARD_CHARS = 20000
-
 
 def _fence(label: str, value: str, max_chars: int) -> str:
     """De-fang and fence one externally sourced value.

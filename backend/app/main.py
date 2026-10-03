@@ -41,7 +41,13 @@ from app.services.llm_client import LLMClient
 from app.services.mcp_gateway import MCPGateway
 from app.services.progress_summarizer import ProgressSummarizer
 from app.services.progress_store import ProgressStore
-from app.services.rate_limit import InMemoryRateLimiter, classify_rate_limit_scope, request_ip
+from app.services.rate_limit import (
+    InMemoryRateLimiter,
+    RateLimiterBackend,
+    classify_rate_limit_scope,
+    create_rate_limiter,
+    request_ip,
+)
 from app.services.user_settings_store import UserSettingsStore, resolve_credentials_encryption_secret
 from app.services.auth import decode_jwt_token
 
@@ -56,7 +62,42 @@ _llm_assignments_store: LLMAssignmentsStore | None = None
 _mcp_gateway: MCPGateway | None = None
 _progress_store: ProgressStore | None = None
 _progress_summarizer: ProgressSummarizer | None = None
-_rate_limiter = InMemoryRateLimiter()
+_rate_limiter: RateLimiterBackend = InMemoryRateLimiter()
+
+
+def _init_rate_limiter(settings) -> RateLimiterBackend:
+    """Resolve the configured rate-limiter backend at startup.
+
+    Redis is opt-in (``STUDY_RATE_LIMIT_BACKEND=redis``). When
+    it is unreachable, strict mode (``STUDY_RATE_LIMIT_STRICT``)
+    fails startup instead of silently degrading to per-replica
+    in-memory state, which would hide cross-replica over-limit
+    traffic.
+    """
+    backend_name = str(
+        getattr(settings, "rate_limit_backend", "memory") or "memory"
+    ).strip().lower()
+    if backend_name != "redis":
+        return _rate_limiter
+    try:
+        limiter = create_rate_limiter(settings)
+        ping = getattr(limiter, "ping", None)
+        if callable(ping):
+            ping()
+        logger.info("Rate limiter backend: redis")
+        return limiter
+    except Exception as exc:
+        if getattr(settings, "rate_limit_strict", False):
+            logger.error(
+                "Redis rate limiter unavailable and STUDY_RATE_LIMIT_STRICT=true: %s",
+                exc,
+            )
+            raise
+        logger.warning(
+            "Redis rate limiter unavailable (%s); falling back to in-memory",
+            exc,
+        )
+        return _rate_limiter
 
 
 def _rate_limit_rule(scope: str) -> tuple[int, int]:
@@ -110,13 +151,14 @@ _load_dotenv()
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle."""
-    global _llm_client, _learning_store, _learning_planner, _user_settings_store, _llm_service_access, _llm_assignments_store, _mcp_gateway, _progress_store, _progress_summarizer
+    global _llm_client, _learning_store, _learning_planner, _user_settings_store, _llm_service_access, _llm_assignments_store, _mcp_gateway, _progress_store, _progress_summarizer, _rate_limiter
 
     settings = get_settings()
     logging.basicConfig(level=logging.INFO)
     logger.info("Starting %s v%s", settings.app_name, settings.app_version)
     resolve_auth_secret_key(settings)
     resolve_credentials_encryption_secret(settings)
+    _rate_limiter = _init_rate_limiter(settings)
 
     # Initialise shared services
     _llm_service_access = LLMServiceAccess()
@@ -150,7 +192,7 @@ async def lifespan(application: FastAPI):
         settings.learning_db_path,
         _mcp_gateway,
     )
-    voice.init(_llm_client)
+    voice.init(_llm_client, _user_settings_store)
 
     logger.info("Loaded %d topics from curriculum %s", len(parser.list_topics()), parser.source_path)
 

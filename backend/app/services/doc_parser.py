@@ -311,8 +311,8 @@ class DocParser:
     def _normalise_level(level: Optional[str]) -> str:
         if not level:
             return ""
-        l = level.strip().lower()
-        return l if l in _VALID_LEVELS else ""
+        normalised = level.strip().lower()
+        return normalised if normalised in _VALID_LEVELS else ""
 
     def _normalise_levels(self, levels_meta: object) -> list[str]:
         if isinstance(levels_meta, str):
@@ -324,9 +324,9 @@ class DocParser:
 
         normalised: list[str] = []
         for item in raw_levels:
-            l = self._normalise_level(item)
-            if l and l not in normalised:
-                normalised.append(l)
+            level_code = self._normalise_level(item)
+            if level_code and level_code not in normalised:
+                normalised.append(level_code)
         return normalised or list(_DEFAULT_LEVELS)
 
     def _infer_track(self, topic_id: str, title: str) -> str:

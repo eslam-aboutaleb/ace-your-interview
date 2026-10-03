@@ -4091,16 +4091,21 @@ class QuestionGenerator:
                 section_title=mode["section_title"],
                 content=mode["section_content"] or doc_content,
             )
-            validator = lambda item, mode=mode, grounding_anchors=grounding_anchors: _validate_question_item(
+            def validator(
                 item,
-                topic_id,
-                mode["difficulty"],
-                level,
-                preferred_language=str(mode["preferred_language"]),
-                requires_programming=bool(mode["requires_programming"]),
-                topic_title=topic_title,
+                mode=mode,
                 grounding_anchors=grounding_anchors,
-            )
+            ):
+                return _validate_question_item(
+                    item,
+                    topic_id,
+                    mode["difficulty"],
+                    level,
+                    preferred_language=str(mode["preferred_language"]),
+                    requires_programming=bool(mode["requires_programming"]),
+                    topic_title=topic_title,
+                    grounding_anchors=grounding_anchors,
+                )
             prompt = _build_prompt(
                 topic_id=topic_id,
                 topic_title=topic_title,
@@ -4616,13 +4621,14 @@ class QuestionGenerator:
         )
         allowed_topics = {str(tc["id"]) for tc in topics_content}
         allowed_types = set(question_types or ["mcq", "true_false"])
-        validator = lambda item: _validate_quiz_item(
-            item,
-            allowed_topics,
-            allowed_types,
-            difficulty,
-            level,
-        )
+        def validator(item):
+            return _validate_quiz_item(
+                item,
+                allowed_topics,
+                allowed_types,
+                difficulty,
+                level,
+            )
 
         raw_items, stats = await _collect_with_retries(
             llm=self.llm,

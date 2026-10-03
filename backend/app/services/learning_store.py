@@ -590,7 +590,7 @@ class LearningStore:
                 "task_type": "quiz",
                 "topic_id": topic_id,
                 "title": f"Reinforce {topic_id} with quiz",
-                "reason": f"Validate retention and confidence after focused review.",
+                "reason": "Validate retention and confidence after focused review.",
                 "estimated_minutes": 15,
                 "cta_route": f"/quiz/{topic_id}",
             }

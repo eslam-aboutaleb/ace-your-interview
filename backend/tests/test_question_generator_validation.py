@@ -221,9 +221,10 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
             requested_total_count=5,
             existing_questions=["How would you design retries for this API?"],
         )
-        validator = lambda item: _validate_question_item(
-            item, "topic-reliability", "medium", "mid"
-        )
+        def validator(item):
+            return _validate_question_item(
+                item, "topic-reliability", "medium", "mid"
+            )
         items, _stats = asyncio.run(
             _collect_with_retries(
                 llm=FakeLLM(),
@@ -279,9 +280,10 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
             count=2,
             level="mid",
         )
-        validator = lambda item: _validate_question_item(
-            item, "topic-reliability", "medium", "mid"
-        )
+        def validator(item):
+            return _validate_question_item(
+                item, "topic-reliability", "medium", "mid"
+            )
         items, _stats = asyncio.run(
             _collect_with_retries(
                 llm=FakeLLM(),

@@ -1,4 +1,3 @@
-import json
 import os
 import tempfile
 import unittest
@@ -187,6 +186,40 @@ class UserSettingsRouterTests(unittest.TestCase):
         self.assertEqual(pref_res.status_code, 200)
         self.assertEqual(pref_res.json()["llm_source"], "study_app")
         self.assertEqual(pref_res.json()["auth_mode"], "api_key")
+
+    def test_voice_tier_preference_round_trip(self):
+        pref_res = self.client.put(
+            "/api/user-settings/preferences",
+            json={
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "temperature": 0.6,
+                "max_tokens": 256,
+                "auth_mode": "api_key",
+                "voice_tier": "cloud",
+            },
+        )
+        self.assertEqual(pref_res.status_code, 200)
+        self.assertEqual(pref_res.json()["voice_tier"], "cloud")
+
+        after = self.client.get("/api/user-settings")
+        self.assertEqual(after.status_code, 200)
+        self.assertEqual(after.json()["preferences"]["voice_tier"], "cloud")
+
+        # Unknown tiers fall back to the admin default (None).
+        invalid_res = self.client.put(
+            "/api/user-settings/preferences",
+            json={
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "temperature": 0.6,
+                "max_tokens": 256,
+                "auth_mode": "api_key",
+                "voice_tier": "carrier-pigeon",
+            },
+        )
+        self.assertEqual(invalid_res.status_code, 200)
+        self.assertIsNone(invalid_res.json()["voice_tier"])
 
     def test_using_backend_fallback_flag_false_when_not_approved(self):
         os.environ["OPENAI_API_KEY"] = "sk-backend-openai"

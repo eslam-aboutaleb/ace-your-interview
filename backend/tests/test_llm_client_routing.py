@@ -37,7 +37,10 @@ class LLMClientRoutingTests(unittest.TestCase):
         with patch("app.services.llm_client.get_settings", return_value=settings):
             with patch("app.services.llm_client.litellm.acompletion", new=fake_completion):
                 out = asyncio.run(
-                    client.completion("Evaluate the candidate answer and return rubric JSON")
+                    client.completion(
+                        "Evaluate the candidate answer and return rubric JSON",
+                        task="eval",
+                    )
                 )
         self.assertTrue(out["success"])
         self.assertEqual(captured.get("model"), "gpt-4o-mini")

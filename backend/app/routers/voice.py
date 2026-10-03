@@ -8,13 +8,11 @@ import logging
 import os
 import time
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from app.config import get_settings
 from app.dependencies import (
-    is_admin_identity,
     is_dev_auth_bypass_enabled,
     require_admin,
     require_auth,
@@ -26,6 +24,7 @@ from app.schemas.models import (
 )
 from app.services.auth import decode_jwt_token
 from app.services.llm_client import LLMClient
+from app.services.user_settings_store import UserSettingsStore, identity_key_for_user
 from app.services.voice_session import VoiceSession, create_voice_session
 
 logger = logging.getLogger(__name__)
@@ -33,15 +32,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
 _llm_client: LLMClient | None = None
+_user_settings_store: UserSettingsStore | None = None
 
 # Close code for a connection that exhausted its per-connection LLM turn budget.
 # Application-defined range (4000-4999), distinct from 4001 (unauthenticated).
 _TURN_BUDGET_CLOSE_CODE = 4429
 
 
-def init(llm_client: LLMClient):
-    global _llm_client
+def init(llm_client: LLMClient, user_settings_store: UserSettingsStore | None = None):
+    global _llm_client, _user_settings_store
     _llm_client = llm_client
+    _user_settings_store = user_settings_store
 
 
 # ── REST Endpoints ─────────────────────────────────────────
@@ -53,11 +54,21 @@ async def get_voice_config(user: dict = Depends(require_auth)):
     settings = get_settings()
     enabled_tiers = [t.strip() for t in settings.voice_tiers_enabled.split(",") if t.strip()]
 
+    # Per-user tier override: a saved preference wins when it names a
+    # tier that is currently enabled; otherwise the admin default applies.
+    user_tier = settings.voice_default_tier
+    if _user_settings_store is not None:
+        identity_key = identity_key_for_user(user)
+        prefs, _ = _user_settings_store.get_user_state(identity_key)
+        saved_tier = str(prefs.get("voice_tier") or "").strip()
+        if saved_tier and saved_tier in enabled_tiers:
+            user_tier = saved_tier
+
     return VoiceConfigResponse(
         enabled=settings.enable_voice_agent,
         available_tiers=enabled_tiers,
         default_tier=settings.voice_default_tier,
-        user_tier=settings.voice_default_tier,  # TODO: per-user override from UserSettingsStore
+        user_tier=user_tier,
         stt_provider=settings.voice_stt_provider,
         tts_provider=settings.voice_tts_provider,
     )

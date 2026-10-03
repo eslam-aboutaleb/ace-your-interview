@@ -378,20 +378,25 @@ Static topic body.
     # ── 2.2 bounds on client-supplied prompt inputs ────────
 
     def test_oversized_section_content_is_truncated_before_the_prompt(self):
-        huge = "S" * 40000
+        # The schema caps section inputs at the same values the
+        # router fences at, so oversized payloads are rejected
+        # (422) before the router runs. Inputs at the declared
+        # caps must still reach the prompt bounded.
+        capped_title = "T" * questions.MAX_SECTION_TITLE_CHARS
+        capped_content = "S" * questions.MAX_SECTION_CONTENT_CHARS
         res = self.client.post(
             "/api/questions/generate-v2",
             json={
                 "topic_id": "custom-java",
                 "count": 1,
                 "level": "mid",
-                "section_title": "T" * 5000,
-                "section_content": huge,
+                "section_title": capped_title,
+                "section_content": capped_content,
             },
         )
         self.assertEqual(res.status_code, 200, res.text)
         base_prompt = self.fake_llm.prompts[0]
-        self.assertNotIn(huge, base_prompt)
+        self.assertNotIn("S" * (questions.MAX_SECTION_CONTENT_CHARS + 1), base_prompt)
         self.assertNotIn("T" * 500, base_prompt)
         # The section still reaches the prompt, bounded to the declared cap.
         self.assertIn("S" * 500, base_prompt)
@@ -401,7 +406,10 @@ Static topic body.
         )
 
     def test_bounded_section_request_helper_matches_declared_limits(self):
-        body = GenerateQuestionsRequest(
+        # model_construct bypasses validation so the helper's own
+        # bounding is exercised with oversized inputs (the schema
+        # rejects those at the HTTP layer).
+        body = GenerateQuestionsRequest.model_construct(
             topic_id="custom-java",
             section_title="T" * 500,
             section_content="S" * 40000,

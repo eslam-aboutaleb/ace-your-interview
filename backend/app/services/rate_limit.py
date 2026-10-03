@@ -1,13 +1,15 @@
-"""In-memory sliding-window rate limiting helpers."""
+"""Pluggable sliding-window rate limiting helpers."""
 
 from __future__ import annotations
 
 import math
+import os
 import threading
 import time
+import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Deque
+from typing import Any, Callable, Deque, Protocol
 
 from fastapi import Request
 
@@ -20,10 +22,33 @@ class RateLimitDecision:
     retry_after_seconds: int
 
 
+class RateLimiterBackend(Protocol):
+    """Backend contract for the per-scope sliding-window limiter.
+
+    Implementations must be safe to share across concurrent
+    requests. ``check`` records a hit when it allows the
+    request and returns the decision for the current window.
+    ``clear`` drops all recorded state; backends whose entries
+    expire on their own may implement it as a no-op.
+    """
+
+    def check(
+        self,
+        *,
+        scope: str,
+        key: str,
+        limit: int,
+        window_seconds: int,
+    ) -> RateLimitDecision: ...
+
+    def clear(self) -> None: ...
+
+
 class InMemoryRateLimiter:
     """Thread-safe per-scope/per-key sliding-window limiter."""
 
-    def __init__(self):
+    def __init__(self, clock: Callable[[], float] = time.monotonic):
+        self._clock = clock
         self._lock = threading.RLock()
         self._hits: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
 
@@ -31,7 +56,7 @@ class InMemoryRateLimiter:
         if limit <= 0 or window_seconds <= 0:
             return RateLimitDecision(allowed=True, retry_after_seconds=0)
 
-        now = time.monotonic()
+        now = self._clock()
         cutoff = now - float(window_seconds)
         bucket_key = (scope, key)
 
@@ -50,6 +75,94 @@ class InMemoryRateLimiter:
     def clear(self) -> None:
         with self._lock:
             self._hits.clear()
+
+
+class RedisBackend:
+    """Sliding-window limiter backed by Redis sorted sets.
+
+    Each ``(scope, key)`` pair owns one sorted set: members are
+    unique request markers and scores are request timestamps.
+    The window is enforced by trimming scores at or below the
+    cutoff (``ZREMRANGEBYSCORE``) before counting (``ZCARD``),
+    so the state is shared across replicas and survives
+    restarts until the key's TTL expires.
+    """
+
+    _KEY_PREFIX = "ratelimit"
+
+    def __init__(
+        self,
+        redis_url: str = "",
+        *,
+        client: Any | None = None,
+        clock: Callable[[], float] = time.time,
+    ):
+        self._clock = clock
+        if client is not None:
+            self._client = client
+            return
+        url = (redis_url or os.getenv("REDIS_URL", "")).strip()
+        if not url:
+            raise RuntimeError(
+                "REDIS_URL must be set when STUDY_RATE_LIMIT_BACKEND=redis"
+            )
+        try:
+            import redis as redis_module
+        except ImportError as exc:
+            raise RuntimeError(
+                "STUDY_RATE_LIMIT_BACKEND=redis requires the 'redis' "
+                "package. Install it with: uv add redis"
+            ) from exc
+        self._client = redis_module.Redis.from_url(url, decode_responses=True)
+
+    def ping(self) -> None:
+        """Validate connectivity; raises when Redis is unreachable."""
+        self._client.ping()
+
+    def _bucket(self, scope: str, key: str) -> str:
+        return f"{self._KEY_PREFIX}:{scope}:{key}"
+
+    def check(self, *, scope: str, key: str, limit: int, window_seconds: int) -> RateLimitDecision:
+        if limit <= 0 or window_seconds <= 0:
+            return RateLimitDecision(allowed=True, retry_after_seconds=0)
+
+        now = self._clock()
+        cutoff = now - float(window_seconds)
+        bucket = self._bucket(scope, key)
+
+        self._client.zremrangebyscore(bucket, "-inf", cutoff)
+        if self._client.zcard(bucket) >= int(limit):
+            oldest = self._client.zrange(bucket, 0, 0, withscores=True)
+            oldest_score = float(oldest[0][1]) if oldest else now
+            retry = max(1, int(math.ceil(float(window_seconds) - (now - oldest_score))))
+            return RateLimitDecision(allowed=False, retry_after_seconds=retry)
+
+        self._client.zadd(bucket, {f"{now:.6f}:{uuid.uuid4().hex}": now})
+        self._client.expire(bucket, int(window_seconds))
+        return RateLimitDecision(allowed=True, retry_after_seconds=0)
+
+    def clear(self) -> None:
+        """No-op: every bucket carries a TTL and expires on its own."""
+        return None
+
+
+def create_rate_limiter(settings: Any | None = None) -> RateLimiterBackend:
+    """Build the configured rate-limiter backend.
+
+    ``STUDY_RATE_LIMIT_BACKEND`` selects the implementation:
+    ``memory`` (default) keeps per-replica state, while
+    ``redis`` shares sliding-window state across replicas via
+    ``REDIS_URL``.
+    """
+    settings = settings or get_settings()
+    backend_name = str(
+        getattr(settings, "rate_limit_backend", "memory") or "memory"
+    ).strip().lower()
+    if backend_name in {"", "memory", "inmemory", "in-memory"}:
+        return InMemoryRateLimiter()
+    if backend_name == "redis":
+        return RedisBackend(redis_url=str(getattr(settings, "redis_url", "") or ""))
+    raise ValueError(f"Unknown STUDY_RATE_LIMIT_BACKEND: {backend_name!r}")
 
 
 def _trusts_proxy_headers() -> bool:
