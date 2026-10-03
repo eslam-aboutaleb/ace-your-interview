@@ -11,6 +11,7 @@ import QuizMode from "@/pages/QuizMode";
 import ReviewQueue from "@/pages/ReviewQueue";
 import StudyPlan from "@/pages/StudyPlan";
 import DocumentsPage from "@/pages/DocumentsPage";
+import DecksPage from "@/pages/DecksPage";
 import Settings from "@/pages/Settings";
 import UserSettings from "@/pages/UserSettings";
 import LoginPage from "@/pages/LoginPage";
@@ -169,6 +170,7 @@ export default function App() {
             <Route path="review" element={<ReviewQueue />} />
             <Route path="study-plan" element={<StudyPlan />} />
             <Route path="documents" element={<DocumentsPage />} />
+            <Route path="decks" element={<DecksPage />} />
             <Route path="interview" element={<InterviewSetup />} />
             <Route path="interview/trends" element={<InterviewTrendsPage />} />
             <Route

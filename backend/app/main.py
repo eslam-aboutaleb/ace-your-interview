@@ -15,6 +15,7 @@ from app.config import get_settings, resolve_auth_secret_key
 from app.dependencies import require_auth
 from app.routers import (
     auth,
+    cards,
     chat,
     documents,
     interview_sessions,
@@ -55,6 +56,7 @@ from app.services.rate_limit import (
 )
 from app.services.user_settings_store import UserSettingsStore, resolve_credentials_encryption_secret
 from app.services.auth import decode_jwt_token
+from app.services.card_store import CardStore
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,7 @@ async def lifespan(application: FastAPI):
     parser = DocParser(curriculum_path=settings.curriculum_path)
     document_store = DocumentStore(settings.learning_db_path)
     embedding_client = EmbeddingClient(user_settings_store=_user_settings_store)
+    card_store = CardStore(settings.learning_db_path)
     document_pipeline = DocumentPipeline(
         document_store=document_store,
         embedding_client=embedding_client,
@@ -207,6 +210,15 @@ async def lifespan(application: FastAPI):
         learning_store=_learning_store,
     )
     learning.init(_learning_store, _learning_planner)
+    cards.init(
+        card_store=card_store,
+        learning_store=_learning_store,
+        llm_client=_llm_client,
+        parser=parser,
+        mcp_gateway=_mcp_gateway,
+        document_store=document_store,
+        embedding_client=embedding_client,
+    )
     interview_sessions.init(
         _llm_client,
         parser,
@@ -306,6 +318,8 @@ def create_app() -> FastAPI:
     application.include_router(chat.router, dependencies=auth_dep)
     application.include_router(documents.router, dependencies=auth_dep)
     application.include_router(learning.router)
+    application.include_router(cards.decks_router)
+    application.include_router(cards.cards_router)
     application.include_router(progress.router, dependencies=auth_dep)
     application.include_router(interview_sessions.router, dependencies=auth_dep)
     application.include_router(voice.router)  # WebSocket handles its own auth

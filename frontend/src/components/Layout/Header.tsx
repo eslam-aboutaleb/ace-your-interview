@@ -10,6 +10,7 @@ import {
   CalendarDays,
   Clock3,
   FileText,
+  Layers,
   LogOut,
   User,
   LogIn,
@@ -104,6 +105,12 @@ export default function Header() {
             label: "Documents",
             icon: <FileText className="w-4 h-4" />,
             active: location.pathname.startsWith("/documents"),
+          },
+          {
+            to: "/decks",
+            label: "Flashcards",
+            icon: <Layers className="w-4 h-4" />,
+            active: location.pathname.startsWith("/decks"),
           },
           {
             to: "/interview",

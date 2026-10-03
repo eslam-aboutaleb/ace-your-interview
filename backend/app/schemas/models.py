@@ -1000,3 +1000,159 @@ class ChatAskResponse(BaseModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)
     conversation_id: str
+
+
+# ── Flashcard Decks + Anki Interop Models ─────────
+class DeckCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
+class DeckUpdateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
+class DeckResponse(BaseModel):
+    deck_id: str
+    name: str
+    description: str = ""
+    card_count: int = 0
+    due_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class DeckListResponse(BaseModel):
+    decks: list[DeckResponse] = Field(default_factory=list)
+
+
+class CardCreateRequest(BaseModel):
+    front: str = Field(..., min_length=1, max_length=8000)
+    back: str = Field(..., min_length=1, max_length=16000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CardUpdateRequest(BaseModel):
+    front: str = Field(..., min_length=1, max_length=8000)
+    back: str = Field(..., min_length=1, max_length=16000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class FSRSCardState(BaseModel):
+    state: str
+    stability: Optional[float] = None
+    difficulty: Optional[float] = None
+    due_at: str
+    last_review_at: Optional[str] = None
+    reps: int = 0
+    lapses: int = 0
+    scheduled_days: int = 0
+    elapsed_days: int = 0
+    suspended: int = 0
+
+
+class CardResponse(BaseModel):
+    card_id: str
+    deck_id: str
+    front: str
+    back: str
+    source_ref: str = ""
+    tags: list[str] = Field(default_factory=list)
+    fsrs_card_id: str
+    suspended: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+    fsrs: Optional[FSRSCardState] = None
+
+
+class CardListResponse(BaseModel):
+    cards: list[CardResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class GenerateCardsSourceType(str, Enum):
+    TOPIC = "topic"
+    SECTION = "section"
+    DOCUMENT = "document"
+
+
+class GenerateCardsRequest(BaseModel):
+    source_type: GenerateCardsSourceType
+    topic_id: Optional[str] = Field(default=None, max_length=200)
+    section_title: Optional[str] = Field(default=None, max_length=400)
+    document_id: Optional[str] = Field(default=None, max_length=200)
+    count: int = Field(default=10, ge=1, le=50)
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class GenerateCardsResponse(BaseModel):
+    job_id: str
+    status: str = "queued"
+
+
+class GeneratedCardItem(BaseModel):
+    card_id: str
+    front: str
+    back: str
+    source_section: str = ""
+    source_quote: str = ""
+
+
+class GenerateCardsJobResponse(BaseModel):
+    job_id: str
+    status: str  # queued | running | done | failed
+    cards: list[GeneratedCardItem] = Field(default_factory=list)
+    retries_used: int = 0
+    malformed_items_dropped: int = 0
+    error: str = ""
+
+
+class ImportDeckResponse(BaseModel):
+    deck_id: str
+    deck_name: str = ""
+    imported: int = 0
+    skipped_duplicates: int = 0
+    errors: list[str] = Field(default_factory=list)
+
+
+class FindDuplicatesRequest(BaseModel):
+    deck_id: Optional[str] = Field(default=None, max_length=200)
+    threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+
+
+class DuplicateCardRef(BaseModel):
+    card_id: str
+    deck_id: str = ""
+    front: str = ""
+
+
+class DuplicatePair(BaseModel):
+    card_a: DuplicateCardRef
+    card_b: DuplicateCardRef
+    similarity: float
+    jaccard: float
+    cosine: Optional[float] = None
+
+
+class FindDuplicatesResponse(BaseModel):
+    pairs: list[DuplicatePair] = Field(default_factory=list)
+    threshold: float = 0.85
+
+
+class DeckReviewRequest(BaseModel):
+    card_id: str = Field(..., min_length=1, max_length=200)
+    rating: LearningReviewRating
+    response_time_ms: int = Field(default=0, ge=0)
+
+
+class DeckReviewResponse(BaseModel):
+    card: CardResponse
+    log: FSRSReviewLogResponse
+    leech: bool = False
+
+
+class StudySessionResponse(BaseModel):
+    deck_id: str
+    cards: list[CardResponse] = Field(default_factory=list)
+    total_due: int = 0
