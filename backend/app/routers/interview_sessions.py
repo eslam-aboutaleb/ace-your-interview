@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -54,6 +55,8 @@ from app.services.resume_parser import (
     ResumeProfileStore,
 )
 from app.services.star_store import StarStore
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/interview-sessions", tags=["interview-sessions"])
 
@@ -280,12 +283,34 @@ async def create_session(
     if not context:
         raise HTTPException(status_code=500, detail="Failed to create session context")
 
-    first_q = await _generator.generate_question(
-        session=context,
-        turns=[],
-        llm_config=body.llm_config,
-        user_identity=user,
-    )
+    try:
+        first_q = await _generator.generate_question(
+            session=context,
+            turns=[],
+            llm_config=body.llm_config,
+            user_identity=user,
+        )
+    except (
+        LLMServiceApprovalRequiredError,
+        StudyAppLLMNotAssignedError,
+        PersonalCredentialRequiredError,
+    ) as exc:
+        detail = policy_error_detail(exc)
+        status = 403 if detail["code"] == "llm_service_approval_required" else 400
+        raise HTTPException(status_code=status, detail=detail) from exc
+    except RuntimeError as exc:
+        # The session row already exists, but without a first question it
+        # is inert; surface a retryable 503 instead of a bare 500 so the
+        # client can distinguish "LLM unavailable" from a server bug.
+        logger.warning(
+            "Interview first-question generation failed session=%s err=%s",
+            session["session_id"],
+            exc,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Interview question generation is temporarily unavailable. Retry shortly.",
+        ) from exc
     _store.set_current_question(
         user_id=user["user"],
         session_id=session["session_id"],
@@ -874,12 +899,31 @@ async def next_question(
         raise HTTPException(status_code=400, detail="Interview session already completed")
 
     turns = _store.get_turns(user_id=user["user"], session_id=session_id)
-    generated = await _generator.generate_question(
-        session=session,
-        turns=turns,
-        llm_config=llm_config,
-        user_identity=user,
-    )
+    try:
+        generated = await _generator.generate_question(
+            session=session,
+            turns=turns,
+            llm_config=llm_config,
+            user_identity=user,
+        )
+    except (
+        LLMServiceApprovalRequiredError,
+        StudyAppLLMNotAssignedError,
+        PersonalCredentialRequiredError,
+    ) as exc:
+        detail = policy_error_detail(exc)
+        status = 403 if detail["code"] == "llm_service_approval_required" else 400
+        raise HTTPException(status_code=status, detail=detail) from exc
+    except RuntimeError as exc:
+        logger.warning(
+            "Interview next-question generation failed session=%s err=%s",
+            session_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Interview question generation is temporarily unavailable. Retry shortly.",
+        ) from exc
     updated = _store.set_current_question(
         user_id=user["user"],
         session_id=session_id,

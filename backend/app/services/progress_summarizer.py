@@ -301,6 +301,7 @@ other than the topic title."""
                 llm_config,
                 user_identity=user_identity,
                 task="final",
+                flow="progress_summary",
             )
             metadata = result.get("metadata") or {}
             provider_used = str(metadata.get("provider", "") or "")

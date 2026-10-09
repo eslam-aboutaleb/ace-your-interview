@@ -49,6 +49,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // The production bundle (mermaid + syntax highlighter) exceeds
+        // workbox's 2 MB default precache ceiling; raise it so the
+        // service worker still precaches the app shell.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [

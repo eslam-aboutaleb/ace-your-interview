@@ -72,7 +72,7 @@ class FakeLLM:
     def __init__(self, responses):
         self._responses = list(responses)
 
-    async def completion(self, prompt, llm_config=None, user_identity=None):
+    async def completion(self, prompt, llm_config=None, user_identity=None, **kwargs):
         if self._responses:
             return {"success": True, "analysis": self._responses.pop(0), "metadata": {}}
         return {"success": True, "analysis": "{}", "metadata": {}}

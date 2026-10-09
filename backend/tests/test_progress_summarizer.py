@@ -15,7 +15,7 @@ class FakeLLM:
         self.raises = raises
         self.calls: list[dict] = []
 
-    async def completion(self, prompt, llm_config=None, user_identity=None, task=None):
+    async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
         self.calls.append(
             {"prompt": prompt, "llm_config": llm_config, "user_identity": user_identity, "task": task}
         )

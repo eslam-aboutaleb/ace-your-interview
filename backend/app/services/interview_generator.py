@@ -974,6 +974,7 @@ Candidate answer:
                 prompt,
                 llm_config,
                 user_identity=user_identity,
+                flow="interview_question",
             )
             raise_if_policy_blocked_result(result)
             if _is_non_retryable_result(result):
@@ -1052,6 +1053,7 @@ Candidate answer:
                 prompt,
                 llm_config,
                 user_identity=user_identity,
+                flow="interview_eval",
             )
             raise_if_policy_blocked_result(result)
             if _is_non_retryable_result(result):

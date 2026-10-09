@@ -17,7 +17,7 @@ class FakeLLM:
         self.text = text
         self.calls = 0
 
-    async def completion(self, prompt, llm_config=None, user_identity=None, task=None):
+    async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
         self.calls += 1
         return {
             "success": True,
