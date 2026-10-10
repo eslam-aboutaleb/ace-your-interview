@@ -25,6 +25,10 @@ dependencies = [
     "sqlite-vec>=0.1.9",
     "python-multipart>=0.0.32",
     "grpcio>=1.60.0",
+    # The vendored app/generated/*_pb2.py stubs are gencode for
+    # protobuf 6.31.1; grpcio does not pull protobuf in, and the
+    # generated modules import google.protobuf at collection time.
+    "protobuf>=6.31.1",
 ]
 
 [project.optional-dependencies]

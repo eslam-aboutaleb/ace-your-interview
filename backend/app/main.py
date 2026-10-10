@@ -53,6 +53,7 @@ from app.services.mcp_gateway import MCPGateway
 from app.services.progress_summarizer import ProgressSummarizer
 from app.services.progress_store import ProgressStore
 from app.services.rag_service import RagService
+from app.services.star_store import StarStore
 from app.services.rate_limit import (
     InMemoryRateLimiter,
     RateLimiterBackend,
@@ -195,6 +196,7 @@ async def lifespan(application: FastAPI):
     _learning_planner = LearningPlannerStore(settings.learning_db_path)
     _progress_store = ProgressStore(settings.learning_db_path)
     _progress_summarizer = ProgressSummarizer(_llm_client)
+    _star_store = StarStore(settings.learning_db_path)
     parser = DocParser(curriculum_path=settings.curriculum_path)
     document_store = DocumentStore(settings.learning_db_path)
     embedding_client = EmbeddingClient(user_settings_store=_user_settings_store)
@@ -268,6 +270,7 @@ async def lifespan(application: FastAPI):
     exams.init(exam_store, exam_service)
     gamification.init(gamification_service)
     analytics.init(analytics_service)
+    star_stories.init(_star_store)
 
     logger.info("Loaded %d topics from curriculum %s", len(parser.list_topics()), parser.source_path)
 
