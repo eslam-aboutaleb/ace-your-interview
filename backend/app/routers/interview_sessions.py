@@ -518,8 +518,22 @@ async def analyze_job_description(
     analysis = await _jd_analyzer.analyze(
         jd_text=body.jd_text,
         profile=profile,
+        llm_config=body.llm_config,
+        user_identity=user,
     )
     return JDAnalysisResponse(**analysis)
+
+
+def get_jd_analysis_services() -> tuple[JDAnalyzer, DocParser, ResumeProfileStore] | None:
+    """Share the JD analyzer, doc parser, and resume profile store.
+
+    The learning router's ``/plan-from-jd`` endpoint reuses
+    these to analyse a JD and map its gaps to curriculum
+    topics without constructing duplicate services.
+    """
+    if _jd_analyzer is None or _parser is None or _resume_store is None:
+        return None
+    return _jd_analyzer, _parser, _resume_store
 
 
 @router.get("/companies", response_model=CompanyPacksResponse)

@@ -4,6 +4,7 @@
  */
 
 import type {
+  VoiceAudioMessage,
   VoiceClientMessage,
   VoiceConfig,
   VoiceInterviewCompletedEvent,
@@ -61,6 +62,9 @@ export async function fetchVoiceConfig(): Promise<VoiceConfig> {
 // ── Audio playback helper ───────────────────────────────────
 
 let currentAudio: HTMLAudioElement | null = null;
+let currentAudioOnEnd: (() => void) | null = null;
+// Active streamed-TTS player, if any.
+let streamingPlayer: StreamingAudioPlayer | null = null;
 
 export function playAudioBase64(
   base64: string,
@@ -75,32 +79,111 @@ export function playAudioBase64(
 
   const audio = new Audio(`data:audio/mp3;base64,${base64}`);
   currentAudio = audio;
+  currentAudioOnEnd = onEnd ?? null;
 
-  audio.onended = () => {
-    currentAudio = null;
+  const finish = () => {
+    if (currentAudio === audio) {
+      currentAudio = null;
+      currentAudioOnEnd = null;
+    }
     onEnd?.();
   };
-  audio.onerror = () => {
-    currentAudio = null;
-    onEnd?.();
-  };
-  audio.play().catch(() => {
-    currentAudio = null;
-    onEnd?.();
-  });
+  audio.onended = finish;
+  audio.onerror = finish;
+  audio.play().catch(finish);
   return audio;
 }
 
 export function stopPlayback() {
+  if (streamingPlayer) {
+    const player = streamingPlayer;
+    streamingPlayer = null;
+    player.halt();
+  }
   if (currentAudio) {
     currentAudio.pause();
     currentAudio.currentTime = 0;
     currentAudio = null;
   }
+  // A stopped playback must settle the speaking state
+  // the same way a naturally ended one does.
+  const onEnd = currentAudioOnEnd;
+  currentAudioOnEnd = null;
+  onEnd?.();
 }
 
 export function isPlaying(): boolean {
   return currentAudio !== null && !currentAudio.paused;
+}
+
+/**
+ * Plays queued TTS chunks sequentially so a streamed
+ * utterance can be cut mid-stream by an interrupt.
+ */
+class StreamingAudioPlayer {
+  private queue: string[] = [];
+  private draining = false;
+  private halted = false;
+  onEnd?: () => void;
+
+  enqueue(base64: string): void {
+    if (this.halted || !base64) return;
+    this.queue.push(base64);
+    if (!this.draining) {
+      void this.drain();
+    }
+  }
+
+  /** Stop immediately: drop queued chunks and pause playback. */
+  halt(): void {
+    this.halted = true;
+    this.queue = [];
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      currentAudio = null;
+    }
+    const onEnd = currentAudioOnEnd;
+    currentAudioOnEnd = null;
+    onEnd?.();
+    this.onEnd?.();
+  }
+
+  private async drain(): Promise<void> {
+    this.draining = true;
+    try {
+      while (!this.halted && this.queue.length > 0) {
+        const chunk = this.queue.shift() as string;
+        await this.playChunk(chunk);
+      }
+      if (!this.halted) {
+        this.onEnd?.();
+      }
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  private playChunk(base64: string): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.halted) {
+        resolve();
+        return;
+      }
+      const audio = new Audio(`data:audio/mp3;base64,${base64}`);
+      currentAudio = audio;
+      currentAudioOnEnd = null;
+      const finish = () => {
+        if (currentAudio === audio) {
+          currentAudio = null;
+        }
+        resolve();
+      };
+      audio.onended = finish;
+      audio.onerror = finish;
+      audio.play().catch(finish);
+    });
+  }
 }
 
 // ── Browser Speech API (free tier) ──────────────────────────
@@ -200,6 +283,83 @@ export class BrowserVoiceService {
   }
 }
 
+// ── Barge-in (VAD) ──────────────────────────────────
+
+/**
+ * Detects the user speaking while the assistant's TTS
+ * is playing, so the utterance can cut the assistant
+ * short (barge-in). Uses the Silero VAD via
+ * ``@ricky0123/vad-web``; unsupported browsers (no
+ * AudioContext / mic) degrade gracefully — push-to-talk
+ * remains the fallback.
+ */
+export class BargeInDetector {
+  private vad: import("@ricky0123/vad-web").MicVAD | null =
+    null;
+  private fired = false;
+  private destroyed = false;
+
+  static isSupported(): boolean {
+    return (
+      typeof AudioContext !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      typeof navigator.mediaDevices?.getUserMedia === "function"
+    );
+  }
+
+  /**
+   * Create and start a detector. Resolves to ``null``
+   * when VAD is unsupported or fails to initialise —
+   * barge-in is optional and must never block the
+   * interview flow. Fires ``onBargeIn`` at most once
+   * per detector instance.
+   */
+  static async create(onBargeIn: () => void): Promise<BargeInDetector | null> {
+    if (!BargeInDetector.isSupported()) return null;
+    try {
+      const { MicVAD } = await import("@ricky0123/vad-web");
+      const detector = new BargeInDetector();
+      detector.vad = await MicVAD.new({
+        startOnLoad: false,
+        processorType: "auto",
+        getStream: () =>
+          navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          }),
+        onSpeechStart: () => {
+          if (detector.destroyed || detector.fired) return;
+          detector.fired = true;
+          onBargeIn();
+        },
+        onVADMisfire: () => {
+          /* transient noise — ignore */
+        },
+      });
+      await detector.vad.start();
+      return detector;
+    } catch {
+      return null;
+    }
+  }
+
+  async destroy(): Promise<void> {
+    this.destroyed = true;
+    if (this.vad) {
+      const vad = this.vad;
+      this.vad = null;
+      try {
+        await vad.destroy();
+      } catch {
+        /* already torn down */
+      }
+    }
+  }
+}
+
 // ── WebSocket Voice Service (cloud tier) ─────────────────
 
 export class WebSocketVoiceService {
@@ -280,14 +440,30 @@ export class WebSocketVoiceService {
             });
           }
           break;
-        case "audio":
-          if (msg.audio) {
+        case "audio": {
+          const audioMsg = msg as VoiceAudioMessage;
+          if (audioMsg.final) {
+            // Terminal frame of a streamed synthesis.
+            // Queued chunks keep playing; the player
+            // settles the speaking state when drained.
+            break;
+          }
+          if (audioMsg.audio) {
             this.callbacks.onSpeaking?.(true);
-            playAudioBase64(msg.audio, () => {
-              this.callbacks.onSpeaking?.(false);
-            });
+            if (!streamingPlayer) {
+              const player = new StreamingAudioPlayer();
+              streamingPlayer = player;
+              player.onEnd = () => {
+                if (streamingPlayer === player) {
+                  streamingPlayer = null;
+                }
+                this.callbacks.onSpeaking?.(false);
+              };
+            }
+            streamingPlayer.enqueue(audioMsg.audio);
           }
           break;
+        }
         case "stopped":
           this._sessionActive = false;
           break;
@@ -357,16 +533,30 @@ export class WebSocketVoiceService {
     this.send({ type: "interview_start", config });
   }
 
-  sendAudio(audioBase64: string, mime = "audio/webm"): void {
-    this.send({ type: "audio", data: audioBase64, mime });
+  sendAudio(
+    audioBase64: string,
+    mime = "audio/webm",
+    responseTimeMs = 0,
+  ): void {
+    this.send({
+      type: "audio",
+      data: audioBase64,
+      mime,
+      response_time_ms: Math.max(0, Math.round(responseTimeMs)),
+    });
   }
 
   sendText(text: string, speak = true): void {
     this.send({ type: "text", content: text, speak });
   }
 
-  synthesize(text: string): void {
-    this.send({ type: "synthesize", text });
+  /** Cancel the in-flight turn (barge-in). */
+  sendInterrupt(): void {
+    this.send({ type: "interrupt" });
+  }
+
+  synthesize(text: string, stream = false): void {
+    this.send({ type: "synthesize", text, stream });
   }
 
   stopSession(): void {
