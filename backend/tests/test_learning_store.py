@@ -24,8 +24,18 @@ class LearningStoreTests(unittest.TestCase):
                     response_time_ms=800,
                     mode="study",
                 )
-                queue = await store.run_async(store.get_review_queue, user_id="alice", limit=10)
                 self.assertEqual(saved["question_id"], "q-async")
+                # The attempt dual-writes an FSRS card; force
+                # it due so it surfaces in the review queue.
+                store._conn.execute(
+                    "UPDATE fsrs_cards SET due_at = ? "
+                    "WHERE user_id = ? AND card_id = ?",
+                    (datetime.now(UTC).isoformat(), "alice", "q-async"),
+                )
+                store._conn.commit()
+                queue = await store.run_async(
+                    store.get_fsrs_review_queue, user_id="alice", limit=10
+                )
                 self.assertEqual(queue["items"][0]["question_id"], "q-async")
 
         asyncio.run(_exercise())
@@ -55,9 +65,26 @@ class LearningStoreTests(unittest.TestCase):
                 mode="quiz",
             )
 
-            self.assertLess(first["mastery_score"], second["mastery_score"])
+            # The incorrect attempt schedules its card sooner
+            # (again < good interval), so it is reviewed first.
+            self.assertLess(first["due_at"], second["due_at"])
 
-            queue = store.get_review_queue(user_id="alice", limit=10)
+            # Force both cards due, preserving their relative
+            # order, and confirm the review queue surfaces the
+            # incorrect one first.
+            now = datetime.now(UTC)
+            store._conn.execute(
+                "UPDATE fsrs_cards SET due_at = ? "
+                "WHERE user_id = ? AND card_id = ?",
+                ((now - timedelta(minutes=2)).isoformat(), "alice", "q1"),
+            )
+            store._conn.execute(
+                "UPDATE fsrs_cards SET due_at = ? "
+                "WHERE user_id = ? AND card_id = ?",
+                ((now - timedelta(minutes=1)).isoformat(), "alice", "q2"),
+            )
+            store._conn.commit()
+            queue = store.get_fsrs_review_queue(user_id="alice", limit=10)
             self.assertGreaterEqual(queue["total_due"], 1)
             self.assertEqual(queue["items"][0]["question_id"], "q1")
 

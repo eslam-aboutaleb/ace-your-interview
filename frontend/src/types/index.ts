@@ -582,9 +582,10 @@ export interface LearningAttemptResponse {
   attempt_id: number;
   topic_id: string;
   question_id: string;
-  mastery_score: number;
+  state: string;
   due_at: string;
-  review_bucket: number;
+  lapses: number;
+  leech: boolean;
 }
 
 export interface ReviewQueueItem {
@@ -623,6 +624,8 @@ export interface TopicMasteryItem {
   topic_id: string;
   mastery_score: number;
   attempts: number;
+  accuracy: number;
+  due_count: number;
 }
 
 export interface TopicMasteryResponse {
