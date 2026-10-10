@@ -485,7 +485,7 @@ async def generate_questions(
             detail="Problem Solving roadmap is not generated yet for this language.",
         )
     _, _, store = _ensure_services()
-    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway, run_store=store)
     ai_settings = await _resolve_ai_settings(
         store=store,
         user_id=user["user"],
@@ -556,7 +556,7 @@ async def generate_questions_v2(
             detail="Problem Solving roadmap is not generated yet for this language.",
         )
     _, _, store = _ensure_services()
-    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway, run_store=store)
     ai_settings = await _resolve_ai_settings(
         store=store,
         user_id=user["user"],
@@ -626,7 +626,7 @@ async def generate_questions_v2_stream(
             detail="Problem Solving roadmap is not generated yet for this language.",
         )
     _, _, store = _ensure_services()
-    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway, run_store=store)
     ai_settings = await _resolve_ai_settings(
         store=store,
         user_id=user["user"],
@@ -712,7 +712,7 @@ async def generate_quiz(
     )
     _note_partial_failures(http_response, failed_topics)
 
-    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway, run_store=store)
     prior_progress, additional_existing = await _load_progress_context(
         user_id=user["user"],
         topic_ids=[tc["id"] for tc in topics_content],
@@ -763,7 +763,7 @@ async def generate_quiz_v2(
     )
     _note_partial_failures(http_response, failed_topics)
 
-    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway, run_store=store)
     prior_progress, additional_existing = await _load_progress_context(
         user_id=user["user"],
         topic_ids=[tc["id"] for tc in topics_content],
@@ -811,7 +811,7 @@ async def generate_quiz_v2_stream(
         store=store,
         body=body,
     )
-    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway, run_store=store)
     prior_progress, additional_existing = await _load_progress_context(
         user_id=user["user"],
         topic_ids=[tc["id"] for tc in topics_content],

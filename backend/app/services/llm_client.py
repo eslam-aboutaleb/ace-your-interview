@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import re
@@ -47,6 +48,20 @@ _TASK_ROUTE_KEYS = {"planner", "retrieval", "eval", "final"}
 # equivalent parameter and must fall back to the shared salvage parser.
 JSON_MODE_CAPABLE_PROVIDERS: frozenset[str] = frozenset(
     {"openai", "groq", "ollama", "google", "github"}
+)
+
+# Providers whose OpenAI-compatible surface accepts
+# ``response_format={"type": "json_schema", "json_schema": {...}}``.
+# Every other provider degrades to ``json_object`` mode, then to the
+# salvage parser; the request never fails over a missing capability.
+JSON_SCHEMA_CAPABLE_PROVIDERS: frozenset[str] = frozenset(
+    {"openai", "github"}
+)
+
+# Providers whose native LiteLLM surface accepts a ``response_schema``
+# keyword (Gemini). Sent instead of ``response_format`` for these.
+RESPONSE_SCHEMA_CAPABLE_PROVIDERS: frozenset[str] = frozenset(
+    {"google"}
 )
 
 # Per-flow output ceilings. A caller-supplied ``max_tokens`` (or a saved user
@@ -152,6 +167,40 @@ def _load_task_route_map(raw: str) -> dict[str, str]:
 
 def _provider_supports_json_mode(provider: str) -> bool:
     return str(provider or "").strip().lower() in JSON_MODE_CAPABLE_PROVIDERS
+
+
+def _provider_supports_json_schema(provider: str) -> bool:
+    return str(provider or "").strip().lower() in JSON_SCHEMA_CAPABLE_PROVIDERS
+
+
+def _provider_supports_response_schema(provider: str) -> bool:
+    return str(provider or "").strip().lower() in RESPONSE_SCHEMA_CAPABLE_PROVIDERS
+
+
+def _json_schema_name(schema: dict[str, Any]) -> str:
+    """Derive an OpenAI-safe ``json_schema.name`` from a schema."""
+    title = str(schema.get("title", "") or "").strip()
+    if title:
+        sanitized = re.sub(r"[^a-zA-Z0-9_-]", "_", title)[:64]
+        if sanitized:
+            return sanitized
+    return "response"
+
+
+def supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
+    """Drop call options ``client.completion`` does not accept.
+
+    ``LLMClient`` takes the full Stage-2 option set, but the client is
+    injected, so a narrower implementation may be in use. Filter against
+    the bound signature rather than assuming one shape.
+    """
+    try:
+        params = inspect.signature(client.completion).parameters
+    except (TypeError, ValueError):
+        return dict(options)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return options
+    return {key: value for key, value in options.items() if key in params}
 
 
 def _extract_usage(response: Any) -> dict[str, int]:
@@ -276,6 +325,11 @@ class LLMClient:
         flow: str = "",
         tools: Optional[list[dict[str, Any]]] = None,
         tool_choice: Optional[Any] = None,
+        response_json_schema: Optional[dict[str, Any]] = None,
+        attempts: int = 1,
+        terminal_reason: str = "",
+        prompt_name: str = "",
+        prompt_version: str = "",
     ) -> dict:
         """Send a prompt and return a standardised result dict.
 
@@ -291,22 +345,41 @@ class LLMClient:
                 ``max_tokens_cap`` takes precedence when both are given.
             tools: OpenAI-style tool definitions. Mutually exclusive with
                 ``structured`` (``response_format``).
+            response_json_schema: JSON schema for structured output. Providers
+                that support it receive a schema-enforced response format;
+                every other provider degrades to ``json_object`` mode, then to
+                the salvage parser, so the request never fails over it.
+            attempts: the caller's retry-loop attempt count, echoed into the
+                result metadata so retry outcomes survive the call. The retry
+                loop itself stays in the caller.
+            terminal_reason: the caller's terminal error code (if any),
+                echoed into the result metadata the same way.
+            prompt_name: registry name of the prompt driving this call,
+                recorded in the result metadata.
+            prompt_version: registry version of the prompt driving this call,
+                recorded in the result metadata.
         """
         settings = get_settings()
         structured = bool(structured)
         tools = list(tools or [])
-        if structured and tools:
+        response_json_schema = (
+            dict(response_json_schema) if response_json_schema is not None else None
+        )
+        if (structured or response_json_schema is not None) and tools:
             logger.warning(
-                "completion() received both structured and tools; honouring tools and dropping response_format"
+                "completion() received both structured/json_schema and tools; "
+                "honouring tools and dropping response_format"
             )
             structured = False
+            response_json_schema = None
+        wants_schema = response_json_schema is not None
 
         provider_str = "default"
         model_str = ""
         model_locked = False
         temperature = (
             STRUCTURED_TEMPERATURE
-            if structured
+            if structured or wants_schema
             else float(getattr(settings, "default_temperature", FREE_FORM_TEMPERATURE_FLOOR))
         )
         max_tokens = DEFAULT_MAX_TOKENS
@@ -444,6 +517,11 @@ class LLMClient:
             "credential_source": (
                 "blocked_unapproved" if policy_error_code == APPROVAL_REQUIRED_CODE else credential_source
             ),
+            "latency_ms": 0,
+            "attempts": max(1, int(attempts or 1)),
+            "terminal_reason": str(terminal_reason or ""),
+            "prompt_name": str(prompt_name or ""),
+            "prompt_version": str(prompt_version or ""),
         }
 
         if policy_error_code:
@@ -495,6 +573,23 @@ class LLMClient:
             completion_kwargs["tools"] = tools
             if tool_choice is not None:
                 completion_kwargs["tool_choice"] = tool_choice
+        elif wants_schema:
+            # Schema enforcement is provider-dependent: send the schema
+            # where the provider accepts it, degrade to ``json_object``
+            # mode otherwise, and leave the salvage parser in place for
+            # providers with neither parameter (Anthropic).
+            if _provider_supports_json_schema(actual_provider):
+                completion_kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": _json_schema_name(response_json_schema),
+                        "schema": response_json_schema,
+                    },
+                }
+            elif _provider_supports_response_schema(actual_provider):
+                completion_kwargs["response_schema"] = response_json_schema
+            elif _provider_supports_json_mode(actual_provider):
+                completion_kwargs["response_format"] = {"type": "json_object"}
         elif structured and _provider_supports_json_mode(actual_provider):
             completion_kwargs["response_format"] = {"type": "json_object"}
 
@@ -514,14 +609,29 @@ class LLMClient:
                 cur_model = completion_kwargs["model"]
                 if cur_model.startswith("gemini/"):
                     completion_kwargs["model"] = "openai/" + cur_model[len("gemini/"):]
+                # The OpenAI-compatible endpoint speaks the OpenAI
+                # schema format, not Gemini's ``response_schema``.
+                if "response_schema" in completion_kwargs:
+                    schema_payload = completion_kwargs.pop("response_schema")
+                    completion_kwargs["response_format"] = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": _json_schema_name(schema_payload),
+                            "schema": schema_payload,
+                        },
+                    }
             else:
                 completion_kwargs["api_key"] = runtime_credential
 
         semaphore = await self._semaphore_for(identity_key)
         async with semaphore:
+            started = time.monotonic()
             try:
                 response = await litellm.acompletion(**completion_kwargs)
             except Exception as e:
+                base_metadata["latency_ms"] = round(
+                    (time.monotonic() - started) * 1000, 1
+                )
                 logger.error("LiteLLM completion error (%s): %s", resolved_model, e)
                 return {
                     "success": False,
@@ -532,6 +642,9 @@ class LLMClient:
                     "finish_reason": "",
                     "usage": {},
                 }
+            base_metadata["latency_ms"] = round(
+                (time.monotonic() - started) * 1000, 1
+            )
 
         text = response.choices[0].message.content or ""
         finish_reason = str(getattr(response.choices[0], "finish_reason", "") or "")

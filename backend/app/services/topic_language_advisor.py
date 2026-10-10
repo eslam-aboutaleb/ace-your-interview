@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import re
 from typing import Any, Optional
@@ -12,6 +11,7 @@ from app.services.llm_client import (
     TERMINAL_ERROR_CODES,
     LLMClient,
     parse_json_object,
+    supported_options,
 )
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.prompt_blocks import (
@@ -19,18 +19,16 @@ from app.services.prompt_blocks import (
     render_contract,
     untrusted_block,
 )
+from app.services.prompt_registry import default_registry
 
 logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 3
 _MAX_TOPIC_CONTEXT = 7000
 _MAX_TOKENS_CAP = 600
-_ADVISOR_SYSTEM_PROMPT = (
-    "You are a technical curriculum advisor. You inspect one topic's metadata and section "
-    "content and decide whether the topic needs programming-language-specific code examples, "
-    "and which languages to offer for them. You always answer with a single JSON object and "
-    "never with prose."
-)
+#: The topic-language advisor system prompt contract, migrated
+#: verbatim into the prompt registry as ``topic_language_advisor@1``.
+_ADVISOR_SYSTEM_PROMPT = default_registry.get("topic_language_advisor").system_prompt
 _CANONICAL_LANGUAGE_MAP = {
     "js": "javascript",
     "node": "javascript",
@@ -118,21 +116,11 @@ def _fallback_profile(topic: TopicDetail) -> dict[str, Any]:
     }
 
 
-def _supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
-    """Drop call options ``client.completion`` does not accept.
-
-    ``LLMClient`` takes the full Stage-2 option set, but the client is injected,
-    so a narrower implementation may be in use. Filter against the bound
-    signature rather than assuming one shape.
-    """
-    try:
-        params = inspect.signature(client.completion).parameters
-    except (TypeError, ValueError):
-        return dict(options)
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return options
-    return {key: value for key, value in options.items() if key in params}
-
+#: The option-narrowing shim now lives in :mod:`app.services.llm_client`
+#: as :func:`supported_options`; the module-level alias keeps the
+#: historical call sites (and their tests) working against the one
+#: shared implementation.
+_supported_options = supported_options
 
 
 def _build_prompt(topic: TopicDetail, mcp_context: str = "") -> str:
@@ -191,7 +179,9 @@ class TopicLanguageAdvisor:
         mcp_context: str = "",
     ) -> dict[str, Any]:
         prompt = _build_prompt(topic, mcp_context=mcp_context)
+        attempts = 0
         for _ in range(_MAX_ATTEMPTS):
+            attempts += 1
             result = await self.llm.completion(
                 prompt,
                 llm_config,
@@ -203,6 +193,11 @@ class TopicLanguageAdvisor:
                         "system": _ADVISOR_SYSTEM_PROMPT,
                         "structured": True,
                         "max_tokens_cap": _MAX_TOKENS_CAP,
+                        "attempts": attempts,
+                        "prompt_name": "topic_language_advisor",
+                        "prompt_version": default_registry.latest_version(
+                            "topic_language_advisor"
+                        ),
                     },
                 ),
             )

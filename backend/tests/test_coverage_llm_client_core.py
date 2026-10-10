@@ -534,14 +534,25 @@ class ResultMappingTests(_ClientTest):
         self.assertEqual(result["error_code"], "")
         self.assertEqual(result["finish_reason"], "stop")
         self.assertEqual(result["usage"], {})
+        # ``latency_ms`` is wall-clock timing, so it is
+        # asserted as a non-negative number rather than an
+        # exact value; every other metadata field is
+        # deterministic and compared exactly.
+        metadata = dict(result["metadata"])
+        latency_ms = metadata.pop("latency_ms")
+        self.assertGreaterEqual(latency_ms, 0)
         self.assertEqual(
-            result["metadata"],
+            metadata,
             {
                 "provider": "openai",
                 "model": "gpt-4o-mini",
                 "task": "final",
                 "credential_source": "backend",
                 "usage": {},
+                "attempts": 1,
+                "terminal_reason": "",
+                "prompt_name": "",
+                "prompt_version": "",
             },
         )
         self.assertEqual(sorted(_ALL_KEYS), sorted(["__all__"]))

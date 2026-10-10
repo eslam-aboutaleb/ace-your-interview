@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import math
 import re
@@ -13,6 +12,7 @@ from app.services.llm_client import (
     TERMINAL_ERROR_CODES,
     LLMClient,
     parse_json_object,
+    supported_options,
 )
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.mcp_gateway import MCPGateway
@@ -21,6 +21,7 @@ from app.services.prompt_blocks import (
     render_contract,
     untrusted_block,
 )
+from app.services.prompt_registry import default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +34,9 @@ _DEFAULT_SECTIONS = 120
 _MAX_ATTEMPTS = 4
 _MAX_STREAM_HEADINGS_CONTEXT = 200
 _MAX_TOKENS_CAP = 4000
-_ARCHITECT_SYSTEM_PROMPT = (
-    "You are an expert curriculum architect and technical interview coach. You design "
-    "learning roadmaps that turn a learner into a strong practitioner and teacher of the "
-    "requested topic. You always respond with a single JSON object and never with prose."
-)
+#: The custom-topic architect system prompt contract, migrated verbatim
+#: into the prompt registry as ``custom_topic_architect@1``.
+_ARCHITECT_SYSTEM_PROMPT = default_registry.get("custom_topic_architect").system_prompt
 
 _GENERIC_HEADING_PATTERNS = [
     re.compile(r"^(module|part|chapter|section|topic)\s*[\w\-\.]*$", re.IGNORECASE),
@@ -148,21 +147,11 @@ def _estimate_target_sections(topic: str) -> int:
     return max(_MIN_SECTIONS, min(_MAX_SECTIONS, score))
 
 
-def _supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
-    """Drop call options ``client.completion`` does not accept.
-
-    ``LLMClient`` takes the full Stage-2 option set, but the client is injected,
-    so a narrower implementation may be in use. Filter against the bound
-    signature rather than assuming one shape.
-    """
-    try:
-        params = inspect.signature(client.completion).parameters
-    except (TypeError, ValueError):
-        return dict(options)
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return options
-    return {key: value for key, value in options.items() if key in params}
-
+#: The option-narrowing shim now lives in :mod:`app.services.llm_client`
+#: as :func:`supported_options`; the module-level alias keeps the
+#: historical call sites (and their tests) working against the one
+#: shared implementation.
+_supported_options = supported_options
 
 
 def _slugify_topic(topic: str) -> str:
@@ -979,7 +968,9 @@ class CustomTopicGenerator:
             attempt_description = description
             attempt_track = track
             attempt_levels = levels
+            batch_attempts = 0
             for _ in range(_MAX_ATTEMPTS):
+                batch_attempts += 1
                 result = await self.llm.completion(
                     prompt,
                     llm_config,
@@ -991,6 +982,11 @@ class CustomTopicGenerator:
                             "system": _ARCHITECT_SYSTEM_PROMPT,
                             "structured": True,
                             "max_tokens_cap": _MAX_TOKENS_CAP,
+                            "attempts": batch_attempts,
+                            "prompt_name": "custom_topic_architect",
+                            "prompt_version": default_registry.latest_version(
+                                "custom_topic_architect"
+                            ),
                         },
                     ),
                 )

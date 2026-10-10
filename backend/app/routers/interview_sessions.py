@@ -88,6 +88,7 @@ def init(
         mcp_gateway=mcp_gateway,
         company_pack_store=_company_packs,
         star_store=_star_store,
+        run_store=learning_store,
     )
     _resume_parser = ResumeParser(llm_client, _resume_store)
     _parser = parser
@@ -623,6 +624,7 @@ async def submit_answer(
             response_time_ms=body.response_time_ms,
             degraded=degraded,
             contract=question_contract,
+            generation_version=eval_payload.get("generation_version", ""),
         )
     except TurnConflictError as exc:
         raise HTTPException(status_code=409, detail=_turn_conflict_detail()) from exc
@@ -777,6 +779,7 @@ async def submit_answer_stream(
                     response_time_ms=body.response_time_ms,
                     degraded=degraded,
                     contract=question_contract,
+                    generation_version=eval_payload.get("generation_version", ""),
                 )
             except TurnConflictError as exc:
                 yield json.dumps(

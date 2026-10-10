@@ -660,7 +660,7 @@ async def generate_cards(
         "created_at": time.time(),
         "finished_at": 0.0,
     }
-    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway)
+    generator = QuestionGenerator(llm_client, mcp_gateway=_mcp_gateway, run_store=learning)
     kwargs: dict[str, Any] = {
         "topic_id": body.topic_id or f"deck:{deck_id}",
         "topic_title": topic_title or deck["name"],
