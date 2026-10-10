@@ -1049,6 +1049,7 @@ Candidate answer:
                 prompt,
                 llm_config,
                 user_identity=user_identity,
+                flow="interview_question",
                 **supported_options(
                     self.llm,
                     {
@@ -1149,6 +1150,7 @@ Candidate answer:
                 prompt,
                 llm_config,
                 user_identity=user_identity,
+                flow="interview_eval",
                 **supported_options(
                     self.llm,
                     {
