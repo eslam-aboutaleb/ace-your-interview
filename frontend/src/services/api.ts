@@ -47,6 +47,7 @@ import type {
   ChatAskRequest,
   ChatAskResponse,
   ReviewQueueResponse,
+  StudyPlanFromJDResponse,
   StudyPlanResponse,
   NextObjectivesResponse,
   WeakAreasResponse,
@@ -1051,6 +1052,18 @@ export async function fetchNextObjectives(
   const { data } = await api.get<NextObjectivesResponse>(
     "/learning/next-objectives",
     { params: { topic_ids: topicIds, limit } },
+  );
+  return data;
+}
+
+export async function buildStudyPlanFromJd(
+  jdText: string,
+  days = 7,
+  dailyItems = 3,
+): Promise<StudyPlanFromJDResponse> {
+  const { data } = await api.post<StudyPlanFromJDResponse>(
+    "/learning/plan-from-jd",
+    { jd_text: jdText, days, daily_items: dailyItems },
   );
   return data;
 }

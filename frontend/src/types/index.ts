@@ -846,6 +846,12 @@ export interface StudyPlanResponse {
   days_plan: StudyPlanDay[];
 }
 
+export interface StudyPlanFromJDResponse extends StudyPlanResponse {
+  mapped_topic_ids: string[];
+  unmapped_focus_areas: string[];
+  focus_topic_ids: string[];
+}
+
 /* ── Mock Interview Types ────────────────────────────────── */
 
 export interface InterviewRubricScore {
@@ -1118,12 +1124,22 @@ export interface VoiceLatency {
   total_ms: number;
 }
 
+/** A streamed TTS audio chunk (or a complete utterance). */
+export interface VoiceAudioMessage {
+  type: "audio";
+  audio: string;
+  text?: string;
+  /** True on the terminal frame of a streamed synthesis. */
+  final?: boolean;
+  streamed?: boolean;
+}
+
 /** Messages FROM the server over WebSocket */
 export type VoiceServerMessage =
   | { type: "ready"; session_id: string; tier: VoiceTier }
   | { type: "transcript"; text: string; final: boolean }
   | { type: "response"; text: string; audio: string; latency: VoiceLatency }
-  | { type: "audio"; audio: string; text: string }
+  | VoiceAudioMessage
   | { type: "stopped"; session_id: string }
   | { type: "error"; message: string }
   | VoiceInterviewReadyEvent
@@ -1139,9 +1155,16 @@ export type VoiceClientMessage =
       session_id?: string;
       llm_config?: { provider: string; model: string };
     }
-  | { type: "audio"; data: string; mime: string }
+  | {
+      type: "audio";
+      data: string;
+      mime: string;
+      /** Mic-start → mic-stop duration of the spoken turn. */
+      response_time_ms?: number;
+    }
   | { type: "text"; content: string; speak?: boolean }
-  | { type: "synthesize"; text: string }
+  | { type: "synthesize"; text: string; stream?: boolean }
+  | { type: "interrupt" }
   | { type: "stop" }
   | VoiceInterviewStartMessage;
 
@@ -1554,7 +1577,9 @@ export interface VoiceInterviewResponseEvent {
   rubric: InterviewRubricScoreExtended | null;
   degraded: boolean;
   completed: boolean;
-  latency: { llm_ms: number; total_ms: number };
+  /** Mic-start → mic-stop duration of the spoken answer. */
+  response_time_ms?: number;
+  latency: VoiceLatency;
 }
 
 export interface VoiceInterviewCompletedEvent {

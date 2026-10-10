@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -10,6 +11,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from typing import Any
 
 from app.config import get_settings
 from app.dependencies import (
@@ -178,6 +180,53 @@ async def _consume_turn_budget(
     return False
 
 
+async def _run_turn_interruptible(
+    websocket: WebSocket,
+    turn_task: "asyncio.Task[dict]",
+    interrupt_target: Any,
+    pending: "list[dict]",
+) -> "dict | None":
+    """Await a turn task while listening for an ``interrupt``.
+
+    The turn runs as a cancellable task. While it is in
+    flight, incoming messages are read: an ``interrupt``
+    cancels the turn through the session's ``interrupt``
+    method, and any other message is stashed in ``pending``
+    for the main loop to process once the turn settles.
+    Returns the turn result, or ``None`` when the turn was
+    interrupted before it produced one.
+    """
+    reader: "asyncio.Task[str] | None" = None
+    try:
+        while True:
+            reader = asyncio.create_task(websocket.receive_text())
+            done, _ = await asyncio.wait(
+                {turn_task, reader},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if turn_task in done:
+                return turn_task.result()
+            raw = reader.result()
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                msg = {}
+            if msg.get("type") == "interrupt":
+                interrupt_target.interrupt()
+                # The cancelled turn settles with an interrupted
+                # result; await it so the task is reaped.
+                try:
+                    return await turn_task
+                except asyncio.CancelledError:
+                    return None
+            pending.append(msg)
+    finally:
+        if reader is not None and not reader.done():
+            reader.cancel()
+        if not turn_task.done():
+            turn_task.cancel()
+
+
 @router.websocket("/stream")
 async def voice_stream(
     websocket: WebSocket,
@@ -190,20 +239,31 @@ async def voice_stream(
             1. {"type": "start", "tier": "cloud", "session_type": "chat",
                 "session_id": "...",
                 "llm_config": {"provider": "groq", "model": "..."}}
-            2. {"type": "audio", "data": "<base64 audio>", "mime": "audio/webm"}
+            2. {"type": "audio", "data": "<base64 audio>", "mime": "audio/webm",
+                "response_time_ms": 1234}
             3. {"type": "text", "content": "typed text fallback"}
-            4. {"type": "stop"}
+            4. {"type": "synthesize", "text": "read aloud", "stream": true}
+            5. {"type": "interrupt"}  # cancel the in-flight turn (barge-in)
+            6. {"type": "stop"}
 
         Server → Client:
             1. {"type": "ready", "session_id": "..."}
             2. {"type": "transcript", "text": "...", "final": true}
             3. {"type": "response", "text": "...", "audio": "<base64 mp3>",
                 "latency": {"stt_ms": .., "llm_ms": .., "tts_ms": .., "total_ms": ..}}
-            4. {"type": "error", "message": "..."}
+            4. {"type": "audio", "audio": "<base64 chunk>", "text": "...",
+                "final": false}
+            5. {"type": "error", "message": "..."}
 
     Each connection is limited to ``settings.voice_max_turns_per_connection``
     LLM-producing turns; exceeding it sends ``{"type": "error"}`` and closes
     with code 4429.
+
+    An ``interrupt`` cancels the in-flight turn (barge-in): the turn's
+    STT/LLM/TTS pipeline runs as a cancellable task, so a client that
+    starts speaking while the assistant is talking can cut the turn short.
+    An interrupted turn that never reached the LLM does not consume an LLM
+    turn of the per-connection budget.
     """
     settings = get_settings()
 
@@ -241,15 +301,21 @@ async def voice_stream(
     # disables the budget.
     llm_turns_used = 0
     max_llm_turns = int(settings.voice_max_turns_per_connection or 0)
+    # Messages received while a turn is in flight are stashed
+    # here and processed once the turn settles.
+    pending: "list[dict]" = []
 
     try:
         while True:
-            raw = await websocket.receive_text()
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
-                continue
+            if pending:
+                msg = pending.pop(0)
+            else:
+                raw = await websocket.receive_text()
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                    continue
 
             msg_type = msg.get("type", "")
 
@@ -415,14 +481,6 @@ async def voice_stream(
                 if interview is not None:
                     # Voice interview: a spoken answer is transcribed,
                     # evaluated, recorded, and spoken back as feedback.
-                    if not await _consume_turn_budget(
-                        websocket,
-                        turns_used=llm_turns_used,
-                        max_turns=max_llm_turns,
-                    ):
-                        return
-                    llm_turns_used += 1
-
                     audio_b64 = msg.get("data", "")
                     mime = msg.get("mime", "audio/webm")
                     try:
@@ -435,9 +493,37 @@ async def voice_stream(
                         await websocket.send_json({"type": "error", "message": "Audio too short"})
                         continue
 
-                    answer_start = time.monotonic()
-                    result = await interview.answer(audio_bytes, mime_type=mime)
-                    answer_ms = int((time.monotonic() - answer_start) * 1000)
+                    if not await _consume_turn_budget(
+                        websocket,
+                        turns_used=llm_turns_used,
+                        max_turns=max_llm_turns,
+                    ):
+                        return
+                    llm_turns_used += 1
+
+                    response_time_ms = int(msg.get("response_time_ms") or 0)
+                    turn_task = asyncio.create_task(
+                        interview.answer(
+                            audio_bytes,
+                            mime_type=mime,
+                            response_time_ms=response_time_ms,
+                        )
+                    )
+                    result = await _run_turn_interruptible(
+                        websocket, turn_task, interview, pending
+                    )
+                    # An interrupted turn that never reached the
+                    # evaluation LLM did not spend an LLM turn.
+                    if (
+                        result is not None
+                        and result.get("interrupted")
+                        and not interview.llm_reached
+                    ):
+                        llm_turns_used -= 1
+                    if result is None or result.get("interrupted"):
+                        # Barge-in cut the turn short; the client
+                        # is already recording the next answer.
+                        continue
 
                     if result["transcript"]:
                         await websocket.send_json({
@@ -451,6 +537,7 @@ async def voice_stream(
                         if result["audio_bytes"]
                         else ""
                     )
+                    latency = result.get("latency") or {}
                     await websocket.send_json({
                         "type": "interview_response",
                         "text": result["feedback_text"],
@@ -458,7 +545,13 @@ async def voice_stream(
                         "rubric": result["rubric"],
                         "degraded": result["degraded"],
                         "completed": result["completed"],
-                        "latency": {"llm_ms": answer_ms, "total_ms": answer_ms},
+                        "response_time_ms": result.get("response_time_ms", 0),
+                        "latency": {
+                            "stt_ms": latency.get("stt_ms", 0),
+                            "llm_ms": latency.get("llm_ms", 0),
+                            "tts_ms": latency.get("tts_ms", 0),
+                            "total_ms": latency.get("total_ms", 0),
+                        },
                     })
 
                     if result["completed"] and result["report"]:
@@ -477,15 +570,6 @@ async def voice_stream(
                     })
                     continue
 
-                if not await _consume_turn_budget(
-                    websocket,
-                    turns_used=llm_turns_used,
-                    max_turns=max_llm_turns,
-                ):
-                    return
-
-                llm_turns_used += 1
-
                 audio_b64 = msg.get("data", "")
                 mime = msg.get("mime", "audio/webm")
                 try:
@@ -498,7 +582,31 @@ async def voice_stream(
                     await websocket.send_json({"type": "error", "message": "Audio too short"})
                     continue
 
-                result = await session.process_audio_turn(audio_bytes, mime_type=mime)
+                if not await _consume_turn_budget(
+                    websocket,
+                    turns_used=llm_turns_used,
+                    max_turns=max_llm_turns,
+                ):
+                    return
+
+                llm_turns_used += 1
+
+                turn_task = asyncio.create_task(
+                    session.process_audio_turn(audio_bytes, mime_type=mime)
+                )
+                result = await _run_turn_interruptible(
+                    websocket, turn_task, session, pending
+                )
+                # An interrupted turn that never reached the LLM
+                # did not spend an LLM turn.
+                if (
+                    result is not None
+                    and result.get("interrupted")
+                    and not session.llm_reached
+                ):
+                    llm_turns_used -= 1
+                if result is None or result.get("interrupted"):
+                    continue
 
                 if result.get("error"):
                     await websocket.send_json({"type": "error", "message": result["error"]})
@@ -544,15 +652,14 @@ async def voice_stream(
                         return
                     llm_turns_used += 1
 
-                    answer_start = time.monotonic()
                     result = await interview.answer_text(text)
-                    answer_ms = int((time.monotonic() - answer_start) * 1000)
 
                     answer_audio_b64 = (
                         base64.b64encode(result["audio_bytes"]).decode()
                         if result["audio_bytes"]
                         else ""
                     )
+                    latency = result.get("latency") or {}
                     await websocket.send_json({
                         "type": "interview_response",
                         "text": result["feedback_text"],
@@ -560,7 +667,13 @@ async def voice_stream(
                         "rubric": result["rubric"],
                         "degraded": result["degraded"],
                         "completed": result["completed"],
-                        "latency": {"llm_ms": answer_ms, "total_ms": answer_ms},
+                        "response_time_ms": result.get("response_time_ms", 0),
+                        "latency": {
+                            "stt_ms": latency.get("stt_ms", 0),
+                            "llm_ms": latency.get("llm_ms", 0),
+                            "tts_ms": latency.get("tts_ms", 0),
+                            "total_ms": latency.get("total_ms", 0),
+                        },
                     })
 
                     if result["completed"] and result["report"]:
@@ -636,6 +749,36 @@ async def voice_stream(
                 if not text:
                     continue
 
+                if msg.get("stream"):
+                    # Chunked playback: stream TTS audio as it is
+                    # synthesized so an interrupt can cut it
+                    # mid-utterance. A final (possibly empty)
+                    # frame always terminates the stream.
+                    streamed = False
+                    try:
+                        async for chunk in session.generate_speech_stream(text):
+                            if not chunk:
+                                continue
+                            streamed = True
+                            await websocket.send_json({
+                                "type": "audio",
+                                "audio": base64.b64encode(chunk).decode(),
+                                "text": text,
+                                "final": False,
+                            })
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.error("Streaming synthesis failed: %s", exc)
+                    await websocket.send_json({
+                        "type": "audio",
+                        "audio": "",
+                        "text": text,
+                        "final": True,
+                        "streamed": streamed,
+                    })
+                    continue
+
                 audio_bytes = await session.generate_speech(text)
                 audio_out_b64 = base64.b64encode(audio_bytes).decode() if audio_bytes else ""
                 await websocket.send_json({
@@ -643,6 +786,17 @@ async def voice_stream(
                     "audio": audio_out_b64,
                     "text": text,
                 })
+
+            elif msg_type == "interrupt":
+                # Cancel the in-flight turn (barge-in). During
+                # an active turn the interrupt is consumed by
+                # _run_turn_interruptible; this handler covers
+                # the race where the turn has already settled,
+                # and defensively cancels any stray task.
+                if session is not None:
+                    session.interrupt()
+                if interview is not None:
+                    interview.interrupt()
 
             elif msg_type == "stop":
                 if session:

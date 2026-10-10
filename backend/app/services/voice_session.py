@@ -7,10 +7,11 @@ audio responses.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, AsyncIterator
 
 from app.config import get_settings
 from app.schemas.models import LLMConfigRequest
@@ -55,6 +56,13 @@ class VoiceSession:
         self.system_prompt = system_prompt or self._default_system_prompt()
         self.conversation_history: list[dict[str, str]] = conversation_history or []
         self.turn_index = 0
+        # The in-flight turn runs as a cancellable task so a
+        # client ``interrupt`` can cut it mid-pipeline.
+        self._turn_task: asyncio.Task[dict[str, Any]] | None = None
+        # Set True once a turn reaches the LLM stage. The router
+        # reads it after an interrupt to decide whether the turn
+        # consumed an LLM turn of the connection budget.
+        self.llm_reached = False
 
     def _default_system_prompt(self) -> str:
         if self.session_type == "interview":
@@ -84,7 +92,8 @@ class VoiceSession:
     ) -> dict[str, Any]:
         """Process one voice turn: transcribe → LLM → synthesize.
 
-        Returns:
+        The pipeline runs as a cancellable task so a client
+        ``interrupt`` can cut it mid-flight. Returns:
             {
                 "transcript": str,           # what the user said
                 "response_text": str,        # LLM reply text
@@ -93,8 +102,42 @@ class VoiceSession:
                 "llm_latency_ms": int,
                 "tts_latency_ms": int,
                 "total_latency_ms": int,
+                "interrupted": bool,
             }
         """
+        self.llm_reached = False
+        # The turn runs as its own task (the router wraps this
+        # coroutine in one). ``interrupt`` cancels that task, so
+        # the pipeline is cut at whatever stage is in flight and
+        # no inner work is orphaned.
+        self._turn_task = asyncio.current_task()
+        try:
+            return await self._run_audio_turn(audio_bytes, mime_type=mime_type)
+        except asyncio.CancelledError:
+            return {
+                "transcript": "",
+                "response_text": "",
+                "audio_bytes": b"",
+                "stt_latency_ms": 0,
+                "llm_latency_ms": 0,
+                "tts_latency_ms": 0,
+                "total_latency_ms": 0,
+                "interrupted": True,
+            }
+        finally:
+            self._turn_task = None
+
+    def interrupt(self) -> None:
+        """Cancel the in-flight turn, if any."""
+        if self._turn_task is not None and not self._turn_task.done():
+            self._turn_task.cancel()
+
+    async def _run_audio_turn(
+        self,
+        audio_bytes: bytes,
+        *,
+        mime_type: str = "audio/webm",
+    ) -> dict[str, Any]:
         total_start = time.monotonic()
 
         # 1) STT — transcribe user speech
@@ -115,12 +158,14 @@ class VoiceSession:
                 "llm_latency_ms": 0,
                 "tts_latency_ms": 0,
                 "total_latency_ms": int((time.monotonic() - total_start) * 1000),
+                "interrupted": False,
             }
 
         # 2) LLM — generate response
         self.conversation_history.append({"role": "user", "content": transcript})
 
         llm_start = time.monotonic()
+        self.llm_reached = True
         try:
             response_text = await self._call_llm(transcript)
         except Exception as e:
@@ -150,7 +195,26 @@ class VoiceSession:
             "llm_latency_ms": llm_ms,
             "tts_latency_ms": tts_ms,
             "total_latency_ms": total_ms,
+            "interrupted": False,
         }
+
+    async def generate_speech_stream(self, text: str) -> AsyncIterator[bytes]:
+        """Stream TTS audio chunks, falling back to full synthesis.
+
+        Wraps the provider's ``synthesize_stream`` so a long
+        utterance can be cut mid-stream by an interrupt. When the
+        provider cannot stream, the fully synthesized audio is
+        yielded as a single chunk (the ``synthesize`` fallback).
+        """
+        try:
+            async for chunk in self.tts.synthesize_stream(text):
+                yield chunk
+            return
+        except Exception as e:
+            logger.error("Streaming TTS failed, falling back: %s", e)
+        audio = await self.generate_speech(text)
+        if audio:
+            yield audio
 
     async def generate_speech(self, text: str) -> bytes:
         """TTS-only: convert text to audio (for speaking questions aloud)."""
@@ -241,6 +305,13 @@ class VoiceInterviewSession:
         self.session_id = str(self.session.get("session_id") or "")
         self.turn_count = int(self.session.get("turn_count") or 0)
         self.completed = False
+        # The in-flight answer runs as a cancellable task so a
+        # client ``interrupt`` (barge-in) can cut it mid-pipeline.
+        self._turn_task: asyncio.Task[dict[str, Any]] | None = None
+        # Set True once an answer reaches the evaluation (LLM)
+        # stage; the router reads it after an interrupt to decide
+        # whether the turn consumed an LLM turn of the budget.
+        self.llm_reached = False
 
     @property
     def turns_completed(self) -> int:
@@ -286,9 +357,59 @@ class VoiceInterviewSession:
         self,
         audio_bytes: bytes,
         mime_type: str = "audio/webm",
+        response_time_ms: int = 0,
     ) -> dict[str, Any]:
-        """Transcribe a spoken answer, evaluate it, speak feedback."""
-        transcript = await self.voice.transcribe_audio(audio_bytes, mime_type=mime_type)
+        """Transcribe a spoken answer, evaluate it, speak feedback.
+
+        ``response_time_ms`` is the client-measured duration of
+        the spoken answer (mic-start → mic-stop); it is persisted
+        on the turn. The pipeline runs as a cancellable task so a
+        client ``interrupt`` (barge-in) can cut it mid-flight.
+        """
+        self.llm_reached = False
+        # The answer runs as its own task (the router wraps
+        # this coroutine in one); ``interrupt`` cancels it,
+        # cutting the pipeline at whatever stage is in flight.
+        self._turn_task = asyncio.current_task()
+        try:
+            return await self._answer(
+                audio_bytes,
+                mime_type=mime_type,
+                response_time_ms=response_time_ms,
+            )
+        except asyncio.CancelledError:
+            return {
+                "transcript": "",
+                "feedback_text": "",
+                "audio_bytes": b"",
+                "rubric": None,
+                "degraded": False,
+                "completed": False,
+                "report": None,
+                "response_time_ms": max(0, int(response_time_ms)),
+                "latency": {"stt_ms": 0, "llm_ms": 0, "tts_ms": 0, "total_ms": 0},
+                "interrupted": True,
+            }
+        finally:
+            self._turn_task = None
+
+    def interrupt(self) -> None:
+        """Cancel the in-flight answer, if any."""
+        if self._turn_task is not None and not self._turn_task.done():
+            self._turn_task.cancel()
+
+    async def _answer(
+        self,
+        audio_bytes: bytes,
+        *,
+        mime_type: str = "audio/webm",
+        response_time_ms: int = 0,
+    ) -> dict[str, Any]:
+        stt_start = time.monotonic()
+        transcript = await self.voice.transcribe_audio(
+            audio_bytes, mime_type=mime_type
+        )
+        stt_ms = int((time.monotonic() - stt_start) * 1000)
         if not transcript.strip():
             return {
                 "transcript": "",
@@ -298,8 +419,19 @@ class VoiceInterviewSession:
                 "degraded": False,
                 "completed": False,
                 "report": None,
+                "response_time_ms": max(0, int(response_time_ms)),
+                "latency": {
+                    "stt_ms": stt_ms,
+                    "llm_ms": 0,
+                    "tts_ms": 0,
+                    "total_ms": stt_ms,
+                },
             }
-        return await self._evaluate_answer(transcript)
+        return await self._evaluate_answer(
+            transcript,
+            response_time_ms=response_time_ms,
+            stt_ms=stt_ms,
+        )
 
     async def answer_text(self, text: str) -> dict[str, Any]:
         """Evaluate a typed answer (text fallback for the interview)."""
@@ -312,16 +444,26 @@ class VoiceInterviewSession:
                 "degraded": False,
                 "completed": False,
                 "report": None,
+                "response_time_ms": 0,
+                "latency": {"stt_ms": 0, "llm_ms": 0, "tts_ms": 0, "total_ms": 0},
             }
         return await self._evaluate_answer(str(text).strip())
 
-    async def _evaluate_answer(self, user_answer: str) -> dict[str, Any]:
+    async def _evaluate_answer(
+        self,
+        user_answer: str,
+        *,
+        response_time_ms: int = 0,
+        stt_ms: int = 0,
+    ) -> dict[str, Any]:
         question = str(self.session.get("current_question") or "").strip()
         # The question's assessment contract was persisted when the
         # question was asked; legacy sessions have none and evaluate
         # against the question text only.
         question_contract = self.session.get("current_question_contract") or None
         turn_index = self.turns_completed + 1
+        llm_start = time.monotonic()
+        self.llm_reached = True
         eval_payload = await self.generator.evaluate_answer(
             session=self.session,
             question=question,
@@ -331,6 +473,7 @@ class VoiceInterviewSession:
             user_identity=self.user_identity,
             question_contract=question_contract,
         )
+        llm_ms = int((time.monotonic() - llm_start) * 1000)
         # Internal drift signal for the eval harness; never spoken.
         eval_payload.pop("follow_up_note_repaired", None)
         degraded = bool(eval_payload.get("degraded"))
@@ -345,7 +488,7 @@ class VoiceInterviewSession:
             strengths=eval_payload["strengths"],
             improvements=eval_payload["improvements"],
             follow_up_note=eval_payload["follow_up_note"],
-            response_time_ms=0,
+            response_time_ms=response_time_ms,
             degraded=degraded,
             contract=question_contract,
         )
@@ -369,7 +512,9 @@ class VoiceInterviewSession:
         self.session["memory_summary"] = memory_update[:2400]
 
         feedback_text = self._feedback_text(eval_payload)
+        tts_start = time.monotonic()
         audio = await self.voice.generate_speech(feedback_text)
+        tts_ms = int((time.monotonic() - tts_start) * 1000)
 
         report = None
         if self.turn_limit_reached:
@@ -393,6 +538,13 @@ class VoiceInterviewSession:
             "degraded": degraded,
             "completed": self.completed,
             "report": report,
+            "response_time_ms": max(0, int(response_time_ms)),
+            "latency": {
+                "stt_ms": stt_ms,
+                "llm_ms": llm_ms,
+                "tts_ms": tts_ms,
+                "total_ms": stt_ms + llm_ms + tts_ms,
+            },
         }
 
     @staticmethod
