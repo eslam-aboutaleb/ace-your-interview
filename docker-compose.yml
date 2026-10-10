@@ -1,6 +1,13 @@
 services:
   ace-your-interview-backend:
     build: ./backend
+    # nginx.conf (shipped in the frontend image) proxies /api to
+    # http://study-backend:8001; alias the service so the name
+    # resolves on the default network in this stack too.
+    networks:
+      default:
+        aliases:
+          - study-backend
     ports:
       - "8001:8001"
     volumes:
