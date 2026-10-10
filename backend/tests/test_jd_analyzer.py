@@ -1,6 +1,6 @@
 """JD analyzer tests — gap precision on a fixture resume + JD.
 
-Validation target (from the plan): a fixture resume and JD with
+Validation target: a fixture resume and JD with
 planted gaps must detect >= 80% of the gaps and never invent a
 skill that is not literally in the JD text.
 """

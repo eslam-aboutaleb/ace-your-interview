@@ -1,7 +1,5 @@
 """Study analytics: activity heatmap, retention, mastery curve.
 
-Plan: ``1790987112911-analytics-gamification-exam-mode.md``
-
 All endpoints are read-only aggregations over existing
 tables (``learning_attempts``, ``fsrs_review_log``,
 ``exam_sessions``), so the analytics router is

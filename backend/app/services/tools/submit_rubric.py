@@ -19,7 +19,7 @@ imports ``mcp_gateway`` which imports this package, so importing
 is therefore duplicated as :data:`RUBRIC_KEYS` / :data:`RUBRIC_RANGES` instead of
 imported — the same values the evaluator's prompt block already declares. The
 integration points that remain to be applied in
-``app/services/interview_generator.py`` are listed in the plan's Stage 4.2.
+``app/services/interview_generator.py`` are tracked as a follow-up.
 """
 
 from __future__ import annotations

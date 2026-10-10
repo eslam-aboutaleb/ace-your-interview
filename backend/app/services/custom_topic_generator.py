@@ -678,7 +678,7 @@ def _build_stream_batch_prompt(
 ) -> str:
     """Build the user turn for one stream batch.
 
-    The architect persona lives in ``system`` (Stage 2.1). The coverage mandate
+    The architect persona lives in ``system``. The coverage mandate
     below is ported from the deleted non-streaming ``_build_prompt``: batches
     are generated independently, so without it each batch drifts toward the
     same generic topics and the finished roadmap loses whole dimensions.

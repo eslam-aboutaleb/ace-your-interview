@@ -124,7 +124,7 @@ _supported_options = supported_options
 
 
 def _build_prompt(topic: TopicDetail, mcp_context: str = "") -> str:
-    """Build the user turn. The advisor persona lives in ``system`` (Stage 2.1)."""
+    """Build the user turn. The advisor persona lives in ``system``."""
     contract = render_contract(
         schema_label="Return ONLY valid JSON",
         schema_block="""{

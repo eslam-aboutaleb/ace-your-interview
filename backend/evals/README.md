@@ -1,6 +1,8 @@
 # Eval fixtures and golden outputs
 
-Stage 4.1 of `.kilo/plans/1790987112911-*` / `1790972917415-llm-pipeline-reliability-plan.md`.
+Deterministic eval harness for agent quality: production-validator
+agreement, prompt contracts, untrusted-input containment, and golden
+prompt digests.
 
 Two tiers live here:
 
@@ -19,7 +21,7 @@ and validators, so a number it reports is a number production would agree with.
 | `questions.jsonl` | question generation | conceptual + problem-solving, every language in `PROBLEM_SOLVING_LANGUAGE_OPTIONS`, every level, `_attempt_budget` fan-out, prior-progress uniqueness, hostile `mcp_context`, the unsupported-language degraded path |
 | `quiz.jsonl` | quiz generation | single/multi topic, mcq-only and true-false-only, problem-solving topic, large `count`, hostile topic content |
 | `interview_question.jsonl` | interview question generation | `coding` / `behavioral` / `mixed` x `junior` / `mid` / `senior`, opening/middle/late turn phases, hostile job description + resume, a duplicate question production must reject |
-| `interview.jsonl` | interview evaluation | the same 3x3 type/level matrix, notes that need Stage 1.4 repair, two Stage 1.3 degraded outputs, a hostile answer |
+| `interview.jsonl` | interview evaluation | the same 3x3 type/level matrix, notes that need follow-up-note repair, two degraded outputs, a hostile answer |
 | `chat.jsonl` | chat follow-up | normal markdown reply, a reply to a fence-breakout attempt |
 | `custom_topics.jsonl` | roadmap generation | opening/middle batches, hostile topic name, a 100-section aggregate |
 
@@ -28,7 +30,7 @@ and validators, so a number it reports is a number production would agree with.
 `matrix_coverage` in the report checks that the fixtures actually cover every
 `junior` / `mid` / `senior` level, every `coding` / `behavioral` / `mixed`
 interview type, and every language in
-`PROBLEM_SOLVING_LANGUAGE_OPTIONS`. Stage 1.10 adds a language → the gate fails
+`PROBLEM_SOLVING_LANGUAGE_OPTIONS`. Adding a language → the gate fails
 until a fixture covers it, so the matrix cannot silently rot.
 
 ### Case shape

@@ -14,8 +14,8 @@ from app.services.learning_store import LearningStore
 
 class FakeLLM:
     async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
-        # Stage 2.1 moved each persona out of the user turn into the system role,
-        # so route on `system` first and fall back to the task-shaped prompt text.
+        # Each persona lives in the system role, so route on `system`
+        # first and fall back to the task-shaped prompt text.
         haystack = f"{kwargs.get('system') or ''}\n{prompt}".lower()
         wants_quiz = "expert technical quiz creator" in haystack or (
             "quiz questions from the documentation" in haystack

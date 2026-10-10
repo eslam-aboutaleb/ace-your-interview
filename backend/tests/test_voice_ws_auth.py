@@ -1,7 +1,7 @@
 """Voice WebSocket authentication, persona, and turn-budget tests.
 
-Covers plan Stage 1.1 (WebSocket auth), 1.1b (dev bypass parity with HTTP),
-1.7 (client cannot supply the persona), and the Stage 3.1 per-connection
+Covers WebSocket auth, the dev bypass parity with HTTP,
+the client's inability to supply the persona, and the per-connection
 LLM turn budget.
 
 ``TestClient`` hardcodes ``scope["client"]`` to ``("testclient", 50000)``, so a

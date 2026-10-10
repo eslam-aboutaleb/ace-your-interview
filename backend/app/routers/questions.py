@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
 
-# ── Prompt bounds (Stage 2.2) ────────────────────────────────
+# ── Prompt bounds ────────────────────────────────────────────────
 # `GenerateQuestionsRequest.section_content` / `section_title` are unbounded in
 # the Pydantic schema and are embedded verbatim in the generation prompt, so
 # they are bounded here. These match the `max_length` values requested for
@@ -46,7 +46,7 @@ MAX_SECTION_CONTENT_CHARS = 12000
 MAX_SECTION_TITLE_CHARS = 200
 MAX_EXISTING_QUESTION_CHARS = 400
 
-#: Bound on how many topics are resolved at once (Stage 3.5). The per-topic
+#: Bound on how many topics are resolved at once. The per-topic
 #: resolution steps are independent, so they run concurrently; the semaphore
 #: keeps one wide multi-topic request from monopolising the event loop or the
 #: single-worker SQLite executor.
@@ -220,7 +220,7 @@ async def _load_progress_context(
     Asked questions are interleaved round-robin across the requested topics so a
     multi-topic quiz does not fill the whole prompt budget from the first topic.
 
-    Per-topic reads are independent, so they run concurrently (Stage 3.5) and
+    Per-topic reads are independent, so they run concurrently and
     are reassembled in request order.
     """
     store = _progress_store
@@ -356,7 +356,7 @@ async def _capture_grouped_questions(
         )
 
 
-# ── Multi-topic quiz resolution (Stage 3.5) ────────────────────
+# ── Multi-topic quiz resolution ──────────────────────────────────
 #
 # Every requested topic is resolved independently: its content comes from a
 # separate parser/store read and its AI settings from a separate preference

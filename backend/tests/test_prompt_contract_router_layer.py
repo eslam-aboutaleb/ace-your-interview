@@ -1,4 +1,4 @@
-"""Structural Stage 2.1/2.3 guard for the router layer owned by this plan stage.
+"""Structural guard for the router layer's prompt contract.
 
 Scans the owned source files so a future prompt edit cannot silently regress to
 a single-user-turn prompt or drop the explicit task / structured / cap keywords.
@@ -10,7 +10,7 @@ import unittest
 
 APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "app"
 
-#: Files whose prompts this stage owns.
+#: Files whose prompts this guard owns.
 OWNED_FILES = (
     "routers/chat.py",
     "routers/questions.py",

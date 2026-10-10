@@ -1,4 +1,4 @@
-"""Stage 4.1: the eval harness must share code with production, and its metrics must be able to fail."""
+"""The eval harness must share code with production, and its metrics must be able to fail."""
 
 from __future__ import annotations
 
@@ -27,11 +27,11 @@ EVALS = BACKEND / "evals"
 
 
 class HarnessBindsProductionValidatorsTests(unittest.TestCase):
-    """The plan's "assert the import in a test, not by inspection".
+    """Assert the import in a test, not by inspection.
 
     Each case binds a harness name to the production object and checks identity
     against a fresh import from ``app.services``. Re-implementing any of these
-    locally — which is the bug 4.1 exists to remove — fails here.
+    locally — which is the bug this harness exists to remove — fails here.
     """
 
     def test_question_flow_binds_question_generator_validators(self):
@@ -202,7 +202,7 @@ class HarnessMetricsCanFailTests(unittest.TestCase):
         report = run_eval(EVALS)
         eval_cases = [case for case in load_cases(EVALS) if case.flow == "interview"]
         repaired = [case for case in eval_cases if case.note_repaired]
-        self.assertTrue(repaired, "no fixture exercises Stage 1.4's follow_up_note repair")
+        self.assertTrue(repaired, "no fixture exercises the follow_up_note repair")
         expected = round(len(repaired) / len(eval_cases) * 100, 2)
         self.assertEqual(report["summary"]["repair_rate"], expected)
 
@@ -210,7 +210,7 @@ class HarnessMetricsCanFailTests(unittest.TestCase):
         report = run_eval(EVALS)
         eval_cases = [case for case in load_cases(EVALS) if case.flow == "interview"]
         degraded = [case for case in eval_cases if case.degraded]
-        self.assertTrue(degraded, "no fixture exercises Stage 1.3's degraded path")
+        self.assertTrue(degraded, "no fixture exercises the degraded path")
         for case in degraded:
             self.assertFalse(case.valid)
             self.assertFalse(case.expected_valid)
@@ -223,8 +223,8 @@ class HarnessMetricsCanFailTests(unittest.TestCase):
             self.assertEqual(_failure_gates(fixture_dir), set())
 
             # Empty rubrics: exactly what a model emits when the evaluate prompt
-            # stops showing the rubric shape, and exactly what Stage 1.3 then
-            # degrades. Both rates must move.
+            # stops showing the rubric shape, and exactly what the degraded
+            # path then flags. Both rates must move.
             self._rewrite(
                 fixture_dir / "interview.jsonl",
                 lambda row: row.update(

@@ -42,7 +42,7 @@ _PROVIDER_PREFIX: dict[str, str] = {
 
 _TASK_ROUTE_KEYS = {"planner", "retrieval", "eval", "final"}
 
-# ── Capability map (Stage 2.3) ──────────────────────────────
+# ── Capability map ────────────────────────────────────────────
 # Providers whose OpenAI-compatible surface accepts
 # ``response_format={"type": "json_object"}``. Anthropic has no
 # equivalent parameter and must fall back to the shared salvage parser.
@@ -391,7 +391,7 @@ class LLMClient:
             model_str = llm_config.model or ""
             if model_str:
                 model_locked = True
-            # 0.0 means "unset" (Stage 2.6); the field default cannot express
+            # 0.0 means "unset"; the field default cannot express
             # "explicitly deterministic" without collapsing to the default.
             if llm_config.temperature and llm_config.temperature > 0:
                 explicit_temperature = float(llm_config.temperature)
@@ -485,7 +485,7 @@ class LLMClient:
             # Non-authenticated/background contexts continue using backend settings.
             credential_source = "backend"
 
-        # Explicit task only (Stage 2.4). Prompt text is never inspected.
+        # Explicit task only. Prompt text is never inspected.
         resolved_task = str(task or "").strip().lower() or "final"
         if resolved_task not in _TASK_ROUTE_KEYS:
             resolved_task = "final"
@@ -535,7 +535,7 @@ class LLMClient:
                 "usage": {},
             }
 
-        # ── per-user call budget (Stage 3.1) ──────────────────
+        # ── per-user call budget ────────────────────────────────
         budget = await self._budget_for(settings)
         allowed, retry_after = await budget.acquire(identity_key)
         if not allowed:

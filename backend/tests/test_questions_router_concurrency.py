@@ -1,4 +1,4 @@
-"""Stage 3.5 (batch concurrency) + Stage 2.2 (bounds) for the questions router."""
+"""Batch concurrency and prompt bounds for the questions router."""
 
 import asyncio
 import json
@@ -23,7 +23,7 @@ class FakeLLM:
 
     async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
         self.prompts.append(prompt)
-        # Stage 2.1 put each persona in the system role, so route on `system`
+        # Each persona lives in the system role, so route on `system`
         # first and fall back to the task-shaped prompt text.
         haystack = f"{kwargs.get('system') or ''}\n{prompt}".lower()
         wants_quiz = "expert technical quiz creator" in haystack or (

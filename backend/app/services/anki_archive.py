@@ -5,11 +5,11 @@ An ``.apkg`` file is a zip containing ``collection.anki2``
 a ``media`` JSON manifest, and optional media blobs.
 
 This module implements a custom minimal reader/writer over
-the documented format (plan decision: avoid heavy deps). It
+the documented format (avoiding heavy dependencies). It
 targets the Anki 2.1 collection format (``usn=-1``, ``mod``
 as epoch seconds, collection ``ver=11``).
 
-Import guards (plan decisions): 50 MB per import, 2000 cards
+Import guards: 50 MB per import, 2000 cards
 per import, 5000 zip entries, compressed-ratio <= 100x
 (zip-bomb guard).
 """
@@ -27,7 +27,7 @@ import time
 import zipfile
 from typing import Any
 
-# ── Import caps (plan decisions) ───────────────────
+# ── Import caps ──────────────────────────────────────
 MAX_IMPORT_BYTES = 50 * 1024 * 1024
 MAX_IMPORT_CARDS = 2000
 MAX_ZIP_ENTRIES = 5000

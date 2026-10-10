@@ -147,7 +147,7 @@ class RateLimitingTests(unittest.TestCase):
         )
         self.assertIsNone(classify_rate_limit_scope("/api/progress/topics", "GET"))
 
-    # ── Stage 3.1: LLM-backed topic GET/PUT scopes ─────────
+    # ── LLM-backed topic GET/PUT scopes ────────────────────
 
     def test_topic_detail_and_preferences_are_llm_scoped(self):
         # All three resolve the language profile, which runs the LLM advisor.
@@ -200,7 +200,7 @@ class RateLimitingTests(unittest.TestCase):
                 res = client.get("/api/voice/config")
                 self.assertNotEqual(res.status_code, 429, res.text)
 
-    # ── Stage 3.1: trusted-proxy gating ────────────────────
+    # ── Trusted-proxy gating ───────────────────────────────
 
     def test_forwarded_for_is_ignored_without_trusted_proxy(self):
         os.environ["STUDY_TRUSTED_PROXY_ENABLED"] = "false"

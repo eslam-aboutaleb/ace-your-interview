@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluation harness for prompt-contract and output quality (Stage 4.1).
+"""Evaluation harness for prompt-contract and output quality.
 
 Two tiers, one report shape:
 
@@ -43,7 +43,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-# ── Production imports (the point of Stage 4.1) ────────────────────────────
+# ── Production imports (the point of the harness) ──────────────────────────
 # Every validator, parser, prompt builder and normaliser below is the one that
 # runs in production. ``tests/test_eval_agent_quality.py`` asserts these exact
 # objects are the harness's, so replacing one with a local copy fails the build.
@@ -739,9 +739,9 @@ def _validate_interview_eval_case(
     """Score one evaluation the way production does.
 
     The ``follow_up_note_repaired`` flag comes from
-    ``InterviewGenerator._normalise_eval_payload`` (Stage 1.4), so the repair
+    ``InterviewGenerator._normalise_eval_payload``, so the repair
     rate is measured rather than asserted. An output production cannot use at
-    all is the Stage 1.3 ``degraded`` path and is reported as such.
+    all is the ``degraded`` path and is reported as such.
     """
     payload = parse_json_object(raw_output)
     if not payload:
@@ -935,9 +935,9 @@ def write_prompt_snapshots(results: Sequence[CaseResult], fixture_dir: Path) -> 
 # ── fixture matrix coverage ───────────────────────────────────────────────
 
 #: Dimensions the fixture matrix must cover. A new language in
-#: ``PROBLEM_SOLVING_LANGUAGE_OPTIONS`` (Stage 1.10) or a new interview type
+#: ``PROBLEM_SOLVING_LANGUAGE_OPTIONS`` or a new interview type
 #: fails this gate until a fixture exists for it, so "expand the matrix" is an
-#: enforced requirement rather than a note in a plan.
+#: enforced requirement rather than a note.
 MATRIX_DIMENSIONS: dict[str, tuple[str, ...]] = {
     "level": ("junior", "mid", "senior"),
     "interview_type": ("coding", "behavioral", "mixed"),
@@ -1142,13 +1142,13 @@ def evaluate_gates(
         "repair_rate",
         metrics["repair_rate"],
         metrics["repair_rate"] <= thresholds["repair_rate_max"],
-        f"must be <= {thresholds['repair_rate_max']}% (Stage 1.4 follow_up_note_repaired)",
+        f"must be <= {thresholds['repair_rate_max']}% (follow_up_note_repaired)",
     )
     check(
         "degraded_eval_rate",
         metrics["degraded_eval_rate"],
         metrics["degraded_eval_rate"] <= thresholds["degraded_eval_rate_max"],
-        f"must be <= {thresholds['degraded_eval_rate_max']}% (Stage 1.3 degraded flag)",
+        f"must be <= {thresholds['degraded_eval_rate_max']}% (degraded flag)",
     )
     retry = metrics["retry_distribution"]
     if retry["available"] and retry["verified"]:

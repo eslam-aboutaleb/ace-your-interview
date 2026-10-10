@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_BATCH_SIZE = 32
 
-# Provider → default embedding model (plan decision).
+# Provider → default embedding model.
 PROVIDER_EMBEDDING_MODEL: dict[str, str] = {
     "openai": "text-embedding-3-small",
     "google": "gemini-embedding",

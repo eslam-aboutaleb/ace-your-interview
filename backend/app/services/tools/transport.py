@@ -7,7 +7,7 @@ content of the response, so it cannot (a) carry a multi-turn transcript that
 includes ``role="tool"`` messages, or (b) return the ``tool_calls`` the loop
 needs to read. Wiring that through would require a ``messages`` parameter and a
 ``tool_calls`` field on the result, which live in a file this change set does not
-own. That follow-up is recorded in the plan; until it lands, the loop issues the
+own. Until that follow-up lands, the loop issues the
 provider call itself.
 
 The two-tier credential policy is not bypassed by that choice. The enrichment

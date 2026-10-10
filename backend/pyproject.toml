@@ -74,7 +74,7 @@ source = ["app"]
 omit = ["app/generated/*"]
 
 [tool.coverage.report]
-# The plan's gate: no regression below 90% total (statement + branch).
+# Coverage gate: no regression below 90% total (statement + branch).
 # Current measured value is ~98%, so this fails only on a real regression.
 fail_under = 90
 show_missing = true

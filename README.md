@@ -14,12 +14,17 @@ Adaptive, LLM-powered interview preparation platform. Level-aware question and q
 
 ### Generation & grounding
 - Question and quiz generation in legacy and **strict v2** modes: v2 emits `source_quote` / `source_section`, validates against the curriculum, retries on failure, and streams (`/stream` variants).
+- Generation prompts are grounded by an **LLM skills taxonomy** (`backend/app/services/llm_skills.py`): 15 technical/coding skills, 10 interview skills, and 10 educational skills, injected as structured prompt blocks.
 - Citation-grounded **RAG chat** over user-ingested documents (sqlite-vec vector search), with follow-up turns and custom-topic generation.
 - On-demand hints for any generated question.
 
 ### Adaptive learning
 - **FSRS-4.5** spaced-repetition scheduler (`fsrs>=4.1,<4.2`) driving the review queue, mastery, weak-area analysis, study plan, forecast, and calibration endpoints.
 - Flashcard **decks** with Anki import/export, duplicate detection, and per-card review recording.
+- **Timed exams** with server-side start/submit timestamps, auto-grading, pass/fail scoring, and deterministic remark re-grading.
+- **Gamification**: XP, levels, streaks, badges, and a daily goal, updated from attempts, reviews, and exam completion.
+- Read-only **study analytics**: activity heatmap, 1d/7d/30d retention, EMA mastery curve, and due-card forecast.
+- Per-topic **progress notes** with AI-generated study summaries (explicit save plus `pagehide` autosave with background repair).
 - Progress trends and personalized recommendations.
 
 ### Mock interviews
@@ -39,8 +44,8 @@ Adaptive, LLM-powered interview preparation platform. Level-aware question and q
 ```
 ┌────────────────────────────┐        ┌──────────────────────────────────┐
 │  React 18 + TypeScript     │  HTTP  │  FastAPI (Python 3.11+)          │
-│  Vite · Tailwind · Zustand │ ─────► │  routers/  (14 API routers)      │
-│  react-router · PWA        │ ◄───── │  services/ (45+ services)        │
+│  Vite · Tailwind · Zustand │ ─────► │  routers/  (17 API routers)      │
+│  react-router · PWA        │ ◄───── │  services/ (50+ services)        │
 │  react-markdown · mermaid  │  WS    │  schemas/models.py               │
 └────────────────────────────┘        └───────────┬──────────────────────┘
                                                   │
@@ -52,8 +57,8 @@ Adaptive, LLM-powered interview preparation platform. Level-aware question and q
   docs, vectors)        ollama
 ```
 
-- **Backend** (`backend/app/`): `routers/` expose the REST/WebSocket API; `services/` hold the domain logic (LLM client + policy, FSRS scheduler, RAG service, document pipeline, interview store, voice session, rate limiter, MCP gateway, agentic tools); `schemas/models.py` defines the Pydantic contract; `config.py` centralizes settings.
-- **Frontend** (`frontend/src/`): `pages/` (17 routes), `components/` (layout, voice, common), `store/` (Zustand: auth, voice, etc.), `hooks/`, `services/` (API client).
+- **Backend** (`backend/app/`): `routers/` expose the REST/WebSocket API; `services/` hold the domain logic (LLM client + policy + prompt registry, FSRS scheduler, RAG service, document pipeline, interview store, voice session, exam engine, gamification, analytics, LLM skills taxonomy, rate limiter, MCP gateway, agentic tools); `schemas/models.py` defines the Pydantic contract; `config.py` centralizes settings.
+- **Frontend** (`frontend/src/`): `pages/` (20 routes), `components/` (layout, voice, common), `store/` (Zustand: auth, voice, etc.), `hooks/`, `services/` (API client).
 - **Evals** (`backend/evals/`): golden fixtures, prompt snapshots, and a deterministic quality harness (`scripts/eval_agent_quality.py`) gating schema validity, prompt contracts, untrusted-input containment, duplicate/grounding/repair/degraded budgets.
 
 ## Repository structure
@@ -62,7 +67,7 @@ Adaptive, LLM-powered interview preparation platform. Level-aware question and q
 ace-your-interview/
 ├── backend/
 │   ├── app/
-│   │   ├── routers/        # 14 API routers (topics, questions, learning, cards, ...)
+│   │   ├── routers/        # 17 API routers (topics, questions, learning, cards, ...)
 │   │   ├── services/       # LLM, FSRS, RAG, interview, voice, auth, rate-limit, ...
 │   │   ├── schemas/        # Pydantic models (API contract)
 │   │   ├── data/           # static_curriculum.json (22 topics, 1000+ sections)
@@ -124,7 +129,7 @@ Copy `backend/.env.example` to `backend/.env`. Key variables:
 | `STUDY_ADMIN_USERS` | Admin surface access (`google:admin@example.com`) |
 | `STUDY_CORS_ORIGINS`, `STUDY_FRONTEND_URL` | Frontend origin for cookies/CORS |
 
-Feature flags (all `STUDY_ENABLE_*`, default `true` unless noted): `MOCK_INTERVIEW_V1`, `FSRS_V1`, `FLASHCARDS_V1`, `INTERVIEW_PLUS_V1`, `VOICE_INTERVIEW_V1` (default `false`), `TOPIC_VIDEOS` (default `false`).
+Feature flags (all `STUDY_ENABLE_*`, default `true` unless noted): `MOCK_INTERVIEW_V1`, `FSRS_V1`, `FLASHCARDS_V1`, `EXAMS_V1`, `GAMIFICATION_V1`, `INTERVIEW_PLUS_V1`, `VOICE_INTERVIEW_V1` (default `false`), `VOICE_AGENT` (default `false`), `RAG_V1` (default `false`), `TOPIC_VIDEOS` (default `false`).
 
 Local-dev auth bypass (localhost only — keep `false` in deployment):
 ```bash
@@ -140,7 +145,6 @@ STUDY_DEV_AUTH_BYPASS_LOCALHOST=true
 | GET | `/api/topics` | List topics (`track`, `level`, `q` filters) |
 | GET | `/api/topics/{id}` | Topic details |
 | GET/PUT | `/api/topics/{id}/preferences` | Per-topic study preferences |
-| POST | `/api/topics/{id}/save`, `/autosave` | Persist topic progress |
 | POST | `/api/topics/{id}/content/generate/stream` | Stream generated topic content |
 | GET | `/api/topics/{id}/videos` | Topic video recommendations |
 | GET/POST | `/api/features/topic-videos/*` | Video feature status / metrics / events |
@@ -153,21 +157,30 @@ STUDY_DEV_AUTH_BYPASS_LOCALHOST=true
 | GET | `/api/learning/review-queue` | Due review items (FSRS) |
 | GET | `/api/learning/weak-areas` | Weak topic summary |
 | GET | `/api/learning/mastery` | Mastery by topic |
-| GET | `/api/learning/study-plan`, `/forecast`, `/calibration`, `/recommendations` | Planning endpoints |
+| GET | `/api/learning/study-plan`, `/forecast`, `/calibration`, `/recommendations`, `/next-objectives` | Planning endpoints |
 | GET/PUT/POST | `/api/learning/profile`, `/profile/diagnostic`, `/review` | Learning profile & review recording |
+| POST | `/api/learning/plan-from-jd` | Study plan built from a job description |
 | **Flashcards** | | |
 | GET/POST | `/api/decks` | List / create decks |
 | GET/PUT/DELETE | `/api/decks/{deck_id}` | Deck management |
-| GET | `/api/decks/{deck_id}/cards`, `/export` | Deck cards / Anki export |
-| POST | `/api/decks/import`, `/find-duplicates` | Anki import / duplicate detection |
-| GET/POST/PUT/DELETE | `/api/cards/*` | Card CRUD and review |
+| GET | `/api/decks/{deck_id}/cards`, `/study-session`, `/export` | Deck cards / due study cards / Anki export |
+| POST | `/api/decks/{deck_id}/review`, `/generate` | Deck-card FSRS review / async LLM card generation |
+| GET | `/api/decks/generate/jobs/{job_id}` | Card-generation job status |
+| POST | `/api/decks/import` | Anki `.apkg` import |
+| POST | `/api/cards/find-duplicates` | Duplicate detection |
+| PUT/DELETE | `/api/cards/{card_id}` | Card update / delete |
+| **Progress** | | |
+| GET | `/api/progress/topics`, `/api/progress/{topic_id}` | Per-topic study progress |
+| POST | `/api/progress/{topic_id}/save`, `/autosave` | Persist progress + AI study-note summary |
+| **Analytics** | | |
+| GET | `/api/analytics/heatmap`, `/retention`, `/mastery`, `/forecast` | Activity heatmap / retention / mastery / due forecast |
 | **Documents & chat** | | |
 | GET/POST | `/api/documents` | List / ingest documents |
 | GET/DELETE | `/api/documents/{document_id}` | Document management |
 | POST | `/api/chat/ask`, `/follow-up` | Citation-grounded RAG chat |
 | POST | `/api/topics/custom`, `/custom/stream` | Custom topic generation |
 | **Mock interviews** | | |
-| POST | `/api/interview-sessions` | Create session |
+| POST | `/api/interview-sessions`, `/stream` | Create session (sync / streaming) |
 | GET | `/api/interview-sessions`, `/stats`, `/trends` | List / metrics |
 | GET | `/api/interview-sessions/{id}` | Session state + turns |
 | POST | `/api/interview-sessions/{id}/answer`, `/answer/stream` | Submit answer + rubric |
@@ -179,6 +192,13 @@ STUDY_DEV_AUTH_BYPASS_LOCALHOST=true
 | **STAR stories** | | |
 | GET/POST | `/api/star-stories`, `/suggest` | Story bank / suggestions |
 | GET/PUT/DELETE | `/api/star-stories/{story_id}` | Story management |
+| **Exams** (`STUDY_ENABLE_EXAMS_V1`) | | |
+| POST/GET | `/api/exams` | Create timed exam / exam history |
+| GET | `/api/exams/{exam_id}` | Exam detail + graded report |
+| POST | `/api/exams/{exam_id}/start`, `/submit`, `/remark` | Start / submit (server-graded) / deterministic re-grade |
+| **Gamification** (`STUDY_ENABLE_GAMIFICATION_V1`) | | |
+| GET | `/api/gamification/summary` | XP, level, streak, badges, daily goal |
+| PUT | `/api/gamification/goal` | Set daily goal |
 | **LLM & settings** | | |
 | GET | `/api/llm/providers`, `/api/llm/health` | Provider availability / health |
 | GET | `/api/llm/ollama/models`, `/ollama/test` | Local Ollama integration |
@@ -187,7 +207,7 @@ STUDY_DEV_AUTH_BYPASS_LOCALHOST=true
 | GET/POST | `/api/user-settings/google/connect`, `/google/disconnect` | Gemini OAuth |
 | **Auth** (`/api/auth`) | | |
 | GET | `/github`, `/github/callback`, `/google`, `/google/callback` | OAuth flows |
-| GET | `/me`, `/profile` · POST `/logout` | Session management |
+| GET | `/me` · POST `/logout` | Session management |
 | GET/POST/DELETE | `/allowed-users/*` | Login allow-list admin |
 | GET/POST/DELETE/PUT | `/llm-service-users/*`, `/llm-assignments/*` | Backend-funded access admin |
 | **Voice** (`/api/voice`) | | |

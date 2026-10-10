@@ -1,6 +1,6 @@
 name: backend
 
-# Stage 4.1 tier 1: the deterministic CI tier.
+# Tier 1: the deterministic CI tier.
 #
 # Everything here must be reproducible offline: no provider credentials, no
 # network calls into the app, no golden-output drift. The live tier that
