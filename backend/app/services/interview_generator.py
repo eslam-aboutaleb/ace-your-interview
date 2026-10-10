@@ -97,6 +97,41 @@ def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
     return max(lo, min(hi, n))
 
 
+def _base36(value: int) -> str:
+    if value == 0:
+        return "0"
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    parts: list[str] = []
+    while value:
+        value, remainder = divmod(value, 36)
+        parts.append(digits[remainder])
+    return "".join(reversed(parts))
+
+
+def _question_id(question: str) -> str:
+    """Deterministic id for a question text.
+
+    Mirrors the derivation the browser used to own (a Java-style
+    31-multiplier hash over the character codes, rendered in base 36)
+    so the server and the client agree on the id for the same text.
+    """
+    hash_ = 0
+    for char in question:
+        hash_ = (hash_ * 31 + ord(char)) & 0xFFFFFFFF
+        if hash_ >= 0x80000000:
+            hash_ -= 0x100000000
+    return f"iq-{_base36(abs(hash_))}"
+
+
+def _difficulty_for_level(level: Any) -> str:
+    """Map the session level onto the question difficulty vocabulary."""
+    return {
+        "junior": "easy",
+        "mid": "medium",
+        "senior": "hard",
+    }.get(str(level or "").strip().lower(), "medium")
+
+
 class InterviewGenerator:
     """Handles interview question creation, evaluation, and report synthesis."""
 
@@ -520,6 +555,7 @@ Already asked questions (do not repeat semantically):
         answer: str,
         turn_index: int,
         hint_level: int = 0,
+        question_contract: dict[str, Any] | None = None,
     ) -> str:
         feedback_mode = InterviewGenerator._feedback_mode(session)
         memory_summary = str(session.get("memory_summary", "")).strip()
@@ -550,6 +586,32 @@ Already asked questions (do not repeat semantically):
                 "Score reasoning_depth on the reasoning the candidate demonstrated "
                 "themselves; do not credit reasoning that came from the hint."
             )
+        # The assessment contract is what the question asked for. Legacy
+        # sessions have no contract stored, so evaluation falls back to
+        # question-text-only scoring.
+        contract_section = ""
+        contract_rule = ""
+        if question_contract:
+            focus = str(question_contract.get("competency_focus") or "").strip()
+            signals = [
+                str(signal).strip()
+                for signal in (question_contract.get("expected_signals") or [])
+                if str(signal).strip()
+            ]
+            if focus or signals:
+                signal_lines = "\n".join(
+                    f"  - {signal}" for signal in signals
+                )
+                contract_section = (
+                    "\nAssessment contract:\n"
+                    f"- question_id: {str(question_contract.get('question_id') or '').strip()}\n"
+                    f"- competency_focus: {focus}\n"
+                    f"- expected_signals:\n{signal_lines}\n"
+                )
+                contract_rule = (
+                    "Score the candidate's evidence against the expected signals; "
+                    "do not reward content the question did not ask for."
+                )
         contract = render_contract(
             schema_label="Return ONLY this JSON object",
             schema_block="""{
@@ -568,6 +630,7 @@ Already asked questions (do not repeat semantically):
             rules=[
                 "Keep scoring strict and evidence-based.",
                 "Use the provided question and answer only; do not invent missing implementation details.",
+                contract_rule,
                 "strengths/improvements must each have 1-4 concise bullets.",
                 "If answer is weak or vague, score low rather than guessing intent.",
                 "strengths/improvements should remain plain short strings.",
@@ -610,7 +673,7 @@ Session:
 
 Question:
 {question}
-
+{contract_section}
 Candidate answer:
 {answer[:12000]}
 
@@ -994,8 +1057,11 @@ Candidate answer:
             )
             if ok:
                 signals = payload.get("expected_signals") if isinstance(payload.get("expected_signals"), list) else []
+                question_text = str(payload.get("question", "")).strip()
                 return {
-                    "question": str(payload.get("question", "")).strip(),
+                    "question": question_text,
+                    "question_id": _question_id(question_text),
+                    "difficulty": _difficulty_for_level(session.get("level")),
                     "competency_focus": str(payload.get("competency_focus", "")).strip(),
                     "expected_signals": [str(x).strip() for x in signals if str(x).strip()][:5],
                 }
@@ -1025,9 +1091,15 @@ Candidate answer:
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
         hint_level: int = 0,
+        question_contract: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         base_prompt = self._evaluate_prompt(
-            session, question, user_answer, turn_index, hint_level=hint_level
+            session,
+            question,
+            user_answer,
+            turn_index,
+            hint_level=hint_level,
+            question_contract=question_contract,
         )
         if self.mcp is not None:
             mcp_context = await self.mcp.gather_context(

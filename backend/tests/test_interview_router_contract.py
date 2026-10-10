@@ -329,6 +329,59 @@ class InterviewRouterContractTests(_InterviewRouterTestBase):
         session_res = client.get(f"/api/interview-sessions/{session_id}")
         self.assertEqual(len(session_res.json()["turns"]), 2)
 
+    def test_question_contract_persists_and_reaches_the_answer(self):
+        client, _ = self.build_client(FakeLLM())
+
+        create_res = client.post(
+            "/api/interview-sessions",
+            json={
+                "track": "backend",
+                "level": "mid",
+                "interview_type": "technical",
+                "turn_count": 1,
+                "target_role": "Backend Engineer",
+                "focus_areas": ["api design"],
+            },
+        )
+        self.assertEqual(create_res.status_code, 200)
+        payload = create_res.json()
+        session_id = payload["session"]["session_id"]
+
+        # The session carries the full question contract, not just text.
+        contract = payload["session"]["current_question_contract"]
+        self.assertEqual(contract["competency_focus"], "tradeoff analysis")
+        self.assertEqual(
+            contract["expected_signals"],
+            ["constraints", "consistency", "client impact"],
+        )
+        self.assertTrue(contract["question_id"].startswith("iq-"))
+
+        answer_res = client.post(
+            f"/api/interview-sessions/{session_id}/answer",
+            json={
+                "user_answer": "I would use cursor pagination for stable ordering.",
+                "response_time_ms": 9000,
+            },
+        )
+        self.assertEqual(answer_res.status_code, 200)
+        turn = answer_res.json()["turn"]
+        self.assertEqual(turn["competency_focus"], "tradeoff analysis")
+        self.assertEqual(
+            turn["expected_signals"],
+            ["constraints", "consistency", "client impact"],
+        )
+        self.assertEqual(turn["question_contract"], contract)
+
+        session_res = client.get(f"/api/interview-sessions/{session_id}")
+        turns = session_res.json()["turns"]
+        self.assertEqual(len(turns), 1)
+        self.assertEqual(turns[0]["competency_focus"], "tradeoff analysis")
+        self.assertEqual(
+            turns[0]["expected_signals"],
+            ["constraints", "consistency", "client impact"],
+        )
+        self.assertEqual(turns[0]["question_contract"], contract)
+
 
 if __name__ == "__main__":
     unittest.main()
