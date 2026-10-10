@@ -100,6 +100,19 @@ import type {
   DeckReviewRequest,
   DeckReviewResponse,
   StudySessionResponse,
+  ExamCreateRequest,
+  ExamCreateResponse,
+  ExamStartResponse,
+  ExamSubmitRequest,
+  ExamSubmitResponse,
+  ExamRemarkResponse,
+  ExamListResponse,
+  ExamDetailResponse,
+  GamificationSummaryResponse,
+  GamificationGoalResponse,
+  HeatmapResponse,
+  RetentionResponse,
+  MasteryCurveResponse,
 } from "@/types";
 
 const api = axios.create({
@@ -1861,6 +1874,116 @@ export async function suggestStarStories(
   const { data } = await api.get<StarStorySuggestionsResponse>(
     "/star-stories/suggest",
     { params: { q: query, limit } },
+  );
+  return data;
+}
+
+// ── Exams ──────────────────────────────
+
+export async function createExam(
+  req: ExamCreateRequest,
+): Promise<ExamCreateResponse> {
+  const { data } = await api.post<ExamCreateResponse>(
+    "/exams",
+    req,
+  );
+  return data;
+}
+
+export async function fetchExams(): Promise<ExamListResponse> {
+  const { data } = await api.get<ExamListResponse>("/exams");
+  return data;
+}
+
+export async function fetchExam(
+  examId: string,
+): Promise<ExamDetailResponse> {
+  const { data } = await api.get<ExamDetailResponse>(
+    `/exams/${encodeURIComponent(examId)}`,
+  );
+  return data;
+}
+
+export async function startExam(
+  examId: string,
+): Promise<ExamStartResponse> {
+  const { data } = await api.post<ExamStartResponse>(
+    `/exams/${encodeURIComponent(examId)}/start`,
+  );
+  return data;
+}
+
+export async function submitExam(
+  examId: string,
+  req: ExamSubmitRequest,
+): Promise<ExamSubmitResponse> {
+  const { data } = await api.post<ExamSubmitResponse>(
+    `/exams/${encodeURIComponent(examId)}/submit`,
+    req,
+  );
+  return data;
+}
+
+export async function remarkExam(
+  examId: string,
+): Promise<ExamRemarkResponse> {
+  const { data } = await api.post<ExamRemarkResponse>(
+    `/exams/${encodeURIComponent(examId)}/remark`,
+  );
+  return data;
+}
+
+// ── Gamification ───────────────────────
+
+export async function fetchGamificationSummary(): Promise<GamificationSummaryResponse> {
+  const { data } = await api.get<GamificationSummaryResponse>(
+    "/gamification/summary",
+  );
+  return data;
+}
+
+export async function updateDailyGoal(
+  dailyGoal: number,
+): Promise<GamificationGoalResponse> {
+  const { data } = await api.put<GamificationGoalResponse>(
+    "/gamification/goal",
+    { daily_goal: dailyGoal },
+  );
+  return data;
+}
+
+// ── Analytics ──────────────────────────
+
+export async function fetchHeatmap(
+  weeks = 52,
+): Promise<HeatmapResponse> {
+  const { data } = await api.get<HeatmapResponse>(
+    "/analytics/heatmap",
+    { params: { weeks } },
+  );
+  return data;
+}
+
+export async function fetchRetention(): Promise<RetentionResponse> {
+  const { data } = await api.get<RetentionResponse>(
+    "/analytics/retention",
+  );
+  return data;
+}
+
+export async function fetchMasteryCurve(): Promise<MasteryCurveResponse> {
+  const { data } = await api.get<MasteryCurveResponse>(
+    "/analytics/mastery",
+  );
+  return data;
+}
+
+export async function fetchDueForecast(
+  days = 7,
+): Promise<ForecastResponse> {
+  const { data } = await api.get<ForecastResponse>(
+    "/analytics/forecast",
+    { params: { days } },
   );
   return data;
 }
