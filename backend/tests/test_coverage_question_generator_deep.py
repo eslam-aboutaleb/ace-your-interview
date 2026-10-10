@@ -999,188 +999,6 @@ class ValidateQuizItemTests(unittest.TestCase):
         self.assertEqual(item["difficulty"], "hard")
 
 
-class FallbackQuizItemTests(unittest.TestCase):
-    TOPIC_CONTENT = [
-        {"id": "topic-a", "title": "Topic A", "content": "A pool bounds concurrent connections."},
-        {"id": "topic-b", "title": "Topic B", "content": "B statement about quotas."},
-    ]
-
-    def test_a_zero_count_or_no_topics_yields_nothing(self):
-        self.assertEqual(
-            qg._build_fallback_quiz_items(
-                topics_content=self.TOPIC_CONTENT,
-                count=0,
-                question_types=["mcq"],
-                difficulty=None,
-                level="mid",
-                existing_questions=[],
-            ),
-            [],
-        )
-        self.assertEqual(
-            qg._build_fallback_quiz_items(
-                topics_content=[],
-                count=3,
-                question_types=["mcq"],
-                difficulty=None,
-                level="mid",
-                existing_questions=[],
-            ),
-            [],
-        )
-
-    def test_a_true_false_only_quiz_uses_the_two_option_contract(self):
-        items = qg._build_fallback_quiz_items(
-            topics_content=self.TOPIC_CONTENT,
-            count=3,
-            question_types=["true_false"],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        self.assertEqual(len(items), 3)
-        for item in items:
-            self.assertEqual(item["type"], "true_false")
-            self.assertEqual(
-                [c["text"] for c in item["choices"]], ["True", "False"]
-            )
-            self.assertIn(item["correct_answer"], {"A", "B"})
-
-    def test_a_mixed_quiz_alternates_types(self):
-        items = qg._build_fallback_quiz_items(
-            topics_content=self.TOPIC_CONTENT,
-            count=4,
-            question_types=["mcq", "true_false"],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        types = [item["type"] for item in items]
-        self.assertEqual(sorted(set(types)), ["mcq", "true_false"])
-
-    def test_topics_without_an_id_produce_nothing(self):
-        # A blank topic id cannot be attributed, so the filler skips the entry
-        # entirely rather than emitting an unattributable question.
-        items = qg._build_fallback_quiz_items(
-            topics_content=[{"id": "", "title": "Nameless", "content": "body"}],
-            count=2,
-            question_types=["mcq"],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        self.assertEqual(items, [])
-
-    def test_a_thin_topic_body_gets_a_generic_source_quote(self):
-        items = qg._build_fallback_quiz_items(
-            topics_content=[{"id": "topic-a", "title": "Topic A", "content": "tiny"}],
-            count=1,
-            question_types=["mcq"],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        self.assertGreaterEqual(len(items[0]["source_quote"]), 8)
-
-    def test_existing_questions_are_not_repeated(self):
-        items = qg._build_fallback_quiz_items(
-            topics_content=self.TOPIC_CONTENT,
-            count=4,
-            question_types=["mcq"],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        texts = [item["question"] for item in items]
-        repeat = qg._build_fallback_quiz_items(
-            topics_content=self.TOPIC_CONTENT,
-            count=4,
-            question_types=["mcq"],
-            difficulty=None,
-            level="mid",
-            existing_questions=texts,
-        )
-        self.assertFalse(set(texts) & {item["question"] for item in repeat})
-
-    def test_an_empty_type_set_means_both_types(self):
-        items = qg._build_fallback_quiz_items(
-            topics_content=[
-                {"id": "topic-a", "title": "Topic A", "content": "A pool bounds connections."}
-            ],
-            count=4,
-            question_types=[],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        self.assertEqual(len(items), 4)
-        types = sorted({item["type"] for item in items})
-        self.assertEqual(types, ["mcq", "true_false"])
-
-    def test_a_mixed_quiz_strictly_alternates_types(self):
-        # Alternation is keyed on the accepted count, so a mixed
-        # quiz flips type on every emitted item.
-        items = qg._build_fallback_quiz_items(
-            topics_content=[
-                {"id": "topic-a", "title": "Topic A", "content": "A pool bounds connections."}
-            ],
-            count=2,
-            question_types=["mcq", "true_false"],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        self.assertEqual([item["type"] for item in items], ["mcq", "true_false"])
-
-        longer = qg._build_fallback_quiz_items(
-            topics_content=self.TOPIC_CONTENT,
-            count=6,
-            question_types=["mcq", "true_false"],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        types = [item["type"] for item in longer]
-        self.assertTrue(types)
-        for prev, nxt in zip(types, types[1:]):
-            self.assertNotEqual(prev, nxt)
-        self.assertEqual(sorted(set(types)), ["mcq", "true_false"])
-
-    def test_both_topics_are_used_by_the_fallback(self):
-        # Topic selection is keyed on the attempt counter, so with
-        # two topics every topic_id appears in the output.
-        items = qg._build_fallback_quiz_items(
-            topics_content=self.TOPIC_CONTENT,
-            count=2,
-            question_types=["mcq", "true_false"],
-            difficulty=None,
-            level="mid",
-            existing_questions=[],
-        )
-        self.assertEqual({item["topic_id"] for item in items}, {"topic-a", "topic-b"})
-
-    def test_a_non_canonical_difficulty_falls_back_to_medium(self):
-        # The filler canonicalises an unknown difficulty to "medium"
-        # and validates against the canonical value, so the batch is
-        # served at the default difficulty instead of coming back empty.
-        items = qg._build_fallback_quiz_items(
-            topics_content=[
-                {"id": "topic-a", "title": "Topic A", "content": "A pool bounds connections."}
-            ],
-            count=2,
-            question_types=["mcq"],
-            difficulty="impossible",
-            level="mid",
-            existing_questions=[],
-        )
-        self.assertEqual(len(items), 2)
-        for item in items:
-            self.assertEqual(item["difficulty"], "medium")
-        ok, issue = qg._validate_quiz_item(_quiz_item(), TOPICS, TYPES, "impossible", "mid")
-        self.assertFalse(ok)
-        self.assertEqual(issue, "difficulty_mismatch")
-
-
 class CollectWithRetriesTests(unittest.TestCase):
     def _run(self, results, *, target_count=2, validator=None):
         llm = ScriptedLLM(results)
@@ -1340,8 +1158,12 @@ class GenerateV2StreamTests(unittest.TestCase):
         events, llm = self._events([_fail("llm_budget_exceeded")], count=1)
         self.assertEqual(llm.calls, 1)
         self.assertEqual(events[-1]["type"], "done")
-        # The deterministic filler still fills the request.
+        # The topic-aware filler still fills the request, but the
+        # done event now flags the fallback explicitly.
         self.assertEqual(events[-1]["generated_count"], 1)
+        self.assertTrue(events[-1]["degraded"])
+        self.assertEqual(events[-1]["requested_count"], 1)
+        self.assertEqual(events[-1]["returned_count"], 1)
 
     def test_a_policy_block_is_reported_as_an_error_event(self):
         from app.services.llm_policy import LLMServiceApprovalRequiredError
@@ -1512,6 +1334,9 @@ class GenerateV2Tests(unittest.TestCase):
             )
         )
         self.assertEqual(len(response.questions), 2)
+        self.assertTrue(response.degraded)
+        self.assertEqual(response.requested_count, 2)
+        self.assertEqual(response.returned_count, 2)
 
     def test_a_problem_solving_answer_under_the_wrong_fence_is_rejected(self):
         # The provider returned python source under a java fence for a python
@@ -1643,12 +1468,18 @@ class GenerateQuizV2StreamTests(unittest.TestCase):
         self.assertEqual(events[-1]["generated_count"], 1)
         self.assertIn("Mix multiple-choice", llm.prompts[0])
 
-    def test_a_terminal_code_still_fills_the_batch_deterministically(self):
+    def test_a_terminal_code_returns_a_partial_degraded_batch(self):
         llm = QuizLLMFactory([_fail("llm_budget_exceeded")])
         events = self._run(llm, count=2)
         self.assertEqual(llm.calls, 1)
         self.assertEqual(events[-1]["type"], "done")
-        self.assertEqual(events[-1]["generated_count"], 2)
+        # No generic substitution: a terminal failure yields a
+        # partial (here empty) batch flagged as degraded.
+        self.assertEqual(events[-1]["generated_count"], 0)
+        self.assertTrue(events[-1]["degraded"])
+        self.assertEqual(events[-1]["requested_count"], 2)
+        self.assertEqual(events[-1]["returned_count"], 0)
+        self.assertEqual(len([e for e in events if e["type"] == "question"]), 0)
 
     def test_a_policy_block_is_reported_as_an_error_event(self):
         from app.services.llm_policy import StudyAppLLMNotAssignedError
@@ -1703,10 +1534,9 @@ class GenerateQuizTests(unittest.TestCase):
         self.assertEqual(response.questions[0].type, "mcq")
         self.assertEqual(response.questions[0].topic_id, "topic-a")
 
-    def test_a_terminal_quiz_failure_still_serves_a_batch(self):
-        # The direct quiz route falls back deterministically, matching the
-        # streaming route
-        # (GenerateQuizV2StreamTests.test_a_terminal_code_still_fills_the_batch).
+    def test_a_terminal_quiz_failure_serves_no_questions(self):
+        # The direct quiz route no longer substitutes generic
+        # questions (GenerateQuizV2StreamTests.test_a_terminal_code_returns_a_partial_degraded_batch).
         llm = QuizLLMFactory([_fail("llm_truncated")])
         response = asyncio.run(
             QuestionGenerator(llm).generate_quiz(
@@ -1714,21 +1544,22 @@ class GenerateQuizTests(unittest.TestCase):
             )
         )
         self.assertEqual(llm.calls, 1)
-        self.assertEqual(len(response.questions), 2)
+        self.assertEqual(len(response.questions), 0)
         self.assertEqual(response.topics_used, ["topic-a"])
-        for question in response.questions:
-            self.assertTrue(question.question.strip())
 
-    def test_a_terminal_quiz_v2_failure_still_serves_a_batch(self):
+    def test_a_terminal_quiz_v2_failure_returns_a_degraded_partial(self):
         llm = QuizLLMFactory([_fail("llm_budget_exceeded")])
         response = asyncio.run(
             QuestionGenerator(llm).generate_quiz_v2(
                 topics_content=QUIZ_TOPICS, count=2, question_types=["mcq"], level="mid"
             )
         )
-        self.assertEqual(len(response.questions), 2)
+        self.assertEqual(len(response.questions), 0)
+        self.assertTrue(response.degraded)
+        self.assertEqual(response.requested_count, 2)
+        self.assertEqual(response.returned_count, 0)
 
-    def test_the_quiz_fallback_never_exceeds_the_requested_count(self):
+    def test_the_quiz_never_exceeds_the_requested_count(self):
         llm = QuizLLMFactory([_fail("llm_budget_exceeded")])
         response = asyncio.run(
             QuestionGenerator(llm).generate_quiz_v2(
@@ -1736,6 +1567,9 @@ class GenerateQuizTests(unittest.TestCase):
             )
         )
         self.assertLessEqual(len(response.questions), 3)
+        self.assertTrue(response.degraded)
+        self.assertEqual(response.requested_count, 3)
+        self.assertEqual(response.returned_count, len(response.questions))
 
     def test_the_legacy_quiz_drops_junk_and_duplicates(self):
         llm = QuizLLMFactory(
@@ -2499,7 +2333,13 @@ class GenerateQuizV2StreamBranchTests(unittest.TestCase):
         recovering = [e for e in events if e.get("stage") == "recovering"]
         self.assertTrue(recovering)
         self.assertEqual(recovering[0]["target_count"], 1)
-        self.assertEqual(events[-1]["generated_count"], 1)
+        # Stream-level recovery cannot fix unparseable output:
+        # the batch stays partial and is flagged degraded rather
+        # than being filled with generic questions.
+        self.assertEqual(events[-1]["generated_count"], 0)
+        self.assertTrue(events[-1]["degraded"])
+        self.assertEqual(events[-1]["requested_count"], 1)
+        self.assertEqual(events[-1]["returned_count"], 0)
 
     def test_a_non_dict_recovery_result_is_skipped_and_the_filler_finishes(self):
         llm = QuizLLMFactory([_ok([_quiz_item()]), _ok(["not-a-dict"])])

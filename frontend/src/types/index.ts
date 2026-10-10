@@ -280,6 +280,9 @@ export interface GenerateQuestionsV2Response {
   model_used: string;
   retries_used: number;
   malformed_items_dropped: number;
+  degraded: boolean;
+  requested_count: number;
+  returned_count: number;
 }
 
 export interface GenerateQuestionsStreamStartEvent {
@@ -303,6 +306,17 @@ export interface GenerateQuestionsStreamDoneEvent {
   model_used: string;
   retries_used: number;
   malformed_items_dropped: number;
+  degraded: boolean;
+  requested_count: number;
+  returned_count: number;
+}
+
+export interface GenerateQuestionsStreamWarningEvent {
+  type: "warning";
+  code: string;
+  message: string;
+  topics: string[];
+  topics_used: string[];
 }
 
 export interface GenerateQuestionsStreamErrorEvent {
@@ -319,12 +333,14 @@ export type GenerateQuestionsStreamEvent =
   | GenerateQuestionsStreamStartEvent
   | GenerateQuestionsStreamQuestionEvent
   | GenerateQuestionsStreamDoneEvent
+  | GenerateQuestionsStreamWarningEvent
   | GenerateQuestionsStreamErrorEvent;
 
 export interface GenerateQuestionsStreamHandlers {
   onStart?: (event: GenerateQuestionsStreamStartEvent) => void;
   onQuestion?: (event: GenerateQuestionsStreamQuestionEvent) => void;
   onDone?: (event: GenerateQuestionsStreamDoneEvent) => void;
+  onWarning?: (event: GenerateQuestionsStreamWarningEvent) => void;
   onError?: (event: GenerateQuestionsStreamErrorEvent) => void;
 }
 
@@ -357,6 +373,17 @@ export interface GenerateQuizStreamDoneEvent {
   model_used: string;
   retries_used: number;
   malformed_items_dropped: number;
+  degraded: boolean;
+  requested_count: number;
+  returned_count: number;
+}
+
+export interface GenerateQuizStreamWarningEvent {
+  type: "warning";
+  code: string;
+  message: string;
+  topics: string[];
+  topics_used: string[];
 }
 
 export interface GenerateQuizStreamErrorEvent {
@@ -374,6 +401,7 @@ export type GenerateQuizStreamEvent =
   | GenerateQuizStreamProgressEvent
   | GenerateQuizStreamQuestionEvent
   | GenerateQuizStreamDoneEvent
+  | GenerateQuizStreamWarningEvent
   | GenerateQuizStreamErrorEvent;
 
 export interface GenerateQuizStreamHandlers {
@@ -381,6 +409,7 @@ export interface GenerateQuizStreamHandlers {
   onProgress?: (event: GenerateQuizStreamProgressEvent) => void;
   onQuestion?: (event: GenerateQuizStreamQuestionEvent) => void;
   onDone?: (event: GenerateQuizStreamDoneEvent) => void;
+  onWarning?: (event: GenerateQuizStreamWarningEvent) => void;
   onError?: (event: GenerateQuizStreamErrorEvent) => void;
 }
 
@@ -572,6 +601,9 @@ export interface GenerateQuizV2Response {
   model_used: string;
   retries_used: number;
   malformed_items_dropped: number;
+  degraded: boolean;
+  requested_count: number;
+  returned_count: number;
 }
 
 export type LearningMode = "study" | "quiz";

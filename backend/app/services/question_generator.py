@@ -3189,129 +3189,6 @@ def _normalise_answer_position(item: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
-def _build_fallback_quiz_items(
-    *,
-    topics_content: list[dict],
-    count: int,
-    question_types: list[str] | None,
-    difficulty: Optional[str],
-    level: Optional[str],
-    existing_questions: list[str],
-) -> list[dict[str, Any]]:
-    if count <= 0 or not topics_content:
-        return []
-
-    allowed_topics = {str(tc.get("id", "")).strip() for tc in topics_content if str(tc.get("id", "")).strip()}
-    allowed_types = set(question_types or ["mcq", "true_false"])
-    if not allowed_types:
-        allowed_types = {"mcq", "true_false"}
-    target_level = _normalise_level(level)
-    diff = str(difficulty or "medium").strip().lower()
-    if diff not in _VALID_DIFFICULTIES:
-        diff = "medium"
-
-    out: list[dict[str, Any]] = []
-    seen_norm = {_normalise_question(q) for q in _normalise_existing_questions(existing_questions)}
-    guard = 0
-    attempt = 0
-    while len(out) < count and guard < (count * 12):
-        topic = topics_content[attempt % len(topics_content)]
-        topic_id = str(topic.get("id", "")).strip()
-        if not topic_id:
-            guard += 1
-            attempt += 1
-            continue
-        topic_title = str(topic.get("title", topic_id)).strip() or topic_id
-        source_scope = str(topic.get("content", "")).strip()
-        source_quote = re.sub(r"\s+", " ", source_scope)[:180].strip() or (
-            f"{topic_title} interview fundamentals and tradeoffs."
-        )
-        if len(source_quote) < 8:
-            source_quote = f"{topic_title} interview fundamentals and tradeoffs."
-
-        use_mcq = "mcq" in allowed_types and (
-            "true_false" not in allowed_types or len(out) % 2 == 0
-        )
-        if use_mcq:
-            stems = [
-                "For {topic_title}, which approach best balances correctness, maintainability, and interview communication under constraints?",
-                "In a {topic_title} interview scenario, which response structure shows the strongest engineering judgment?",
-                "When discussing {topic_title}, which strategy most clearly demonstrates tradeoff-driven thinking?",
-                "For {topic_title}, which interviewing approach is most likely to produce a robust and explainable solution?",
-            ]
-            question = stems[attempt % len(stems)].format(topic_title=topic_title)
-            choices = [
-                {"label": "A", "text": "Clarify constraints, choose a justified approach, and explain tradeoffs."},
-                {"label": "B", "text": "Start coding immediately and defer reasoning until the end."},
-                {"label": "C", "text": "Optimize micro-details before validating core requirements."},
-                {"label": "D", "text": "Assume defaults and skip edge-case discussion to save time."},
-            ]
-            correct = "A"
-            q_type = "mcq"
-            expected_answer = "Clarify constraints, choose a justified approach, and explain tradeoffs."
-            distractor_rationales = [
-                {"label": "B", "rationale": "Coding before reasoning skips the constraints that shape the solution."},
-                {"label": "C", "rationale": "Micro-optimization before validating core requirements wastes effort."},
-                {"label": "D", "rationale": "Assuming defaults silently hides the edge cases the interviewer needs to hear."},
-            ]
-        else:
-            stems = [
-                "True or false for {topic_title}: strong interview answers should explicitly state assumptions and tradeoffs before implementation details.",
-                "For {topic_title}, true or false: candidates should justify constraints first, then explain implementation choices.",
-                "True or false in a {topic_title} interview: skipping assumptions weakens the quality of technical reasoning.",
-                "For {topic_title}, true or false: discussing tradeoffs early usually improves answer clarity and credibility.",
-            ]
-            question = stems[attempt % len(stems)].format(topic_title=topic_title)
-            choices = [
-                {"label": "A", "text": "True"},
-                {"label": "B", "text": "False"},
-            ]
-            correct = "A"
-            q_type = "true_false"
-            expected_answer = "True"
-            distractor_rationales = [
-                {"label": "B", "rationale": "The false option contradicts the documented tradeoff-driven reasoning."},
-            ]
-
-        q_norm = _normalise_question(question)
-        if not q_norm or q_norm in seen_norm:
-            guard += 1
-            attempt += 1
-            continue
-        seen_norm.add(q_norm)
-        item = {
-            "question": question,
-            "type": q_type,
-            "choices": choices,
-            "correct_answer": correct,
-            "explanation": (
-                "Strong responses should make reasoning explicit, connect choices to constraints, "
-                "and communicate tradeoffs with clear structure."
-            ),
-            "difficulty": diff,
-            "topic_id": topic_id,
-            "source_quote": source_quote,
-            "reasoning_summary": "Anchor decisions in constraints, then justify tradeoffs clearly.",
-            "target_level": target_level,
-            "learning_objective": f"Explain the core tradeoffs of {topic_title} and justify the practical decision.",
-            "expected_answer": expected_answer,
-            "distractor_rationales": distractor_rationales,
-        }
-        valid, _issue = _validate_quiz_item(
-            item,
-            allowed_topics=allowed_topics,
-            allowed_types=allowed_types,
-            difficulty=diff,
-            level=level,
-        )
-        if valid:
-            out.append(item)
-        guard += 1
-        attempt += 1
-
-    return out[:count]
-
-
 async def _collect_with_retries(
     *,
     llm: LLMClient,
@@ -3872,6 +3749,9 @@ class QuestionGenerator:
                 "model_used": "",
                 "retries_used": 0,
                 "malformed_items_dropped": 0,
+                "degraded": False,
+                "requested_count": 0,
+                "returned_count": 0,
             }
             return
 
@@ -3972,6 +3852,7 @@ class QuestionGenerator:
                     "question": question,
                 }
 
+        fallback_injected = False
         if generated_count < target_count:
             missing_count = target_count - generated_count
             fallback_items = _build_fallback_question_items(
@@ -4010,6 +3891,7 @@ class QuestionGenerator:
                 generated_question_texts.append(q_text)
                 qa = self._to_question_answer_v2(topic_id, item)
                 generated_count += 1
+                fallback_injected = True
                 yield {
                     "type": "question",
                     "question": qa.model_dump(),
@@ -4026,6 +3908,9 @@ class QuestionGenerator:
             "model_used": model_used,
             "retries_used": retries_used,
             "malformed_items_dropped": malformed_items_dropped,
+            "degraded": fallback_injected,
+            "requested_count": target_count,
+            "returned_count": generated_count,
         }
 
     async def generate(
@@ -4316,6 +4201,7 @@ class QuestionGenerator:
                 if len(raw_items) >= target_count:
                     break
 
+        fallback_injected = False
         if len(raw_items) < target_count:
             missing_count = target_count - len(raw_items)
             fallback_items = _build_fallback_question_items(
@@ -4356,6 +4242,7 @@ class QuestionGenerator:
                 dedup_norm.add(q_norm)
                 seen_questions.append(question_text)
                 raw_items.append(item)
+                fallback_injected = True
                 if len(raw_items) >= target_count:
                     break
 
@@ -4369,6 +4256,9 @@ class QuestionGenerator:
             model_used=model_used,
             retries_used=retries_used,
             malformed_items_dropped=malformed_items_dropped,
+            degraded=fallback_injected,
+            requested_count=target_count,
+            returned_count=len(questions),
         )
 
     async def generate_quiz_v2_stream(
@@ -4642,33 +4532,6 @@ class QuestionGenerator:
                 if not isinstance(question, dict):
                     continue
                 generated_count += 1
-                yield {"type": "question", "question": question}
-
-        if generated_count < target_count:
-            fallback_items = _build_fallback_quiz_items(
-                topics_content=topics_content,
-                count=target_count - generated_count,
-                question_types=question_types,
-                difficulty=difficulty,
-                level=level,
-                existing_questions=generated_question_texts,
-            )
-            for item in fallback_items:
-                if generated_count >= target_count:
-                    break
-                question_text = str(item.get("question", "")).strip()
-                q_norm = _normalise_question(question_text)
-                if (
-                    not q_norm
-                    or q_norm in dedup_norm
-                    or _is_near_duplicate_question(question_text, generated_question_texts)
-                ):
-                    continue
-                dedup_norm.add(q_norm)
-                generated_question_texts.append(question_text)
-                item = _normalise_answer_position(item)
-                question = self._to_quiz_question_v2(item)
-                generated_count += 1
                 yield {"type": "question", "question": question.model_dump()}
 
         yield {
@@ -4680,6 +4543,9 @@ class QuestionGenerator:
             "model_used": model_used,
             "retries_used": retries_used,
             "malformed_items_dropped": malformed_items_dropped,
+            "degraded": generated_count < target_count,
+            "requested_count": target_count,
+            "returned_count": generated_count,
         }
 
     async def generate_quiz(
@@ -4786,25 +4652,6 @@ class QuestionGenerator:
             existing_questions=additional_existing_questions,
         )
 
-        if len(raw_items) < count:
-            # Parity with the streaming route: a terminal failure or an
-            # exhausted retry budget still serves a deterministic batch
-            # instead of an empty quiz.
-            existing_texts = [
-                *(additional_existing_questions or []),
-                *[str(item.get("question", "")) for item in raw_items],
-            ]
-            raw_items.extend(
-                _build_fallback_quiz_items(
-                    topics_content=topics_content,
-                    count=count - len(raw_items),
-                    question_types=question_types,
-                    difficulty=difficulty,
-                    level=level,
-                    existing_questions=existing_texts,
-                )
-            )
-
         questions = []
         for item in raw_items:
             item = _normalise_answer_position(item)
@@ -4845,6 +4692,9 @@ class QuestionGenerator:
             model_used=metadata.get("model", ""),
             retries_used=stats.get("retries_used", 0),
             malformed_items_dropped=stats.get("malformed_items_dropped", 0),
+            degraded=len(questions) < count,
+            requested_count=count,
+            returned_count=len(questions),
         )
 
     async def generate_cards(
