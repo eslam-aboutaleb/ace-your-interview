@@ -38,6 +38,36 @@ def _from_iso(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+# Beta-smoothed standard error of a Bernoulli accuracy estimate,
+# normalised so the no-evidence prior (alpha=beta=1) yields exactly
+# 1.0. Evidence shrinks the value toward 0; a 50/50 split keeps it
+# highest for a given attempt count.
+_UNCERTAINTY_PRIOR_ALPHA = 1.0
+_UNCERTAINTY_PRIOR_BETA = 1.0
+_UNCERTAINTY_COLD_START_VARIANCE = (
+    _UNCERTAINTY_PRIOR_ALPHA
+    * _UNCERTAINTY_PRIOR_BETA
+    / (
+        (_UNCERTAINTY_PRIOR_ALPHA + _UNCERTAINTY_PRIOR_BETA) ** 2
+        * (_UNCERTAINTY_PRIOR_ALPHA + _UNCERTAINTY_PRIOR_BETA + 1)
+    )
+)
+
+
+def accuracy_uncertainty(
+    correct_attempts: int, attempts: int
+) -> float:
+    """Standard error of a Beta-smoothed accuracy estimate, in [0, 1]."""
+    alpha = _UNCERTAINTY_PRIOR_ALPHA + max(0, int(correct_attempts))
+    beta = _UNCERTAINTY_PRIOR_BETA + max(0, int(attempts) - int(correct_attempts))
+    total = alpha + beta
+    variance = (alpha * beta) / (total * total * (total + 1))
+    return min(
+        1.0,
+        max(0.0, (variance / _UNCERTAINTY_COLD_START_VARIANCE) ** 0.5),
+    )
+
+
 # Legacy bucket-engine review intervals, retained only by
 # backfill_fsrs_from_progress to carry the retired
 # question_progress schedule onto migrated fsrs_cards rows.
@@ -82,10 +112,22 @@ class LearningStore:
                     confidence INTEGER NOT NULL,
                     response_time_ms INTEGER NOT NULL,
                     mode TEXT NOT NULL,
+                    learning_objective TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            existing_columns = {
+                str(row["name"])
+                for row in self._conn.execute(
+                    "PRAGMA table_info(learning_attempts)"
+                ).fetchall()
+            }
+            if "learning_objective" not in existing_columns:
+                self._conn.execute(
+                    "ALTER TABLE learning_attempts "
+                    "ADD COLUMN learning_objective TEXT NOT NULL DEFAULT ''"
+                )
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS question_progress (
@@ -347,6 +389,7 @@ class LearningStore:
         confidence: int,
         response_time_ms: int,
         mode: str,
+        learning_objective: str = "",
     ) -> dict:
         """Record a quiz attempt or interview turn.
 
@@ -368,8 +411,9 @@ class LearningStore:
                     """
                     INSERT INTO learning_attempts(
                         user_id, question_id, topic_id, user_answer, is_correct,
-                        confidence, response_time_ms, mode, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        confidence, response_time_ms, mode, learning_objective,
+                        created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
@@ -380,6 +424,7 @@ class LearningStore:
                         confidence,
                         response_time_ms,
                         mode,
+                        learning_objective,
                         now_iso,
                     ),
                 )
@@ -413,6 +458,67 @@ class LearningStore:
             "lapses": new_card["lapses"],
             "leech": fsrs_scheduler.is_leech(new_card),
         }
+
+    def select_next_objectives(
+        self,
+        *,
+        user_id: str,
+        topic_ids: list[str],
+        limit: int = 5,
+    ) -> list[dict]:
+        """Rank learning objectives for the next quiz.
+
+        Candidate objectives are the ``(topic_id, learning_objective)``
+        pairs observed in ``learning_attempts``. Each candidate's
+        priority is ``(1 - accuracy) * uncertainty``: objectives the
+        learner got wrong with little evidence outrank objectives they
+        have mastered or barely touched. Ties break toward higher
+        uncertainty, then fewer attempts (cold start first), then
+        stable identifiers for deterministic ordering.
+        """
+        if not topic_ids:
+            return []
+        placeholders = ", ".join("?" for _ in topic_ids)
+        rows = self._conn.execute(
+            f"""
+            SELECT topic_id, learning_objective,
+                   COUNT(*) AS attempts,
+                   SUM(is_correct) AS correct_attempts
+            FROM learning_attempts
+            WHERE user_id = ?
+              AND topic_id IN ({placeholders})
+              AND learning_objective != ''
+            GROUP BY topic_id, learning_objective
+            """,
+            (user_id, *topic_ids),
+        ).fetchall()
+        candidates: list[dict] = []
+        for row in rows:
+            attempts = int(row["attempts"])
+            correct = int(row["correct_attempts"] or 0)
+            accuracy = correct / attempts if attempts else 0.0
+            uncertainty = accuracy_uncertainty(correct, attempts)
+            candidates.append(
+                {
+                    "topic_id": str(row["topic_id"]),
+                    "learning_objective": str(row["learning_objective"]),
+                    "attempts": attempts,
+                    "correct_attempts": correct,
+                    "accuracy": accuracy,
+                    "uncertainty": uncertainty,
+                    "priority": (1.0 - accuracy) * uncertainty,
+                }
+            )
+        candidates.sort(
+            key=lambda item: (
+                -item["priority"],
+                -item["uncertainty"],
+                item["attempts"],
+                item["topic_id"],
+                item["learning_objective"],
+            )
+        )
+        return candidates[: max(0, int(limit))]
 
     # ── FSRS spaced repetition (STUDY_ENABLE_FSRS_V1) ────────────
 

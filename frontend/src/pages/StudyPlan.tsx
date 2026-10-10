@@ -715,6 +715,20 @@ export default function StudyPlanPage() {
                           {Math.round(item.score)}%
                         </span>
                       </div>
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between text-[11px] text-udemy-text-muted">
+                          <span>Estimate uncertainty</span>
+                          <span>{Math.round((item.uncertainty ?? 0) * 100)}%</span>
+                        </div>
+                        <div className="h-1.5 bg-udemy-border rounded-full mt-1 overflow-hidden">
+                          <div
+                            className="h-full bg-udemy-purple rounded-full"
+                            style={{
+                              width: `${Math.round((item.uncertainty ?? 0) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
