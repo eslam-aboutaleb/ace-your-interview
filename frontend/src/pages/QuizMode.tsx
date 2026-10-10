@@ -15,6 +15,7 @@ import {
   ChevronDown,
   AlertTriangle,
   Lightbulb,
+  Timer,
 } from "lucide-react";
 import {
   scaleInVariants,
@@ -32,6 +33,7 @@ import {
   recordLearningAttempt,
   fetchWeakAreas,
   fetchHint,
+  fetchNextObjectives,
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useProgressStore } from "@/store/progressStore";
@@ -50,6 +52,8 @@ import type {
   TopicSummary,
   QuizQuestionType,
   QuizQuestionV2,
+  QuizMode,
+  NextObjectiveItem,
   WeakAreaItem,
 } from "@/types";
 
@@ -78,6 +82,13 @@ export default function QuizMode() {
   );
   const [difficulty, setDifficulty] = useState("");
   const [level, setLevel] = useState<InterviewLevel>("mid");
+  const [quizMode, setQuizMode] = useState<QuizMode>("practice");
+  const [timeLimitSeconds, setTimeLimitSeconds] = useState<number | null>(
+    null,
+  );
+  const [targetObjectives, setTargetObjectives] = useState<NextObjectiveItem[]>(
+    [],
+  );
   const [generating, setGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState("");
   const [generatedPreviewCount, setGeneratedPreviewCount] = useState(0);
@@ -110,6 +121,8 @@ export default function QuizMode() {
   const [expandedReview, setExpandedReview] = useState<number | null>(null);
   const [weakAreas, setWeakAreas] = useState<WeakAreaItem[]>([]);
   const [loadingWeakAreas, setLoadingWeakAreas] = useState(false);
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const [examFinalized, setExamFinalized] = useState(false);
 
   // Per-question hint state
   const [quizHintLevel, setQuizHintLevel] = useState(1);
@@ -195,6 +208,51 @@ export default function QuizMode() {
     setQuizHintLevelUsed(0);
     setQuizHintLevel(1);
   }, [currentIdx]);
+
+  // Adaptive targeting: rank the learner's weakest objectives
+  // for the selected topics so the next quiz targets them.
+  useEffect(() => {
+    if (quizState !== "setup" || selectedTopics.size === 0) {
+      setTargetObjectives([]);
+      return;
+    }
+    let cancelled = false;
+    fetchNextObjectives(Array.from(selectedTopics), 5)
+      .then((res) => {
+        if (!cancelled) setTargetObjectives(res.objectives);
+      })
+      .catch(() => {
+        if (!cancelled) setTargetObjectives([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [quizState, selectedTopics]);
+
+  // Exam countdown: auto-submit when the timer expires.
+  useEffect(() => {
+    if (
+      quizState !== "playing" ||
+      quizMode !== "exam" ||
+      examFinalized ||
+      timeLimitSeconds === null
+    ) {
+      return;
+    }
+    if (remainingSeconds === null) {
+      setRemainingSeconds(timeLimitSeconds);
+      return;
+    }
+    if (remainingSeconds <= 0) {
+      void handleExamSubmit();
+      return;
+    }
+    const tick = window.setTimeout(() => {
+      setRemainingSeconds((prev) => (prev === null ? null : prev - 1));
+    }, 1000);
+    return () => window.clearTimeout(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizState, quizMode, examFinalized, timeLimitSeconds, remainingSeconds]);
 
   const toggleTopic = (id: string) => {
     setSelectedTopics((prev) => {
@@ -293,6 +351,9 @@ export default function QuizMode() {
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
         },
+        mode: quizMode,
+        time_limit_seconds: quizMode === "exam" ? timeLimitSeconds : null,
+        target_objectives: targetObjectives.map((o) => o.learning_objective),
       };
 
       let latestProviderInfo = {
@@ -399,7 +460,8 @@ export default function QuizMode() {
         is_correct: correct,
         confidence: answerConfidence,
         response_time_ms: responseTime,
-        mode: "quiz",
+        mode: quizMode === "exam" ? "exam" : "quiz",
+        learning_objective: current.learning_objective,
       });
       if (topicForAttempt) {
         // The server now returns the FSRS card state; the
@@ -411,6 +473,40 @@ export default function QuizMode() {
       console.error(err);
       setErrorMsg("Answer recorded locally, but syncing attempt failed.");
     }
+  };
+
+  // Exam mode: answers are withheld until every question is
+  // answered (or the timer expires), then all attempts are
+  // recorded in one pass.
+  const handleExamSubmit = async () => {
+    if (examFinalized) return;
+    setExamFinalized(true);
+    const topicFallback = Array.from(selectedTopics)[0] || "";
+    await Promise.all(
+      questions.map(async (q, idx) => {
+        const ans = answers[idx];
+        if (!ans) return;
+        const topicForAttempt = q.topic_id || topicFallback;
+        try {
+          await recordLearningAttempt({
+            question_id: q.question_id,
+            topic_id: topicForAttempt,
+            user_answer: ans.selected,
+            is_correct: ans.correct,
+            confidence: ans.confidence,
+            response_time_ms: 0,
+            mode: "exam",
+            learning_objective: q.learning_objective,
+          });
+          if (topicForAttempt) {
+            recordAttempt(topicForAttempt, ans.correct, ans.confidence);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }),
+    );
+    setQuizState("results");
   };
 
   const handleQuizHint = async () => {
@@ -447,8 +543,20 @@ export default function QuizMode() {
       setQuestionStartMs((prev) =>
         prev[nextIdx] ? prev : { ...prev, [nextIdx]: Date.now() },
       );
+    } else if (quizMode === "exam") {
+      void handleExamSubmit();
     } else {
       setQuizState("results");
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentIdx > 0) {
+      const prevIdx = currentIdx - 1;
+      setCurrentIdx(prevIdx);
+      setSelectedAnswer(answers[prevIdx]?.selected || null);
+      setAnswered(!!answers[prevIdx]);
+      setAnswerConfidence(answers[prevIdx]?.confidence || 3);
     }
   };
 
@@ -466,6 +574,8 @@ export default function QuizMode() {
     setErrorMsg("");
     setGenerationProgress("");
     setGeneratedPreviewCount(0);
+    setRemainingSeconds(null);
+    setExamFinalized(false);
   };
 
   const percentage = total > 0 ? Math.round((correctCount / total) * 100) : 0;
@@ -643,6 +753,93 @@ export default function QuizMode() {
                     </select>
                   </div>
 
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Quiz Mode
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setQuizMode("practice")}
+                        className={`py-2 px-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                          quizMode === "practice"
+                            ? "border-udemy-purple bg-udemy-purple/10 text-udemy-purple"
+                            : "border-udemy-border text-udemy-text-muted"
+                        }`}
+                      >
+                        Practice
+                      </button>
+                      <button
+                        onClick={() => setQuizMode("exam")}
+                        className={`py-2 px-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                          quizMode === "exam"
+                            ? "border-udemy-purple bg-udemy-purple/10 text-udemy-purple"
+                            : "border-udemy-border text-udemy-text-muted"
+                        }`}
+                      >
+                        Exam
+                      </button>
+                    </div>
+                    <p className="text-xs text-udemy-text-muted mt-1.5">
+                      {quizMode === "exam"
+                        ? "Timed. Answers and explanations are revealed after submission."
+                        : "Immediate feedback with explanations after each answer."}
+                    </p>
+                  </div>
+
+                  {quizMode === "exam" && (
+                    <div>
+                      <label className="block text-sm font-medium mb-2">
+                        Time Limit
+                      </label>
+                      <select
+                        value={timeLimitSeconds === null ? "" : String(timeLimitSeconds)}
+                        onChange={(e) =>
+                          setTimeLimitSeconds(
+                            e.target.value === "" ? null : Number(e.target.value),
+                          )
+                        }
+                        className="w-full border border-udemy-border rounded px-3 py-2.5 text-sm"
+                      >
+                        <option value="">Untimed</option>
+                        <option value="120">2 minutes</option>
+                        <option value="300">5 minutes</option>
+                        <option value="600">10 minutes</option>
+                        <option value="900">15 minutes</option>
+                        <option value="1800">30 minutes</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {targetObjectives.length > 0 && (
+                    <div className="rounded-lg border border-udemy-border bg-udemy-bg p-3">
+                      <h3 className="text-xs font-bold uppercase text-udemy-text-muted mb-1.5">
+                        Adaptive Targets
+                      </h3>
+                      <ul className="space-y-1">
+                        {targetObjectives.slice(0, 3).map((objective) => (
+                          <li
+                            key={`${objective.topic_id}:${objective.learning_objective}`}
+                            className="text-xs text-udemy-text-muted"
+                          >
+                            <span className="font-medium text-udemy-text">
+                              {normalizeEscapedSingleLineText(
+                                objective.topic_title || objective.topic_id,
+                              )}
+                            </span>
+                            <span className="block truncate">
+                              {normalizeEscapedSingleLineText(
+                                objective.learning_objective,
+                              )}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-[11px] text-udemy-text-muted mt-1.5">
+                        Next quiz prioritizes your weakest objectives.
+                      </p>
+                    </div>
+                  )}
+
                   <button
                     onClick={handleStartQuiz}
                     disabled={selectedTopics.size === 0 || generating}
@@ -694,7 +891,26 @@ export default function QuizMode() {
               <span className="text-sm font-medium">
                 {currentIdx + 1} / {total}
               </span>
-              <span className="text-sm text-gray-400">{correctCount} correct</span>
+              {quizMode === "exam" && timeLimitSeconds !== null && (
+                <span
+                  className="text-sm font-medium inline-flex items-center gap-1.5"
+                  role="timer"
+                  aria-live="polite"
+                  aria-label={`Time remaining: ${remainingSeconds ?? timeLimitSeconds} seconds`}
+                >
+                  <Timer className="w-4 h-4" />
+                  {Math.floor((remainingSeconds ?? timeLimitSeconds) / 60)}:
+                  {String((remainingSeconds ?? timeLimitSeconds) % 60).padStart(
+                    2,
+                    "0",
+                  )}
+                </span>
+              )}
+              <span className="text-sm text-gray-400">
+                {quizMode === "exam" && !examFinalized
+                  ? `${Object.keys(answers).length} answered`
+                  : `${correctCount} correct`}
+              </span>
             </div>
             <div className="h-1 bg-gray-700">
               <motion.div
@@ -798,10 +1014,16 @@ export default function QuizMode() {
                     <div className="space-y-3 mb-6">
                       {current.choices.map((choice) => {
                         const isSelected = selectedAnswer === choice.label;
+                        // Exam mode withholds correctness until the
+                        // whole exam is submitted; practice mode
+                        // reveals it per answer.
+                        const revealCorrectness =
+                          quizMode === "practice" ? answered : examFinalized;
                         const isCorrect =
-                          answered && choice.label === current.correct_answer;
+                          revealCorrectness &&
+                          choice.label === current.correct_answer;
                         const isWrong =
-                          answered &&
+                          revealCorrectness &&
                           isSelected &&
                           choice.label !== current.correct_answer;
 
@@ -809,9 +1031,23 @@ export default function QuizMode() {
                           <button
                             key={choice.label}
                             onClick={() => {
+                              if (quizMode === "exam") {
+                                setSelectedAnswer(choice.label);
+                                setAnswers((prev) => ({
+                                  ...prev,
+                                  [currentIdx]: {
+                                    selected: choice.label,
+                                    correct:
+                                      choice.label === current.correct_answer,
+                                    confidence: answerConfidence,
+                                  },
+                                }));
+                                setAnswered(true);
+                                return;
+                              }
                               if (!answered) setSelectedAnswer(choice.label);
                             }}
-                            disabled={answered}
+                            disabled={quizMode === "practice" && answered}
                             className={`w-full p-4 rounded-lg border-2 text-left transition-all flex items-start gap-3 ${
                               isCorrect
                                 ? "border-green-500 bg-green-50"
@@ -820,7 +1056,11 @@ export default function QuizMode() {
                                   : isSelected
                                     ? "border-udemy-purple bg-udemy-purple/5"
                                     : "border-udemy-border hover:border-gray-400"
-                            } ${answered ? "cursor-default" : "cursor-pointer"}`}
+                            } ${
+                              quizMode === "practice" && answered
+                                ? "cursor-default"
+                                : "cursor-pointer"
+                            }`}
                           >
                             <span
                               className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors ${
@@ -849,7 +1089,9 @@ export default function QuizMode() {
                       })}
                     </div>
 
-                    {!answered && (
+                    {(quizMode === "practice"
+                      ? !answered
+                      : !examFinalized) && (
                       <div className="mb-5">
                         <label className="text-xs font-medium text-udemy-text-muted block mb-1">
                           Confidence: {answerConfidence}/5
@@ -866,94 +1108,127 @@ export default function QuizMode() {
                       </div>
                     )}
 
-                    <div className="mb-5 rounded-lg border border-udemy-border p-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-                          <Lightbulb className="w-3.5 h-3.5 text-udemy-purple" />
-                          Hint
-                        </span>
-                        <select
-                          value={quizHintLevel}
-                          onChange={(e) => setQuizHintLevel(Number(e.target.value))}
-                          disabled={quizHintLoading}
-                          className="border border-udemy-border rounded px-2 py-1 text-xs"
-                        >
-                          <option value={1}>Level 1 — nudge</option>
-                          <option value={2}>Level 2 — approach</option>
-                          <option value={3}>Level 3 — partial</option>
-                          <option value={4}>Level 4 — answer</option>
-                        </select>
-                        <button
-                          onClick={handleQuizHint}
-                          disabled={quizHintLoading}
-                          className="btn-secondary inline-flex items-center gap-1 text-xs disabled:opacity-50"
-                        >
-                          {quizHintLoading ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Lightbulb className="w-3 h-3" />
-                          )}
-                          Get hint
-                        </button>
-                        {quizHintResult && (
-                          <span className="text-[11px] text-udemy-text-muted">
-                            {quizHintResult.hints_used}/{quizHintResult.hints_remaining === 0 ? 0 : quizHintResult.hints_used + quizHintResult.hints_remaining} used
+                    {quizMode === "practice" && (
+                      <div className="mb-5 rounded-lg border border-udemy-border p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                            <Lightbulb className="w-3.5 h-3.5 text-udemy-purple" />
+                            Hint
                           </span>
+                          <select
+                            value={quizHintLevel}
+                            onChange={(e) => setQuizHintLevel(Number(e.target.value))}
+                            disabled={quizHintLoading}
+                            className="border border-udemy-border rounded px-2 py-1 text-xs"
+                          >
+                            <option value={1}>Level 1 — nudge</option>
+                            <option value={2}>Level 2 — approach</option>
+                            <option value={3}>Level 3 — partial</option>
+                            <option value={4}>Level 4 — answer</option>
+                          </select>
+                          <button
+                            onClick={handleQuizHint}
+                            disabled={quizHintLoading}
+                            className="btn-secondary inline-flex items-center gap-1 text-xs disabled:opacity-50"
+                          >
+                            {quizHintLoading ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Lightbulb className="w-3 h-3" />
+                            )}
+                            Get hint
+                          </button>
+                          {quizHintResult && (
+                            <span className="text-[11px] text-udemy-text-muted">
+                              {quizHintResult.hints_used}/{quizHintResult.hints_remaining === 0 ? 0 : quizHintResult.hints_used + quizHintResult.hints_remaining} used
+                            </span>
+                          )}
+                        </div>
+                        {quizHintError && (
+                          <p className="text-[11px] text-red-600 mt-1.5 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {quizHintError}
+                          </p>
+                        )}
+                        {quizHintResult && (
+                          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded mt-2 p-2 whitespace-pre-line">
+                            {quizHintResult.hint}
+                          </p>
                         )}
                       </div>
-                      {quizHintError && (
-                        <p className="text-[11px] text-red-600 mt-1.5 flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" />
-                          {quizHintError}
-                        </p>
-                      )}
-                      {quizHintResult && (
-                        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded mt-2 p-2 whitespace-pre-line">
-                          {quizHintResult.hint}
-                        </p>
-                      )}
-                    </div>
+                    )}
 
                     <AnimatePresence>
-                      {answered && current.explanation && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="overflow-hidden mb-6"
-                        >
-                          <div
-                            className={`p-4 rounded-lg border-l-4 ${
-                              answers[currentIdx]?.correct
-                                ? "bg-green-50 border-green-500"
-                                : "bg-amber-50 border-amber-500"
-                            }`}
+                      {(quizMode === "practice"
+                        ? answered
+                        : examFinalized) &&
+                        current.explanation && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="overflow-hidden mb-6"
                           >
-                            <h4 className="text-xs font-bold uppercase text-udemy-text-muted mb-1">
-                              Explanation
-                            </h4>
-                            <div data-word-chat-target="true">
-                              <MarkdownRenderer
-                                content={current.explanation}
-                                className="text-[14px]"
-                              />
+                            <div
+                              className={`p-4 rounded-lg border-l-4 ${
+                                answers[currentIdx]?.correct
+                                  ? "bg-green-50 border-green-500"
+                                  : "bg-amber-50 border-amber-500"
+                              }`}
+                            >
+                              <h4 className="text-xs font-bold uppercase text-udemy-text-muted mb-1">
+                                Explanation
+                              </h4>
+                              <div data-word-chat-target="true">
+                                <MarkdownRenderer
+                                  content={current.explanation}
+                                  className="text-[14px]"
+                                />
+                              </div>
+                              {current.source_quote && (
+                                <p
+                                  data-word-chat-target="true"
+                                  className="text-xs text-udemy-text-muted mt-2 italic whitespace-pre-line"
+                                >
+                                  Source: &ldquo;{normalizeEscapedMultilineText(current.source_quote)}&rdquo;
+                                </p>
+                              )}
                             </div>
-                            {current.source_quote && (
-                              <p
-                                data-word-chat-target="true"
-                                className="text-xs text-udemy-text-muted mt-2 italic whitespace-pre-line"
-                              >
-                                Source: &ldquo;{normalizeEscapedMultilineText(current.source_quote)}&rdquo;
-                              </p>
-                            )}
-                          </div>
-                        </motion.div>
-                      )}
+                          </motion.div>
+                        )}
                     </AnimatePresence>
                   </WordHighlightChat>
 
                   <div className="flex items-center justify-between">
-                    {!answered ? (
+                    {quizMode === "exam" ? (
+                      <>
+                        <button
+                          onClick={handlePrev}
+                          disabled={currentIdx === 0}
+                          className="btn-secondary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                          Previous
+                        </button>
+                        {currentIdx < total - 1 ? (
+                          <button
+                            onClick={handleNext}
+                            className="btn-primary flex items-center gap-2"
+                          >
+                            Next <ChevronRight className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => void handleExamSubmit()}
+                            disabled={examFinalized}
+                            className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Trophy className="w-4 h-4" />
+                            Submit Exam
+                          </button>
+                        )}
+                      </>
+                    ) : !answered ? (
                       <button
                         onClick={handleSubmitAnswer}
                         disabled={!selectedAnswer}

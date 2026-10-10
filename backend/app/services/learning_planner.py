@@ -12,6 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Callable, TypeVar
 
 from app.services import fsrs_scheduler
+from app.services.learning_store import accuracy_uncertainty
 
 T = TypeVar("T")
 
@@ -131,6 +132,7 @@ class LearningPlannerStore:
                     track TEXT NOT NULL,
                     score REAL NOT NULL,
                     confidence_gap REAL NOT NULL,
+                    uncertainty REAL NOT NULL DEFAULT 0.0,
                     evidence_count INTEGER NOT NULL,
                     priority REAL NOT NULL,
                     source TEXT NOT NULL,
@@ -140,6 +142,17 @@ class LearningPlannerStore:
                 )
                 """
             )
+            existing_columns = {
+                str(row["name"])
+                for row in self._conn.execute(
+                    "PRAGMA table_info(learner_competency_scores)"
+                ).fetchall()
+            }
+            if "uncertainty" not in existing_columns:
+                self._conn.execute(
+                    "ALTER TABLE learner_competency_scores "
+                    "ADD COLUMN uncertainty REAL NOT NULL DEFAULT 0.0"
+                )
             self._conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_learner_competencies_priority
@@ -554,9 +567,9 @@ class LearningPlannerStore:
                         """
                         INSERT INTO learner_competency_scores(
                             user_id, competency_id, competency_type, label, track, score,
-                            confidence_gap, evidence_count, priority, source,
+                            confidence_gap, uncertainty, evidence_count, priority, source,
                             metadata_json, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             user_id,
@@ -566,6 +579,7 @@ class LearningPlannerStore:
                             str(item.get("track", "")),
                             float(item["score"]),
                             float(item.get("confidence_gap", 0.0)),
+                            float(item.get("uncertainty", 0.0)),
                             int(item.get("evidence_count", 0)),
                             float(item.get("priority", 0.0)),
                             str(item.get("source", "diagnostic")),
@@ -601,6 +615,7 @@ class LearningPlannerStore:
                 "track": str(row["track"]),
                 "score": round(float(row["score"]), 2),
                 "confidence_gap": round(float(row["confidence_gap"]), 2),
+                "uncertainty": round(float(row["uncertainty"]), 4),
                 "evidence_count": int(row["evidence_count"]),
                 "priority": round(float(row["priority"]), 2),
                 "source": str(row["source"]),
@@ -629,6 +644,9 @@ class LearningPlannerStore:
             due_count = max(0, int(row["due_count"] or 0))
             due_pressure = (due_count / max_due) if max_due > 0 else 0.0
             accuracy = (correct_attempts / attempts) if attempts > 0 else 0.0
+            uncertainty = round(
+                accuracy_uncertainty(correct_attempts, attempts), 4
+            )
             priority = min(
                 100.0,
                 round(
@@ -647,6 +665,7 @@ class LearningPlannerStore:
                     "track": self._topic_track(topic_id),
                     "score": score,
                     "confidence_gap": confidence_gap,
+                    "uncertainty": uncertainty,
                     "evidence_count": attempts,
                     "priority": priority,
                     "source": "adaptive_learning",
@@ -654,6 +673,7 @@ class LearningPlannerStore:
                         "topic_id": topic_id,
                         "due_count": due_count,
                         "accuracy": round(accuracy, 4),
+                        "correct_attempts": correct_attempts,
                     },
                 }
             )
@@ -676,6 +696,14 @@ class LearningPlannerStore:
                 declared_confidence = int(profile["confidence_by_track"].get(track, 3)) * 20.0
                 confidence_gap = round(abs(declared_confidence - score), 2)
                 evidence_count = sum(int(item["evidence_count"]) for item in items)
+                uncertainty = round(
+                    sum(
+                        float(item["uncertainty"]) * max(1, int(item["evidence_count"]))
+                        for item in items
+                    )
+                    / sum(max(1, int(item["evidence_count"])) for item in items),
+                    4,
+                )
                 primary_bonus = 8.0 if track == profile["primary_track"] else 0.0
                 priority = min(100.0, round(((100.0 - score) * 0.75) + (confidence_gap * 0.25) + primary_bonus, 2))
             track_entries.append(
@@ -686,6 +714,7 @@ class LearningPlannerStore:
                     "track": track,
                     "score": score,
                     "confidence_gap": confidence_gap,
+                    "uncertainty": 1.0 if not items else uncertainty,
                     "evidence_count": evidence_count,
                     "priority": priority,
                     "source": "profile_plus_learning",
@@ -716,6 +745,9 @@ class LearningPlannerStore:
                         "track": profile["primary_track"],
                         "score": score,
                         "confidence_gap": 0.0,
+                        "uncertainty": round(
+                            accuracy_uncertainty(len(values), len(values)), 4
+                        ),
                         "evidence_count": len(values),
                         "priority": priority,
                         "source": "interview_reports",

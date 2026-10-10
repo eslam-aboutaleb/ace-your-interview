@@ -48,6 +48,7 @@ import type {
   ChatAskResponse,
   ReviewQueueResponse,
   StudyPlanResponse,
+  NextObjectivesResponse,
   WeakAreasResponse,
   TopicMasteryResponse,
   LearnerProfile,
@@ -1040,6 +1041,17 @@ export async function fetchStudyPlan(
   const { data } = await api.get<StudyPlanResponse>("/learning/study-plan", {
     params: { days, daily_items: dailyItems },
   });
+  return data;
+}
+
+export async function fetchNextObjectives(
+  topicIds: string[],
+  limit = 5,
+): Promise<NextObjectivesResponse> {
+  const { data } = await api.get<NextObjectivesResponse>(
+    "/learning/next-objectives",
+    { params: { topic_ids: topicIds, limit } },
+  );
   return data;
 }
 
