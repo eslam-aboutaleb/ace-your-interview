@@ -933,6 +933,9 @@ export interface CreateInterviewSessionRequest {
 export interface SubmitInterviewAnswerRequest {
   user_answer: string;
   response_time_ms: number;
+  /** Mirrors `SubmitInterviewAnswerRequestWithHints` on the backend. */
+  question_id?: string;
+  hint_level?: number;
   llm_config?: LLMConfig;
 }
 

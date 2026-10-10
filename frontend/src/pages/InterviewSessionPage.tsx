@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -25,12 +25,15 @@ import {
 } from "@/services/api";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useInterviewSessionStore } from "@/store/interviewSessionStore";
+import { useStreamGeneration } from "@/hooks/useStreamGeneration";
 import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
 import { useVoice } from "@/hooks/useVoice";
 import type {
-  HintResponse,
-  InterviewSessionResponse,
+  InterviewQuestionResponse,
+  InterviewQuestionStreamDoneEvent,
   InterviewTurnResponse,
+  InterviewTurnStreamDoneEvent,
 } from "@/types";
 
 function questionIdFor(question: string): string {
@@ -41,38 +44,81 @@ function questionIdFor(question: string): string {
   return `iq-${Math.abs(hash).toString(36)}`;
 }
 
+/**
+ * A stream error may fall back to the non-streaming
+ * endpoint unless it explicitly opted out
+ * (`fallbackEligible === false`). Any other error
+ * (network, abort) also falls back, matching the
+ * original recovery semantics.
+ */
+function interviewStreamFallbackEligible(error: unknown): boolean {
+  return !(isInterviewStreamError(error) && !error.fallbackEligible);
+}
+
 export default function InterviewSessionPage() {
   const { sessionId = "" } = useParams();
   const navigate = useNavigate();
   const settings = useSettingsStore();
+  const store = useInterviewSessionStore();
+  const {
+    session,
+    loading,
+    error,
+    streamProgress,
+    loadingNext,
+    submitting,
+    startedAt,
+    lastTurn,
+    hintLevel,
+    hintResult,
+    hintLoading,
+    hintError,
+    hintLevelUsed,
+  } = store;
 
-  const [data, setData] = useState<InterviewSessionResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
+  // Purely local UI state: the answer draft.
   const [answerDraft, setAnswerDraft] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [loadingNext, setLoadingNext] = useState(false);
-  const [streamProgress, setStreamProgress] = useState("");
-  const [startedAt, setStartedAt] = useState<number>(Date.now());
-  const [lastTurn, setLastTurn] = useState<InterviewTurnResponse | null>(null);
 
-  // Hint state
-  const [hintLevel, setHintLevel] = useState(1);
-  const [hintResult, setHintResult] = useState<HintResponse | null>(null);
-  const [hintLoading, setHintLoading] = useState(false);
-  const [hintError, setHintError] = useState("");
-  const [hintLevelUsed, setHintLevelUsed] = useState(0);
+  const nextQuestionStream = useStreamGeneration<
+    InterviewQuestionStreamDoneEvent,
+    InterviewQuestionResponse
+  >();
+  const submitAnswerStream = useStreamGeneration<
+    InterviewTurnStreamDoneEvent,
+    InterviewTurnResponse
+  >();
+
+  const questionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const firstQuestionRef = useRef(true);
 
   // Voice integration
   const voice = useVoice();
 
+  // Reset the session store when leaving the page so a
+  // later visit starts fresh (mirrors local useState).
+  useEffect(() => {
+    return () => {
+      useInterviewSessionStore.getState().reset();
+    };
+  }, []);
+
   // Reset hint state when the current question changes
   useEffect(() => {
-    setHintResult(null);
-    setHintError("");
-    setHintLevelUsed(0);
-    setHintLevel(1);
-  }, [data?.session.current_question]);
+    store.resetHintState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.session.current_question]);
+
+  // Move focus to newly generated questions (skip the
+  // initial load so the page title keeps focus).
+  useEffect(() => {
+    if (!session?.session.current_question) return;
+    if (firstQuestionRef.current) {
+      firstQuestionRef.current = false;
+      return;
+    }
+    questionHeadingRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.session.current_question]);
 
   // Auto-fill answer draft from voice transcript
   useEffect(() => {
@@ -91,18 +137,20 @@ export default function InterviewSessionPage() {
 
   const loadSession = useCallback(async () => {
     if (!sessionId) return;
-    setLoading(true);
+    store.setLoading(true);
+    store.setError("");
     try {
       const res = await fetchInterviewSession(sessionId);
-      setData(res);
+      store.setSession(res);
       if (res.session.current_question) {
-        setStartedAt(Date.now());
+        store.setStartedAt(Date.now());
       }
     } catch {
-      setErrorMsg("Could not load interview session.");
+      store.setError("Could not load interview session.");
     } finally {
-      setLoading(false);
+      store.setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   useEffect(() => {
@@ -110,18 +158,18 @@ export default function InterviewSessionPage() {
   }, [loadSession]);
 
   const handleLoadHint = async () => {
-    const question = data?.session.current_question;
+    const question = session?.session.current_question;
     if (!sessionId || !question) return;
-    setHintLoading(true);
-    setHintError("");
+    store.setHintLoading(true);
+    store.setHintError("");
     try {
       const res = await fetchHint(
         questionIdFor(question),
         hintLevel,
         { question_text: question },
       );
-      setHintResult(res);
-      setHintLevelUsed((prev) => Math.max(prev, res.level));
+      store.setHintResult(res);
+      store.setHintLevelUsed(Math.max(hintLevelUsed, res.level));
     } catch (err) {
       const detail = (
         err as {
@@ -129,23 +177,23 @@ export default function InterviewSessionPage() {
           message?: string;
         }
       )?.response?.data?.detail;
-      setHintError(
+      store.setHintError(
         typeof detail === "string"
           ? detail
           : "Could not load a hint for this question.",
       );
     } finally {
-      setHintLoading(false);
+      store.setHintLoading(false);
     }
   };
 
   const ensureNextQuestion = useCallback(async () => {
-    if (!sessionId || !data || data.session.status !== "active") return;
-    if (data.session.current_question) return;
+    if (!sessionId || !session || session.session.status !== "active") return;
+    if (session.session.current_question) return;
 
-    setLoadingNext(true);
-    setErrorMsg("");
-    setStreamProgress("Generating first interview question...");
+    store.setLoadingNext(true);
+    store.setError("");
+    store.setStreamProgress("Generating first interview question...");
     const payload = {
       llm_config: {
         provider: settings.provider,
@@ -155,73 +203,65 @@ export default function InterviewSessionPage() {
       },
     };
     try {
-      await generateNextInterviewQuestionStream(sessionId, payload, {
-        onStart: (event) => {
-          setStreamProgress(event.message || "Generating interview question...");
-        },
-        onProgress: (event) => {
-          setStreamProgress(event.message || "Generating interview question...");
-        },
-        onDone: (event) => {
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  session: {
-                    ...prev.session,
-                    current_question: event.question,
-                  },
-                }
-              : prev,
-          );
-        },
-        onError: (event) => {
-          setErrorMsg(event.message || "Could not generate the next question.");
-        },
+      const result = await nextQuestionStream.run({
+        stream: (signal) =>
+          generateNextInterviewQuestionStream(sessionId, payload, {
+            onStart: (event) => {
+              store.setStreamProgress(
+                event.message || "Generating interview question...",
+              );
+            },
+            onProgress: (event) => {
+              store.setStreamProgress(
+                event.message || "Generating interview question...",
+              );
+            },
+            onDone: (event) => {
+              store.setCurrentQuestion(event.question);
+            },
+            onError: (event) => {
+              store.setError(
+                event.message || "Could not generate the next question.",
+              );
+            },
+          }, signal),
+        fallback: () => generateNextInterviewQuestion(sessionId, payload),
+        isFallbackEligible: interviewStreamFallbackEligible,
       });
-      setStartedAt(Date.now());
-    } catch (streamErr) {
-      if (isInterviewStreamError(streamErr) && !streamErr.fallbackEligible) {
-        setErrorMsg(streamErr.message || "Could not generate the next question.");
-      } else {
-        try {
-          const next = await generateNextInterviewQuestion(sessionId, payload);
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  session: {
-                    ...prev.session,
-                    current_question: next.question,
-                  },
-                }
-              : prev,
-          );
-          setStartedAt(Date.now());
-        } catch {
-          setErrorMsg("Could not generate the next question.");
-        }
+      if (result.aborted) return;
+      if (result.error) {
+        store.setError(
+          isInterviewStreamError(result.error) && !result.error.fallbackEligible
+            ? result.error.message || "Could not generate the next question."
+            : "Could not generate the next question.",
+        );
+        return;
       }
+      if (result.usedFallback && result.data) {
+        store.setCurrentQuestion(result.data.question);
+      }
+      store.setStartedAt(Date.now());
     } finally {
-      setStreamProgress("");
-      setLoadingNext(false);
+      store.setStreamProgress("");
+      store.setLoadingNext(false);
     }
-  }, [sessionId, data, settings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, session, settings, nextQuestionStream]);
 
   useEffect(() => {
     ensureNextQuestion();
   }, [ensureNextQuestion]);
 
   const handleSubmit = async () => {
-    if (!sessionId || !data || !answerDraft.trim()) return;
-    setSubmitting(true);
-    setErrorMsg("");
-    setStreamProgress("Evaluating your answer...");
+    if (!sessionId || !session || !answerDraft.trim()) return;
+    store.setSubmitting(true);
+    store.setError("");
+    store.setStreamProgress("Evaluating your answer...");
     const payload = {
       user_answer: answerDraft.trim(),
       response_time_ms: Math.max(0, Date.now() - startedAt),
-      question_id: data.session.current_question
-        ? questionIdFor(data.session.current_question)
+      question_id: session.session.current_question
+        ? questionIdFor(session.session.current_question)
         : undefined,
       hint_level: hintLevelUsed > 0 ? hintLevelUsed : undefined,
       llm_config: {
@@ -232,69 +272,58 @@ export default function InterviewSessionPage() {
       },
     };
     try {
-      const res = await submitInterviewAnswerStream(sessionId, payload, {
-        onStart: (event) => {
-          setStreamProgress(event.message || "Evaluating your answer...");
-        },
-        onProgress: (event) => {
-          setStreamProgress(event.message || "Evaluating your answer...");
-        },
-        onDone: () => {
-          setStreamProgress("Answer evaluation completed.");
-        },
-        onError: (event) => {
-          setErrorMsg(event.message || "Failed to submit answer. Please retry.");
-        },
+      const result = await submitAnswerStream.run({
+        stream: (signal) =>
+          submitInterviewAnswerStream(sessionId, payload, {
+            onStart: (event) => {
+              store.setStreamProgress(
+                event.message || "Evaluating your answer...",
+              );
+            },
+            onProgress: (event) => {
+              store.setStreamProgress(
+                event.message || "Evaluating your answer...",
+              );
+            },
+            onDone: () => {
+              store.setStreamProgress("Answer evaluation completed.");
+            },
+            onError: (event) => {
+              store.setError(
+                event.message || "Failed to submit answer. Please retry.",
+              );
+            },
+          }, signal),
+        fallback: () => submitInterviewAnswer(sessionId, payload),
+        isFallbackEligible: interviewStreamFallbackEligible,
       });
-      setLastTurn(res);
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              session: res.session,
-              turns: [...prev.turns, res.turn],
-            }
-          : prev,
-      );
+      if (result.aborted) return;
+      if (result.error) {
+        store.setError(
+          isInterviewStreamError(result.error) && !result.error.fallbackEligible
+            ? result.error.message || "Failed to submit answer. Please retry."
+            : "Failed to submit answer. Please retry.",
+        );
+        return;
+      }
+      const res = result.data;
+      if (!res) return;
+      store.appendTurn(res);
       setAnswerDraft("");
       if (res.session.status === "completed") {
         navigate(`/interview/${sessionId}/report`);
       }
-    } catch (streamErr) {
-      if (isInterviewStreamError(streamErr) && !streamErr.fallbackEligible) {
-        setErrorMsg(streamErr.message || "Failed to submit answer. Please retry.");
-      } else {
-        try {
-          const res = await submitInterviewAnswer(sessionId, payload);
-          setLastTurn(res);
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  session: res.session,
-                  turns: [...prev.turns, res.turn],
-                }
-              : prev,
-          );
-          setAnswerDraft("");
-          if (res.session.status === "completed") {
-            navigate(`/interview/${sessionId}/report`);
-          }
-        } catch {
-          setErrorMsg("Failed to submit answer. Please retry.");
-        }
-      }
     } finally {
-      setStreamProgress("");
-      setSubmitting(false);
+      store.setStreamProgress("");
+      store.setSubmitting(false);
     }
   };
 
   const handleNext = async () => {
     if (!sessionId) return;
-    setLoadingNext(true);
-    setErrorMsg("");
-    setStreamProgress("Generating next interview question...");
+    store.setLoadingNext(true);
+    store.setError("");
+    store.setStreamProgress("Generating next interview question...");
     const payload = {
       llm_config: {
         provider: settings.provider,
@@ -304,69 +333,58 @@ export default function InterviewSessionPage() {
       },
     };
     try {
-      const next = await generateNextInterviewQuestionStream(sessionId, payload, {
-        onStart: (event) => {
-          setStreamProgress(event.message || "Generating next interview question...");
-        },
-        onProgress: (event) => {
-          setStreamProgress(event.message || "Generating next interview question...");
-        },
-        onDone: () => {
-          setStreamProgress("Next question ready.");
-        },
-        onError: (event) => {
-          setErrorMsg(event.message || "Could not fetch next question.");
-        },
+      const result = await nextQuestionStream.run({
+        stream: (signal) =>
+          generateNextInterviewQuestionStream(sessionId, payload, {
+            onStart: (event) => {
+              store.setStreamProgress(
+                event.message || "Generating next interview question...",
+              );
+            },
+            onProgress: (event) => {
+              store.setStreamProgress(
+                event.message || "Generating next interview question...",
+              );
+            },
+            onDone: () => {
+              store.setStreamProgress("Next question ready.");
+            },
+            onError: (event) => {
+              store.setError(
+                event.message || "Could not fetch next question.",
+              );
+            },
+          }, signal),
+        fallback: () => generateNextInterviewQuestion(sessionId, payload),
+        isFallbackEligible: interviewStreamFallbackEligible,
       });
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              session: {
-                ...prev.session,
-                current_question: next.question,
-              },
-            }
-          : prev,
-      );
-      setStartedAt(Date.now());
-      setLastTurn(null);
-    } catch (streamErr) {
-      if (isInterviewStreamError(streamErr) && !streamErr.fallbackEligible) {
-        setErrorMsg(streamErr.message || "Could not fetch next question.");
-      } else {
-        try {
-          const next = await generateNextInterviewQuestion(sessionId, payload);
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  session: {
-                    ...prev.session,
-                    current_question: next.question,
-                  },
-                }
-              : prev,
-          );
-          setStartedAt(Date.now());
-          setLastTurn(null);
-        } catch {
-          setErrorMsg("Could not fetch next question.");
-        }
+      if (result.aborted) return;
+      if (result.error) {
+        store.setError(
+          isInterviewStreamError(result.error) && !result.error.fallbackEligible
+            ? result.error.message || "Could not fetch next question."
+            : "Could not fetch next question.",
+        );
+        return;
       }
+      if (result.usedFallback && result.data) {
+        store.setCurrentQuestion(result.data.question);
+      }
+      store.setStartedAt(Date.now());
+      store.setLastTurn(null);
     } finally {
-      setStreamProgress("");
-      setLoadingNext(false);
+      store.setStreamProgress("");
+      store.setLoadingNext(false);
     }
   };
 
   const progressPct = useMemo(() => {
-    if (!data) return 0;
+    if (!session) return 0;
     return Math.round(
-      (data.session.turns_completed / data.session.turn_count) * 100,
+      (session.session.turns_completed / session.session.turn_count) * 100,
     );
-  }, [data]);
-  const isCoding = data?.session.interview_type === "coding";
+  }, [session]);
+  const isCoding = session?.session.interview_type === "coding";
 
   if (loading) {
     return (
@@ -376,7 +394,7 @@ export default function InterviewSessionPage() {
     );
   }
 
-  if (!data) {
+  if (!session) {
     return (
       <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-12">
         <p className="text-udemy-text-muted">Interview session not found.</p>
@@ -396,12 +414,12 @@ export default function InterviewSessionPage() {
         <div className="max-w-[1000px] mx-auto px-4 sm:px-6 py-6">
           <h1 className="text-2xl font-bold">Live Mock Interview</h1>
           <p className="text-gray-400 text-sm mt-1">
-            {data.session.track} · {data.session.level} ·{" "}
-            {data.session.interview_type}
+            {session.session.track} · {session.session.level} ·{" "}
+            {session.session.interview_type}
           </p>
           <p className="text-gray-400 text-xs mt-1">
-            style: {data.session.interviewer_style} · feedback:{" "}
-            {data.session.feedback_mode}
+            style: {session.session.interviewer_style} · feedback:{" "}
+            {session.session.feedback_mode}
           </p>
           <div className="mt-4 bg-white/15 h-2 rounded-full overflow-hidden">
             <div
@@ -410,21 +428,21 @@ export default function InterviewSessionPage() {
             />
           </div>
           <p className="text-xs text-gray-400 mt-2">
-            {data.session.turns_completed}/{data.session.turn_count} turns
+            {session.session.turns_completed}/{session.session.turn_count} turns
             completed
           </p>
         </div>
       </div>
 
       <div className="max-w-[1000px] mx-auto px-4 sm:px-6 py-8 space-y-6">
-        {errorMsg && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+        {error && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2" role="alert">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <span>{errorMsg}</span>
+            <span>{error}</span>
           </div>
         )}
         {(submitting || loadingNext) && streamProgress && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 flex items-center gap-2">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 flex items-center gap-2" aria-live="polite" role="status">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{streamProgress}</span>
           </div>
@@ -434,9 +452,13 @@ export default function InterviewSessionPage() {
           <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-2">
             Current Question
           </h2>
-          <p className="text-lg font-medium leading-relaxed whitespace-pre-line">
+          <p
+            ref={questionHeadingRef}
+            tabIndex={-1}
+            className="text-lg font-medium leading-relaxed whitespace-pre-line outline-none"
+          >
             {normalizeEscapedMultilineText(
-              data.session.current_question || "Generating next question...",
+              session.session.current_question || "Generating next question...",
             )}
           </p>
           {isCoding && (
@@ -445,12 +467,12 @@ export default function InterviewSessionPage() {
               handling.
             </p>
           )}
-          {voice.voiceEnabled && data.session.current_question && (
+          {voice.voiceEnabled && session.session.current_question && (
             <button
               onClick={() =>
                 voice.speak(
                   normalizeEscapedMultilineText(
-                    data.session.current_question || "",
+                    session.session.current_question || "",
                   ),
                 )
               }
@@ -471,7 +493,7 @@ export default function InterviewSessionPage() {
               </div>
               <select
                 value={hintLevel}
-                onChange={(e) => setHintLevel(Number(e.target.value))}
+                onChange={(e) => store.setHintLevel(Number(e.target.value))}
                 disabled={hintLoading}
                 className="border border-udemy-border rounded px-2 py-1.5 text-sm"
               >
@@ -482,7 +504,7 @@ export default function InterviewSessionPage() {
               </select>
               <button
                 onClick={handleLoadHint}
-                disabled={hintLoading || !data.session.current_question}
+                disabled={hintLoading || !session.session.current_question}
                 className="btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-50"
               >
                 {hintLoading ? (
@@ -564,6 +586,9 @@ export default function InterviewSessionPage() {
                 title={
                   voice.isRecording ? "Stop recording" : "Speak your answer"
                 }
+                aria-label={
+                  voice.isRecording ? "Stop recording" : "Speak your answer"
+                }
               >
                 {voice.isRecording ? (
                   <MicOff className="w-4 h-4 text-white" />
@@ -586,7 +611,7 @@ export default function InterviewSessionPage() {
                 submitting ||
                 loadingNext ||
                 !answerDraft.trim() ||
-                !data.session.current_question
+                !session.session.current_question
               }
               className="btn-primary w-full sm:w-auto flex items-center justify-center gap-2 disabled:opacity-50"
             >
@@ -601,7 +626,7 @@ export default function InterviewSessionPage() {
             <button
               onClick={handleNext}
               disabled={
-                loadingNext || submitting || data.session.status !== "active"
+                loadingNext || submitting || session.session.status !== "active"
               }
               className="btn-secondary w-full sm:w-auto flex items-center justify-center gap-2 disabled:opacity-50"
             >
@@ -613,9 +638,9 @@ export default function InterviewSessionPage() {
               Next Question
             </button>
 
-            {data.session.report_ready && (
+            {session.session.report_ready && (
               <Link
-                to={`/interview/${data.session.session_id}/report`}
+                to={`/interview/${session.session.session_id}/report`}
                 className="btn-secondary w-full sm:w-auto inline-flex items-center justify-center gap-2"
               >
                 <FileText className="w-4 h-4" />
@@ -630,8 +655,8 @@ export default function InterviewSessionPage() {
             <h2 className="text-sm font-bold text-udemy-text-muted uppercase mb-3">
               Rubric Feedback
             </h2>
-            {lastTurn.turn.degraded ? (
-              <div className="flex items-start gap-2 text-sm text-udemy-text-muted">
+            {lastTurn.turn.degraded || lastTurn.degraded ? (
+              <div className="flex items-start gap-2 text-sm text-udemy-text-muted" role="alert">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                 <p>
                   Evaluation unavailable — your answer was saved. Submit the next

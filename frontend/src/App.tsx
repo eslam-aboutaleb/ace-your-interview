@@ -3,6 +3,7 @@ import { AnimatePresence } from "framer-motion";
 import { useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import Layout from "@/components/Layout/Layout";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Dashboard from "@/pages/Dashboard";
 import TopicsList from "@/pages/TopicsList";
 import CustomTopicBuild from "@/pages/CustomTopicBuild";
@@ -155,41 +156,170 @@ export default function App() {
   return (
     <AnimatePresence mode="wait">
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/login"
+          element={
+            <ErrorBoundary>
+              <LoginPage />
+            </ErrorBoundary>
+          }
+        />
         <Route element={<PublicRoute />}>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="topics" element={<TopicsList />} />
-            <Route path="topics/:topicId" element={<TopicStudy />} />
+          <Route
+            path="/"
+            element={
+              <ErrorBoundary>
+                <Layout />
+              </ErrorBoundary>
+            }
+          >
+            <Route
+              index
+              element={
+                <ErrorBoundary>
+                  <Dashboard />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="topics"
+              element={
+                <ErrorBoundary>
+                  <TopicsList />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="topics/:topicId"
+              element={
+                <ErrorBoundary>
+                  <TopicStudy />
+                </ErrorBoundary>
+              }
+            />
           </Route>
         </Route>
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<Layout />}>
-            <Route path="topics/custom/build" element={<CustomTopicBuild />} />
-            <Route path="quiz" element={<QuizMode />} />
-            <Route path="quiz/:topicId" element={<QuizMode />} />
-            <Route path="review" element={<ReviewQueue />} />
-            <Route path="study-plan" element={<StudyPlan />} />
-            <Route path="documents" element={<DocumentsPage />} />
-            <Route path="decks" element={<DecksPage />} />
-            <Route path="interview" element={<InterviewSetup />} />
-            <Route path="interview/trends" element={<InterviewTrendsPage />} />
+          <Route
+            path="/"
+            element={
+              <ErrorBoundary>
+                <Layout />
+              </ErrorBoundary>
+            }
+          >
+            <Route
+              path="topics/custom/build"
+              element={
+                <ErrorBoundary>
+                  <CustomTopicBuild />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="quiz"
+              element={
+                <ErrorBoundary>
+                  <QuizMode />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="quiz/:topicId"
+              element={
+                <ErrorBoundary>
+                  <QuizMode />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="review"
+              element={
+                <ErrorBoundary>
+                  <ReviewQueue />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="study-plan"
+              element={
+                <ErrorBoundary>
+                  <StudyPlan />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="documents"
+              element={
+                <ErrorBoundary>
+                  <DocumentsPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="decks"
+              element={
+                <ErrorBoundary>
+                  <DecksPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="interview"
+              element={
+                <ErrorBoundary>
+                  <InterviewSetup />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="interview/trends"
+              element={
+                <ErrorBoundary>
+                  <InterviewTrendsPage />
+                </ErrorBoundary>
+              }
+            />
             <Route
               path="interview/:sessionId"
-              element={<InterviewSessionPage />}
+              element={
+                <ErrorBoundary>
+                  <InterviewSessionPage />
+                </ErrorBoundary>
+              }
             />
             <Route
               path="interview/:sessionId/report"
-              element={<InterviewReportPage />}
+              element={
+                <ErrorBoundary>
+                  <InterviewReportPage />
+                </ErrorBoundary>
+              }
             />
-            <Route path="star-stories" element={<StarStoriesPage />} />
-            <Route path="user-settings" element={<UserSettings />} />
+            <Route
+              path="star-stories"
+              element={
+                <ErrorBoundary>
+                  <StarStoriesPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="user-settings"
+              element={
+                <ErrorBoundary>
+                  <UserSettings />
+                </ErrorBoundary>
+              }
+            />
             <Route
               path="settings"
               element={
-                <AdminRoute>
-                  <Settings />
-                </AdminRoute>
+                <ErrorBoundary>
+                  <AdminRoute>
+                    <Settings />
+                  </AdminRoute>
+                </ErrorBoundary>
               }
             />
           </Route>

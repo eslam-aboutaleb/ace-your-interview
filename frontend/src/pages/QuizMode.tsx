@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useLocation, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -37,6 +37,8 @@ import {
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useProgressStore } from "@/store/progressStore";
+import { useQuizStore } from "@/store/quizStore";
+import { useStreamGeneration } from "@/hooks/useStreamGeneration";
 import DifficultyBadge from "@/components/common/DifficultyBadge";
 import WordHighlightChat from "@/components/common/WordHighlightChat";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
@@ -45,6 +47,7 @@ import {
   normalizeEscapedSingleLineText,
 } from "@/utils/textNormalization";
 import type {
+  GenerateQuizStreamDoneEvent,
   HintResponse,
   InterviewLevel,
   LearningTrack,
@@ -56,8 +59,6 @@ import type {
   NextObjectiveItem,
   WeakAreaItem,
 } from "@/types";
-
-type QuizState = "setup" | "playing" | "results";
 
 const TRACK_LABELS: Record<LearningTrack, string> = {
   backend: "Backend",
@@ -71,7 +72,28 @@ export default function QuizMode() {
   const location = useLocation();
   const preselectedTopic = topicId || "";
 
-  const [quizState, setQuizState] = useState<QuizState>("setup");
+  const quiz = useQuizStore();
+  const {
+    phase,
+    questions,
+    currentIdx,
+    selectedAnswer,
+    answered,
+    answerConfidence,
+    answers,
+    questionStartMs,
+    providerInfo,
+    generating,
+    generationProgress,
+    generatedPreviewCount,
+    degradedQuiz,
+    errorMsg,
+    examFinalized,
+    remainingSeconds,
+  } = quiz;
+
+  // Local UI state: setup configuration, modals,
+  // per-question hint UI, and topic metadata.
   const [topics, setTopics] = useState<TopicSummary[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<Set<string>>(
     preselectedTopic ? new Set([preselectedTopic]) : new Set(),
@@ -89,40 +111,12 @@ export default function QuizMode() {
   const [targetObjectives, setTargetObjectives] = useState<NextObjectiveItem[]>(
     [],
   );
-  const [generating, setGenerating] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState("");
-  const [generatedPreviewCount, setGeneratedPreviewCount] = useState(0);
-  const [degradedQuiz, setDegradedQuiz] = useState<{
-    requested: number;
-    returned: number;
-  } | null>(null);
   const [loadingTopics, setLoadingTopics] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  const [questions, setQuestions] = useState<QuizQuestionV2[]>([]);
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
-  const [answered, setAnswered] = useState(false);
-  const [answerConfidence, setAnswerConfidence] = useState(3);
-  const [answers, setAnswers] = useState<
-    Record<number, { selected: string; correct: boolean; confidence: number }>
-  >({});
-  const [questionStartMs, setQuestionStartMs] = useState<Record<number, number>>(
-    {},
-  );
-  const [providerInfo, setProviderInfo] = useState({
-    provider: "",
-    model: "",
-    retries: 0,
-    malformed: 0,
-  });
 
   const [showReview, setShowReview] = useState(false);
   const [expandedReview, setExpandedReview] = useState<number | null>(null);
   const [weakAreas, setWeakAreas] = useState<WeakAreaItem[]>([]);
   const [loadingWeakAreas, setLoadingWeakAreas] = useState(false);
-  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
-  const [examFinalized, setExamFinalized] = useState(false);
 
   // Per-question hint state
   const [quizHintLevel, setQuizHintLevel] = useState(1);
@@ -145,6 +139,19 @@ export default function QuizMode() {
 
   const settings = useSettingsStore();
   const { recordAttempt } = useProgressStore();
+  const { run: runQuizStream } =
+    useStreamGeneration<GenerateQuizStreamDoneEvent>();
+
+  const questionHeadingRef = useRef<HTMLHeadingElement>(null);
+  const firstQuestionRef = useRef(true);
+
+  // Reset the quiz store when leaving the page so a
+  // later visit starts fresh (mirrors local useState).
+  useEffect(() => {
+    return () => {
+      useQuizStore.getState().reset();
+    };
+  }, []);
 
   const current = questions[currentIdx];
   const topicsById = useMemo(
@@ -169,6 +176,18 @@ export default function QuizMode() {
     [answers],
   );
 
+  // Move focus to newly displayed questions (skip the
+  // first question so the page header keeps focus).
+  useEffect(() => {
+    if (phase !== "playing" || !current) return;
+    if (firstQuestionRef.current) {
+      firstQuestionRef.current = false;
+      return;
+    }
+    questionHeadingRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, currentIdx]);
+
   useEffect(() => {
     fetchTopics()
       .then((loaded) =>
@@ -180,7 +199,9 @@ export default function QuizMode() {
           })),
         ),
       )
-      .catch(() => setErrorMsg("Failed to load topics."))
+      .catch(() =>
+        useQuizStore.getState().setErrorMsg("Failed to load topics."),
+      )
       .finally(() => setLoadingTopics(false));
   }, []);
 
@@ -193,13 +214,13 @@ export default function QuizMode() {
   }, [preselectedTopic, passedQuestions]);
 
   useEffect(() => {
-    if (quizState !== "results") return;
+    if (phase !== "results") return;
     setLoadingWeakAreas(true);
     fetchWeakAreas(5)
       .then((res) => setWeakAreas(res.weak_areas))
       .catch(() => setWeakAreas([]))
       .finally(() => setLoadingWeakAreas(false));
-  }, [quizState]);
+  }, [phase]);
 
   // Reset per-question hint state when moving between questions
   useEffect(() => {
@@ -212,7 +233,7 @@ export default function QuizMode() {
   // Adaptive targeting: rank the learner's weakest objectives
   // for the selected topics so the next quiz targets them.
   useEffect(() => {
-    if (quizState !== "setup" || selectedTopics.size === 0) {
+    if (phase !== "setup" || selectedTopics.size === 0) {
       setTargetObjectives([]);
       return;
     }
@@ -227,12 +248,12 @@ export default function QuizMode() {
     return () => {
       cancelled = true;
     };
-  }, [quizState, selectedTopics]);
+  }, [phase, selectedTopics]);
 
   // Exam countdown: auto-submit when the timer expires.
   useEffect(() => {
     if (
-      quizState !== "playing" ||
+      phase !== "playing" ||
       quizMode !== "exam" ||
       examFinalized ||
       timeLimitSeconds === null
@@ -240,7 +261,7 @@ export default function QuizMode() {
       return;
     }
     if (remainingSeconds === null) {
-      setRemainingSeconds(timeLimitSeconds);
+      quiz.setRemainingSeconds(timeLimitSeconds);
       return;
     }
     if (remainingSeconds <= 0) {
@@ -248,11 +269,11 @@ export default function QuizMode() {
       return;
     }
     const tick = window.setTimeout(() => {
-      setRemainingSeconds((prev) => (prev === null ? null : prev - 1));
+      quiz.setRemainingSeconds((prev) => (prev === null ? null : prev - 1));
     }, 1000);
     return () => window.clearTimeout(tick);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quizState, quizMode, examFinalized, timeLimitSeconds, remainingSeconds]);
+  }, [phase, quizMode, examFinalized, timeLimitSeconds, remainingSeconds]);
 
   const toggleTopic = (id: string) => {
     setSelectedTopics((prev) => {
@@ -276,13 +297,14 @@ export default function QuizMode() {
   };
 
   const handleStartQuiz = useCallback(async () => {
+    const quizState = useQuizStore.getState();
     if (selectedTopics.size === 0) return;
-    setGenerating(true);
-    setErrorMsg("");
-    setGenerationProgress("Preparing quiz generation...");
-    setGeneratedPreviewCount(0);
-    setDegradedQuiz(null);
-    setQuestions([]);
+    quizState.setGenerating(true);
+    quizState.setErrorMsg("");
+    quizState.setGenerationProgress("Preparing quiz generation...");
+    quizState.setGeneratedPreviewCount(0);
+    quizState.setDegradedQuiz(null);
+    quizState.setQuestions([]);
     try {
       const selectedTopicIds = Array.from(selectedTopics);
       const topicDetails = await Promise.all(
@@ -364,88 +386,86 @@ export default function QuizMode() {
       };
 
       const streamedQuestions: QuizQuestionV2[] = [];
-      try {
-        await generateQuizV2Stream(req, {
-          onStart: (event) => {
-            setGenerationProgress(
-              `Starting quiz generation (${event.target_count} questions).`,
-            );
-          },
-          onProgress: (event) => {
-            setGenerationProgress(event.message || "Generating quiz questions...");
-          },
-          onQuestion: (event) => {
-            const merged = mergeUniqueQuestions(streamedQuestions, [event.question]);
-            streamedQuestions.splice(0, streamedQuestions.length, ...merged);
-            setQuestions([...streamedQuestions]);
-            setGeneratedPreviewCount(streamedQuestions.length);
-          },
-          onDone: (event) => {
-            latestProviderInfo = {
-              provider: event.provider_used,
-              model: event.model_used,
-              retries: event.retries_used,
-              malformed: event.malformed_items_dropped,
-            };
-            setProviderInfo(latestProviderInfo);
-            if (event.degraded) {
-              setDegradedQuiz({
-                requested: event.requested_count,
-                returned: event.returned_count,
-              });
-            }
-            setGenerationProgress("Quiz generation completed.");
-          },
-          onWarning: (event) => {
-            setGenerationProgress(event.message || "Some topics could not be resolved.");
-          },
-          onError: (event) => {
-            setGenerationProgress(event.message || "Quiz generation failed.");
-          },
-        });
-      } catch (streamErr) {
-        if (!(isQuizStreamError(streamErr) && streamErr.fallbackEligible)) {
-          throw streamErr;
-        }
-        setGenerationProgress("Streaming unavailable, retrying with compatibility mode...");
+      const result = await runQuizStream({
+        stream: (signal) =>
+          generateQuizV2Stream(req, {
+            onStart: (event) => {
+              quizState.setGenerationProgress(
+                `Starting quiz generation (${event.target_count} questions).`,
+              );
+            },
+            onProgress: (event) => {
+              quizState.setGenerationProgress(event.message || "Generating quiz questions...");
+            },
+            onQuestion: (event) => {
+              const merged = mergeUniqueQuestions(streamedQuestions, [event.question]);
+              streamedQuestions.splice(0, streamedQuestions.length, ...merged);
+              quizState.setQuestions([...streamedQuestions]);
+              quizState.setGeneratedPreviewCount(streamedQuestions.length);
+            },
+            onDone: (event) => {
+              latestProviderInfo = {
+                provider: event.provider_used,
+                model: event.model_used,
+                retries: event.retries_used,
+                malformed: event.malformed_items_dropped,
+              };
+              quizState.setProviderInfo(latestProviderInfo);
+              if (event.degraded) {
+                quizState.setDegradedQuiz({
+                  requested: event.requested_count,
+                  returned: event.returned_count,
+                });
+              }
+              quizState.setGenerationProgress("Quiz generation completed.");
+            },
+            onWarning: (event) => {
+              quizState.setGenerationProgress(event.message || "Some topics could not be resolved.");
+            },
+            onError: (event) => {
+              quizState.setGenerationProgress(event.message || "Quiz generation failed.");
+            },
+          }, signal),
+        isFallbackEligible: (err) => isQuizStreamError(err) && !!err.fallbackEligible,
+      });
+      if (result.error) {
+        throw result.error;
+      }
+      if (result.usedFallback) {
+        quizState.setGenerationProgress(
+          "Streaming unavailable, retrying with compatibility mode...",
+        );
       }
 
-      let finalQuestions = [...streamedQuestions];
+      const finalQuestions = [...streamedQuestions];
       if (finalQuestions.length === 0) {
-        setErrorMsg("No quiz questions generated. Try again.");
+        quizState.setErrorMsg("No quiz questions generated. Try again.");
         return;
       }
-      setQuestions(finalQuestions);
-      setProviderInfo(latestProviderInfo);
-      setCurrentIdx(0);
-      setAnswers({});
-      setSelectedAnswer(null);
-      setAnswered(false);
-      setAnswerConfidence(3);
-      setQuestionStartMs({ 0: Date.now() });
-      setQuizState("playing");
+      quizState.setQuestions(finalQuestions);
+      quizState.setProviderInfo(latestProviderInfo);
+      quizState.beginPlaying();
     } catch (err) {
       console.error(err);
-      setErrorMsg("Quiz generation failed. Check settings and retry.");
+      useQuizStore.getState().setErrorMsg(
+        "Quiz generation failed. Check settings and retry.",
+      );
     } finally {
-      setGenerationProgress("");
-      setGeneratedPreviewCount(0);
-      setGenerating(false);
+      useQuizStore.getState().setGenerationProgress("");
+      useQuizStore.getState().setGeneratedPreviewCount(0);
+      useQuizStore.getState().setGenerating(false);
     }
-  }, [selectedTopics, questionCount, questionTypes, difficulty, level, settings]);
+  }, [selectedTopics, questionCount, questionTypes, difficulty, level, quizMode, timeLimitSeconds, targetObjectives, settings, runQuizStream]);
 
   const handleSubmitAnswer = async () => {
     if (!selectedAnswer || !current) return;
     const correct = selectedAnswer === current.correct_answer;
-    setAnswers((prev) => ({
-      ...prev,
-      [currentIdx]: {
-        selected: selectedAnswer,
-        correct,
-        confidence: answerConfidence,
-      },
-    }));
-    setAnswered(true);
+    quiz.recordAnswer(currentIdx, {
+      selected: selectedAnswer,
+      correct,
+      confidence: answerConfidence,
+    });
+    quiz.setAnswered(true);
 
     try {
       const responseTime = Math.max(
@@ -471,7 +491,7 @@ export default function QuizMode() {
       }
     } catch (err) {
       console.error(err);
-      setErrorMsg("Answer recorded locally, but syncing attempt failed.");
+      quiz.setErrorMsg("Answer recorded locally, but syncing attempt failed.");
     }
   };
 
@@ -480,7 +500,7 @@ export default function QuizMode() {
   // recorded in one pass.
   const handleExamSubmit = async () => {
     if (examFinalized) return;
-    setExamFinalized(true);
+    quiz.setExamFinalized(true);
     const topicFallback = Array.from(selectedTopics)[0] || "";
     await Promise.all(
       questions.map(async (q, idx) => {
@@ -506,7 +526,7 @@ export default function QuizMode() {
         }
       }),
     );
-    setQuizState("results");
+    quiz.setPhase("results");
   };
 
   const handleQuizHint = async () => {
@@ -536,46 +556,33 @@ export default function QuizMode() {
   const handleNext = () => {
     if (currentIdx < total - 1) {
       const nextIdx = currentIdx + 1;
-      setCurrentIdx(nextIdx);
-      setSelectedAnswer(answers[nextIdx]?.selected || null);
-      setAnswered(!!answers[nextIdx]);
-      setAnswerConfidence(answers[nextIdx]?.confidence || 3);
-      setQuestionStartMs((prev) =>
-        prev[nextIdx] ? prev : { ...prev, [nextIdx]: Date.now() },
-      );
+      quiz.setCurrentIdx(nextIdx);
+      quiz.setSelectedAnswer(answers[nextIdx]?.selected || null);
+      quiz.setAnswered(!!answers[nextIdx]);
+      quiz.setAnswerConfidence(answers[nextIdx]?.confidence || 3);
+      quiz.touchQuestionStart(nextIdx);
     } else if (quizMode === "exam") {
       void handleExamSubmit();
     } else {
-      setQuizState("results");
+      quiz.setPhase("results");
     }
   };
 
   const handlePrev = () => {
     if (currentIdx > 0) {
       const prevIdx = currentIdx - 1;
-      setCurrentIdx(prevIdx);
-      setSelectedAnswer(answers[prevIdx]?.selected || null);
-      setAnswered(!!answers[prevIdx]);
-      setAnswerConfidence(answers[prevIdx]?.confidence || 3);
+      quiz.setCurrentIdx(prevIdx);
+      quiz.setSelectedAnswer(answers[prevIdx]?.selected || null);
+      quiz.setAnswered(!!answers[prevIdx]);
+      quiz.setAnswerConfidence(answers[prevIdx]?.confidence || 3);
     }
   };
 
   const handleRestart = () => {
-    setQuizState("setup");
-    setQuestions([]);
-    setAnswers({});
-    setCurrentIdx(0);
-    setSelectedAnswer(null);
-    setAnswered(false);
-    setAnswerConfidence(3);
+    quiz.resetToSetup();
     setShowReview(false);
     setExpandedReview(null);
     setWeakAreas([]);
-    setErrorMsg("");
-    setGenerationProgress("");
-    setGeneratedPreviewCount(0);
-    setRemainingSeconds(null);
-    setExamFinalized(false);
   };
 
   const percentage = total > 0 ? Math.round((correctCount / total) * 100) : 0;
@@ -589,7 +596,7 @@ export default function QuizMode() {
       transition={pageTransition}
       className="min-h-[80vh] flex flex-col"
     >
-      {quizState === "setup" && (
+      {phase === "setup" && (
         <>
           <div className="bg-udemy-dark text-white">
             <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8">
@@ -612,9 +619,18 @@ export default function QuizMode() {
 
           <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8 flex-1">
             {errorMsg && (
-              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2" role="alert">
                 <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <div>{errorMsg}</div>
+                <div className="flex-1">
+                  {errorMsg}
+                  <button
+                    onClick={() => void handleStartQuiz()}
+                    disabled={generating || selectedTopics.size === 0}
+                    className="ml-2 font-bold underline disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Retry generation
+                  </button>
+                </div>
               </div>
             )}
             <motion.div
@@ -841,7 +857,7 @@ export default function QuizMode() {
                   )}
 
                   <button
-                    onClick={handleStartQuiz}
+                    onClick={() => void handleStartQuiz()}
                     disabled={selectedTopics.size === 0 || generating}
                     className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -855,7 +871,7 @@ export default function QuizMode() {
                       : `Start Quiz (${selectedTopics.size} topic${selectedTopics.size !== 1 ? "s" : ""})`}
                   </button>
                   {generating && (
-                    <p className="mt-2 text-xs text-udemy-text-muted">
+                    <p className="mt-2 text-xs text-udemy-text-muted" aria-live="polite" role="status">
                       {generationProgress || "Generating quiz questions..."}{" "}
                       {generatedPreviewCount > 0
                         ? `(${generatedPreviewCount}/${questionCount})`
@@ -873,7 +889,7 @@ export default function QuizMode() {
         </>
       )}
 
-      {quizState === "playing" && current && (
+      {phase === "playing" && current && (
         <>
           <div className="bg-udemy-dark text-white">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-2">
@@ -925,7 +941,7 @@ export default function QuizMode() {
 
           {degradedQuiz && (
             <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4">
-              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2" role="alert">
                 <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                 <div className="flex-1">
                   Only {degradedQuiz.returned} of {degradedQuiz.requested}{" "}
@@ -933,9 +949,8 @@ export default function QuizMode() {
                   available questions.
                   <button
                     onClick={() => {
-                      setQuizState("setup");
-                      setDegradedQuiz(null);
-                      handleStartQuiz();
+                      quiz.resetToSetup();
+                      void handleStartQuiz();
                     }}
                     disabled={generating}
                     className="ml-2 font-bold underline disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1005,8 +1020,10 @@ export default function QuizMode() {
                     qaKey={`quiz:${current.question_id}`}
                   >
                     <h2
+                      ref={questionHeadingRef}
+                      tabIndex={-1}
                       data-word-chat-target="true"
-                      className="text-lg md:text-xl font-bold leading-relaxed mb-6 mt-4"
+                      className="text-lg md:text-xl font-bold leading-relaxed mb-6 mt-4 outline-none"
                     >
                       {normalizeEscapedSingleLineText(current.question)}
                     </h2>
@@ -1032,20 +1049,17 @@ export default function QuizMode() {
                             key={choice.label}
                             onClick={() => {
                               if (quizMode === "exam") {
-                                setSelectedAnswer(choice.label);
-                                setAnswers((prev) => ({
-                                  ...prev,
-                                  [currentIdx]: {
-                                    selected: choice.label,
-                                    correct:
-                                      choice.label === current.correct_answer,
-                                    confidence: answerConfidence,
-                                  },
-                                }));
-                                setAnswered(true);
+                                quiz.setSelectedAnswer(choice.label);
+                                quiz.recordAnswer(currentIdx, {
+                                  selected: choice.label,
+                                  correct:
+                                    choice.label === current.correct_answer,
+                                  confidence: answerConfidence,
+                                });
+                                quiz.setAnswered(true);
                                 return;
                               }
-                              if (!answered) setSelectedAnswer(choice.label);
+                              if (!answered) quiz.setSelectedAnswer(choice.label);
                             }}
                             disabled={quizMode === "practice" && answered}
                             className={`w-full p-4 rounded-lg border-2 text-left transition-all flex items-start gap-3 ${
@@ -1102,7 +1116,7 @@ export default function QuizMode() {
                           max={5}
                           step={1}
                           value={answerConfidence}
-                          onChange={(e) => setAnswerConfidence(Number(e.target.value))}
+                          onChange={(e) => quiz.setAnswerConfidence(Number(e.target.value))}
                           className="w-full accent-udemy-purple"
                         />
                       </div>
@@ -1261,7 +1275,7 @@ export default function QuizMode() {
         </>
       )}
 
-      {quizState === "results" && (
+      {phase === "results" && (
         <div className="flex-1 flex flex-col items-center px-4 sm:px-6 py-10">
           <motion.div
             variants={scaleInVariants}
