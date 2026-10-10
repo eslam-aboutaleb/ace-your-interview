@@ -123,6 +123,25 @@ class QuestionsLLM:
         }
 
 
+class TerminalLLM:
+    """Always fails with a terminal budget error no retry can fix."""
+
+    def __init__(self):
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
+        self.calls += 1
+        self.prompts.append(prompt)
+        return {
+            "success": False,
+            "analysis": "",
+            "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
+            "error": "token budget exceeded",
+            "error_code": "llm_budget_exceeded",
+        }
+
+
 def _write_handbook(root: str) -> None:
     handbook = os.path.join(root, "owner-handbook")
     os.makedirs(handbook, exist_ok=True)
@@ -337,6 +356,37 @@ class QuestionsRouterDeepTests(unittest.TestCase):
         )
         self.assertEqual(events[-1].get("generated_count"), len(questions_frames))
 
+    def test_generate_questions_v2_round_trips_the_degraded_contract(self):
+        # A terminal failure still serves the topic-aware filler
+        # batch, but the degraded flag round-trips so the client
+        # knows the batch was backfilled rather than generated.
+        questions._llm_client = TerminalLLM()
+        res = self.client.post(
+            "/api/questions/generate-v2",
+            json={"topic_id": TOPIC_ID, "count": 2, "question_types": ["interview"]},
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(len(body["questions"]), 2)
+        self.assertTrue(body["degraded"])
+        self.assertEqual(body["requested_count"], 2)
+        self.assertEqual(body["returned_count"], 2)
+
+    def test_generate_questions_v2_stream_round_trips_the_degraded_contract(self):
+        questions._llm_client = TerminalLLM()
+        with self.client.stream(
+            "POST",
+            "/api/questions/generate-v2/stream",
+            json={"topic_id": TOPIC_ID, "count": 2, "question_types": ["interview"]},
+        ) as res:
+            self.assertEqual(res.status_code, 200)
+            events = [json.loads(line) for line in res.iter_lines() if line]
+        self.assertEqual(events[-1]["type"], "done")
+        self.assertEqual(events[-1]["generated_count"], 2)
+        self.assertTrue(events[-1]["degraded"])
+        self.assertEqual(events[-1]["requested_count"], 2)
+        self.assertEqual(events[-1]["returned_count"], 2)
+
     # ------------------------------------------------------- v1 quiz generate
 
     def test_the_v1_quiz_route_generates_and_captures_per_topic(self):
@@ -521,6 +571,36 @@ class QuestionsRouterDeepTests(unittest.TestCase):
         self.assertEqual(events[0]["code"], "topic_resolution_failed")
         self.assertEqual(events[0]["topics"], ["99-broken"])
         self.assertEqual(events[0]["topics_used"], [TOPIC_ID])
+
+    def test_quiz_v2_round_trips_the_degraded_contract(self):
+        # A terminal failure no longer substitutes generic
+        # questions: the response is an explicit degraded partial.
+        questions._llm_client = TerminalLLM()
+        res = self.client.post(
+            "/api/questions/quiz/generate-v2", json=self._quiz_payload(count=3)
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["questions"], [])
+        self.assertTrue(body["degraded"])
+        self.assertEqual(body["requested_count"], 3)
+        self.assertEqual(body["returned_count"], 0)
+
+    def test_quiz_v2_stream_round_trips_the_degraded_contract(self):
+        questions._llm_client = TerminalLLM()
+        with self.client.stream(
+            "POST",
+            "/api/questions/quiz/generate-v2/stream",
+            json=self._quiz_payload(count=3),
+        ) as res:
+            self.assertEqual(res.status_code, 200)
+            events = [json.loads(line) for line in res.iter_lines() if line]
+        self.assertEqual([e["type"] for e in events if e["type"] == "question"], [])
+        self.assertEqual(events[-1]["type"], "done")
+        self.assertEqual(events[-1]["generated_count"], 0)
+        self.assertTrue(events[-1]["degraded"])
+        self.assertEqual(events[-1]["requested_count"], 3)
+        self.assertEqual(events[-1]["returned_count"], 0)
 
     def test_quiz_v2_is_404_when_every_topic_fails_unexpectedly(self):
         import app.routers.questions as questions_module
