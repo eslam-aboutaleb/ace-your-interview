@@ -189,7 +189,7 @@ export function persistTopicStudyQuestionCache(
 ): void {
   if (typeof window === "undefined" || !topicId) return;
   const key = makeTopicStudyQuestionCacheStorageKey(topicId);
-  let payload = buildPayloadFromEntries(entriesByKey);
+  const payload = buildPayloadFromEntries(entriesByKey);
 
   while (true) {
     try {
