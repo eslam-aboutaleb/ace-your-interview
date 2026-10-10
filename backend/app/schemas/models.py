@@ -444,6 +444,11 @@ class GenerateQuizResponse(BaseModel):
     model_used: str = ""
 
 
+class QuizDistractorRationale(BaseModel):
+    label: str
+    rationale: str
+
+
 class QuizQuestionV2(BaseModel):
     question_id: str
     question: str
@@ -455,6 +460,9 @@ class QuizQuestionV2(BaseModel):
     topic_id: str = ""
     source_quote: str = ""
     reasoning_summary: str = ""
+    learning_objective: str = ""
+    expected_answer: str = ""
+    distractor_rationales: list[QuizDistractorRationale] = []
 
 
 class GenerateQuizV2Response(BaseModel):

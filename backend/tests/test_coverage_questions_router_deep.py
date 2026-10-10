@@ -40,6 +40,7 @@ def _valid_question() -> dict:
         "difficulty": "medium",
         "subcategory": "Networking",
         "key_concepts": ["pooling", "latency"],
+        "source_quote": "Section body about caching and connection pooling.",
     }
 
 
@@ -60,6 +61,13 @@ def _valid_quiz_question(topic_id: str = "01-static") -> dict:
         "source_quote": "Section body about caching and connection pooling.",
         "reasoning_summary": "Insertion order plus hash lookup points to LinkedHashMap.",
         "target_level": "mid",
+        "learning_objective": "Explain which collection preserves insertion order with hash lookup.",
+        "expected_answer": "LinkedHashMap",
+        "distractor_rationales": [
+            {"label": "B", "rationale": "HashSet does not preserve insertion order."},
+            {"label": "C", "rationale": "TreeSet orders entries by their natural ordering."},
+            {"label": "D", "rationale": "PriorityQueue orders entries by priority, not insertion."},
+        ],
     }
 
 
@@ -337,7 +345,13 @@ class QuestionsRouterDeepTests(unittest.TestCase):
         body = res.json()
         self.assertEqual(len(body["questions"]), 3)
         self.assertEqual(body["questions"][0]["type"], "mcq")
-        self.assertEqual(body["questions"][0]["correct_answer"], "A")
+        first = body["questions"][0]
+        correct_text = next(
+            choice["text"]
+            for choice in first["choices"]
+            if choice["label"] == first["correct_answer"]
+        )
+        self.assertEqual(correct_text, "LinkedHashMap")
         self.assertNotIn("X-Topic-Resolution-Failures", res.headers)
 
     def test_the_v1_quiz_route_groups_the_captured_history_per_topic(self):
