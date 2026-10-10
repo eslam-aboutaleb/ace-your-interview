@@ -38,6 +38,8 @@ import {
   fetchCompanyPacks,
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useStreamGeneration } from "@/hooks/useStreamGeneration";
+import { extractApiErrorMessage } from "@/utils/apiError";
 import { useVoice } from "@/hooks/useVoice";
 import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
 import type {
@@ -45,6 +47,8 @@ import type {
   FeedbackMode,
   InterviewLevel,
   InterviewSession,
+  InterviewSessionResponse,
+  InterviewSessionStreamDoneEvent,
   InterviewerStyle,
   InterviewType,
   JDAnalysisResponse,
@@ -52,36 +56,13 @@ import type {
   ResumeSkillProfile,
 } from "@/types";
 
-function interviewStartErrorMessage(error: unknown): string {
-  const detail = (
-    error as {
-      response?: {
-        data?: {
-          detail?: unknown;
-        };
-      };
-      message?: string;
-    }
-  )?.response?.data?.detail;
-
-  if (typeof detail === "string" && detail.trim()) {
-    return detail.trim();
-  }
-  if (
-    typeof detail === "object" &&
-    detail &&
-    typeof (detail as { message?: unknown }).message === "string" &&
-    (detail as { message: string }).message.trim()
-  ) {
-    return (detail as { message: string }).message.trim();
-  }
-
-  const message = (error as { message?: unknown })?.message;
-  if (typeof message === "string" && message.trim()) {
-    return message.trim();
-  }
-
-  return "Could not start mock interview.";
+/**
+ * A stream error may fall back to the non-streaming
+ * endpoint unless it explicitly opted out
+ * (`fallbackEligible === false`).
+ */
+function interviewStreamFallbackEligible(error: unknown): boolean {
+  return !(isInterviewStreamError(error) && !error.fallbackEligible);
 }
 
 const TRACK_LABELS: Record<LearningTrack, string> = {
@@ -131,6 +112,11 @@ export default function InterviewSetup() {
   const [loadingRecent, setLoadingRecent] = useState(true);
   const [voiceInterviewActive, setVoiceInterviewActive] = useState(false);
   const [voiceInterviewError, setVoiceInterviewError] = useState("");
+
+  const interviewSessionStream = useStreamGeneration<
+    InterviewSessionStreamDoneEvent,
+    InterviewSessionResponse
+  >();
 
   useEffect(() => {
     fetchInterviewSessions(6, 0)
@@ -291,33 +277,49 @@ export default function InterviewSetup() {
       llm_config: llmConfig,
     };
     try {
-      const done = await createInterviewSessionStream(payload, {
-        onStart: (event) => {
-          setStartProgress(event.message || "Creating interview session...");
-        },
-        onProgress: (event) => {
-          setStartProgress(
-            event.message || "Generating first interview question...",
-          );
-        },
-        onDone: () => {
-          setStartProgress("Interview session ready.");
-        },
-        onError: (event) => {
-          setErrorMsg(event.message || "Could not start mock interview.");
-        },
+      const result = await interviewSessionStream.run({
+        stream: (signal) =>
+          createInterviewSessionStream(payload, {
+            onStart: (event) => {
+              setStartProgress(event.message || "Creating interview session...");
+            },
+            onProgress: (event) => {
+              setStartProgress(
+                event.message || "Generating first interview question...",
+              );
+            },
+            onDone: () => {
+              setStartProgress("Interview session ready.");
+            },
+            onError: (event) => {
+              setErrorMsg(event.message || "Could not start mock interview.");
+            },
+          }, signal),
+        fallback: () => createInterviewSession(payload),
+        isFallbackEligible: interviewStreamFallbackEligible,
       });
-      navigate(`/interview/${done.session.session_id}`);
-    } catch (streamErr) {
-      if (isInterviewStreamError(streamErr) && !streamErr.fallbackEligible) {
-        setErrorMsg(streamErr.message || "Could not start mock interview.");
+      if (result.aborted) return;
+      if (result.error) {
+        if (
+          isInterviewStreamError(result.error) &&
+          !result.error.fallbackEligible
+        ) {
+          setErrorMsg(
+            result.error.message || "Could not start mock interview.",
+          );
+        } else {
+          setErrorMsg(
+            extractApiErrorMessage(
+              result.error,
+              "Could not start mock interview.",
+            ),
+          );
+        }
         return;
       }
-      try {
-        const fallback = await createInterviewSession(payload);
-        navigate(`/interview/${fallback.session.session_id}`);
-      } catch (fallbackErr) {
-        setErrorMsg(interviewStartErrorMessage(fallbackErr));
+      const done = result.data;
+      if (done) {
+        navigate(`/interview/${done.session.session_id}`);
       }
     } finally {
       setStartProgress("");
@@ -798,7 +800,13 @@ export default function InterviewSetup() {
                 {starting ? "Starting..." : "Start Mock Interview"}
               </button>
               {starting && (
-                <p className="text-xs text-udemy-text-muted">{startProgress}</p>
+                <p
+                  className="text-xs text-udemy-text-muted"
+                  aria-live="polite"
+                  role="status"
+                >
+                  {startProgress}
+                </p>
               )}
             </div>
           </motion.div>

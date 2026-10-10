@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { AlertTriangle, Clock3, Loader2, RefreshCw } from "lucide-react";
 import { pageTransition, pageVariants } from "@/utils/animations";
 import { fetchReviewQueue, fetchTopics, submitCardReview } from "@/services/api";
+import { useApi } from "@/hooks/useApi";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
 import type {
   LearningReviewRating,
@@ -45,47 +46,40 @@ const RATING_BUTTONS: {
 ];
 
 export default function ReviewQueue() {
-  const [items, setItems] = useState<ReviewQueueItem[]>([]);
-  const [topics, setTopics] = useState<TopicSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
   const [submitting, setSubmitting] = useState<Record<string, boolean>>(
     {},
   );
   const [gradeError, setGradeError] = useState<
-    Record<string, string>
+    Record<string, { message: string; rating: LearningReviewRating }>
   >({});
   const [loadedAt, setLoadedAt] = useState<Record<string, number>>({});
 
-  const load = async () => {
-    setLoading(true);
-    setErrorMsg("");
-    try {
+  const { data, error, loading, retry } = useApi(
+    async () => {
       const [queue, topicList] = await Promise.all([
         fetchReviewQueue(200),
         fetchTopics(),
       ]);
-      setItems(queue.items || []);
-      setTopics(topicList || []);
-      const now = Date.now();
-      const stamps: Record<string, number> = {};
-      for (const item of queue.items || []) {
-        stamps[item.question_id] = now;
-      }
-      setLoadedAt(stamps);
-      setSubmitting({});
-      setGradeError({});
-    } catch (err) {
-      console.error(err);
-      setErrorMsg("Could not load review queue. Please retry.");
-    } finally {
-      setLoading(false);
-    }
-  };
+      return { items: queue.items || [], topics: topicList || [] };
+    },
+    {
+      errorMessage: "Could not load review queue. Please retry.",
+      fixedErrorMessage: true,
+      onSuccess: (res) => {
+        const now = Date.now();
+        const stamps: Record<string, number> = {};
+        for (const item of res.items) {
+          stamps[item.question_id] = now;
+        }
+        setLoadedAt(stamps);
+        setSubmitting({});
+        setGradeError({});
+      },
+    },
+  );
 
-  useEffect(() => {
-    load();
-  }, []);
+  const items = data?.items ?? [];
+  const topics = data?.topics ?? [];
 
   const topicMap = useMemo(() => {
     return new Map(
@@ -132,12 +126,15 @@ export default function ReviewQueue() {
         response_time_ms: responseTimeMs,
         source_type: "question",
       });
-      await load();
+      await retry();
     } catch (err) {
       console.error(err);
       setGradeError((prev) => ({
         ...prev,
-        [key]: "Could not submit review. Please retry.",
+        [key]: {
+          message: "Could not submit review. Please retry.",
+          rating,
+        },
       }));
       setSubmitting((prev) => ({ ...prev, [key]: false }));
     }
@@ -161,7 +158,7 @@ export default function ReviewQueue() {
             </p>
           </div>
           <button
-            onClick={load}
+            onClick={() => void retry()}
             disabled={loading}
             className="btn-secondary inline-flex items-center justify-center gap-2 disabled:opacity-50"
           >
@@ -181,10 +178,10 @@ export default function ReviewQueue() {
           <SummaryChip label="Leeches" value={`${leechCount}`} />
         </div>
 
-        {errorMsg && (
+        {error && (
           <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <span>{errorMsg}</span>
+            <span>{error}</span>
           </div>
         )}
       </div>
@@ -244,8 +241,15 @@ export default function ReviewQueue() {
                         {isSuspended && <Badge>Suspended</Badge>}
                       </div>
                       {itemError && (
-                        <p className="text-xs text-red-700 mt-2">
-                          {itemError}
+                        <p className="text-xs text-red-700 mt-2 flex items-center gap-2">
+                          <span>{itemError.message}</span>
+                          <button
+                            onClick={() => handleGrade(item, itemError.rating)}
+                            disabled={isSubmitting || isSuspended}
+                            className="font-bold underline disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Retry
+                          </button>
                         </p>
                       )}
                     </div>
