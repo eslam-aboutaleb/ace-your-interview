@@ -275,6 +275,9 @@ export default function QuizMode() {
           topic_id: q.topic_id || selectedTopicIds[0] || "",
           source_quote: "Legacy mode did not return source quote.",
           reasoning_summary: "Review the explanation to reinforce reasoning.",
+          learning_objective: "",
+          expected_answer: q.correct_answer,
+          distractor_rationales: [],
         }));
       for (const entry of topicDetails) {
         if (!entry) continue;

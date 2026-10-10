@@ -34,6 +34,7 @@ import {
   uploadResume,
   deleteResume,
   analyzeJobDescription,
+  buildStudyPlanFromJd,
   fetchCompanyPacks,
 } from "@/services/api";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -116,6 +117,7 @@ export default function InterviewSetup() {
   const [deletingResume, setDeletingResume] = useState(false);
   const [attachResume, setAttachResume] = useState(true);
   const [jdAnalyzing, setJdAnalyzing] = useState(false);
+  const [jdPlanning, setJdPlanning] = useState(false);
   const [jdAnalysis, setJdAnalysis] = useState<JDAnalysisResponse | null>(
     null,
   );
@@ -250,6 +252,22 @@ export default function InterviewSetup() {
       ...recommended.filter((area) => !existing.has(area)),
     ].slice(0, 8);
     setFocusAreasRaw(merged.join(", "));
+  };
+
+  const buildPrepPlanFromJd = async () => {
+    const text = jobDescriptionText.trim();
+    if (!text) return;
+    setJdPlanning(true);
+    try {
+      await buildStudyPlanFromJd(text);
+      navigate("/study-plan");
+    } catch {
+      setErrorMsg(
+        "Could not build a prep plan from the job description.",
+      );
+    } finally {
+      setJdPlanning(false);
+    }
   };
 
   const handleStart = async () => {
@@ -744,6 +762,19 @@ export default function InterviewSetup() {
                         <ArrowRight className="w-3 h-3" />
                       </button>
                     )}
+                    <button
+                      onClick={buildPrepPlanFromJd}
+                      disabled={jdPlanning || !jobDescriptionText.trim()}
+                      className="inline-flex items-center gap-1 text-xs text-udemy-purple hover:underline disabled:opacity-50"
+                    >
+                      {jdPlanning ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3 h-3" />
+                      )}
+                      {jdPlanning ? "Building..." : "Build prep plan from JD"}
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
                   </div>
                 )}
                 {!jdAnalysis && (

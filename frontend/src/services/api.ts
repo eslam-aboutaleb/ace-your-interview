@@ -47,6 +47,7 @@ import type {
   ChatAskRequest,
   ChatAskResponse,
   ReviewQueueResponse,
+  StudyPlanFromJDResponse,
   StudyPlanResponse,
   WeakAreasResponse,
   TopicMasteryResponse,
@@ -1032,6 +1033,18 @@ export async function fetchStudyPlan(
   const { data } = await api.get<StudyPlanResponse>("/learning/study-plan", {
     params: { days, daily_items: dailyItems },
   });
+  return data;
+}
+
+export async function buildStudyPlanFromJd(
+  jdText: string,
+  days = 7,
+  dailyItems = 3,
+): Promise<StudyPlanFromJDResponse> {
+  const { data } = await api.post<StudyPlanFromJDResponse>(
+    "/learning/plan-from-jd",
+    { jd_text: jdText, days, daily_items: dailyItems },
+  );
   return data;
 }
 

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useVoiceStore } from "../store/voiceStore";
 import { useSettingsStore } from "../store/settingsStore";
 import {
+  BargeInDetector,
   BrowserVoiceService,
   MicRecorder,
   WebSocketVoiceService,
@@ -35,6 +36,10 @@ export function useVoice() {
   const wsServiceRef = useRef<WebSocketVoiceService | null>(null);
   const browserServiceRef = useRef<BrowserVoiceService | null>(null);
   const micRef = useRef<MicRecorder | null>(null);
+  const bargeInRef = useRef<BargeInDetector | null>(null);
+  // Mic-start timestamp of the current recording,
+  // measured as the answer's response time.
+  const recordingStartedAtRef = useRef<number>(0);
 
   const [interviewReady, setInterviewReady] =
     useState<VoiceInterviewReadyEvent | null>(null);
@@ -179,6 +184,7 @@ export function useVoice() {
   // ── Start recording (mic) ───────────────────────────────
   const startRecording = useCallback(async () => {
     const tier = store.currentTier;
+    recordingStartedAtRef.current = Date.now();
 
     if (tier === "browser") {
       const browser = getBrowserService();
@@ -215,18 +221,73 @@ export function useVoice() {
     // Cloud: stop mic, encode, send via WS
     if (micRef.current) {
       const blob = await micRef.current.stop();
+      const responseTimeMs = recordingStartedAtRef.current
+        ? Date.now() - recordingStartedAtRef.current
+        : 0;
+      recordingStartedAtRef.current = 0;
       store.setRecording(false);
       store.setListening(false);
 
       if (blob.size > 100) {
         const base64 = await blobToBase64(blob);
         const ws = getWsService();
-        ws.sendAudio(base64, blob.type || "audio/webm");
+        ws.sendAudio(base64, blob.type || "audio/webm", responseTimeMs);
       }
       micRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.currentTier]);
+
+  // ── Barge-in: interrupt the assistant mid-utterance ──
+  const handleBargeIn = useCallback(() => {
+    const tier = store.currentTier;
+    if (tier === "browser") {
+      browserServiceRef.current?.stopSpeaking();
+    } else {
+      stopPlayback();
+      wsServiceRef.current?.sendInterrupt();
+    }
+    // The utterance that triggered the barge-in becomes
+    // the next answer: start capturing it immediately.
+    void startRecording();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.currentTier]);
+
+  // While the assistant speaks, listen for the user
+  // starting to talk (barge-in). VAD is optional —
+  // unsupported browsers keep push-to-talk only.
+  useEffect(() => {
+    let cancelled = false;
+    const active =
+      store.isSpeaking && store.sessionActive && store.voiceEnabled;
+
+    if (!active) {
+      bargeInRef.current?.destroy();
+      bargeInRef.current = null;
+      return;
+    }
+
+    BargeInDetector.create(handleBargeIn).then((detector) => {
+      if (cancelled) {
+        void detector?.destroy();
+        return;
+      }
+      bargeInRef.current = detector;
+    });
+
+    return () => {
+      cancelled = true;
+      bargeInRef.current?.destroy();
+      bargeInRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.isSpeaking, store.sessionActive, store.voiceEnabled]);
+
+  // ── Send an interrupt (barge-in) manually ─────────────
+  const sendInterrupt = useCallback(() => {
+    handleBargeIn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleBargeIn]);
 
   // ── Send text (typed fallback or browser tier follow-up) ─
   const sendText = useCallback(
@@ -342,6 +403,8 @@ export function useVoice() {
     stopRecording,
     sendText,
     speak,
+    sendInterrupt,
+    bargeInSupported: BargeInDetector.isSupported(),
     setPreferredTier: store.setPreferredTier,
     setCurrentTier: store.setCurrentTier,
     setVoiceEnabled: store.setVoiceEnabled,
