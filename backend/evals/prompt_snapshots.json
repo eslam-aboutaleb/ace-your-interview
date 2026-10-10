@@ -45,13 +45,13 @@
     "questions.problem_solving.javascript.senior.count3": "sha256:5c003c4c90cd61ffa113c212892ed05b57f21166b37ed9645703c68595ef2131",
     "questions.problem_solving.python.junior.count3": "sha256:4737558120a65170b9a187e315cdb51e5c9ce044adcc2a37f9251bed3701f222",
     "questions.problem_solving.unsupported_language.rust.count3": "sha256:fa2f2b32880fc6be977b6fbbdfa308960357b8df1fad51ae87c301c68342ab4b",
-    "quiz.attempt_budget.count12": "sha256:19309976e39f2dd64c9642f56560c5d34cba404b7ec14f0edb7cb11f62b9c37f",
-    "quiz.injection.topic_content.mid.count2": "sha256:6b9df902a6603869198f36e1abf484af7453b259c1cc94ae8e02d59efb72a144",
-    "quiz.mcq_only.mid.count3": "sha256:65d52983b5341d59dddf7aca072b9cf2c668808317779d619bae49c7fb088444",
-    "quiz.multi_topic.mid.count4": "sha256:54e41fa98a0a80c657d90bf3946677213c022f0d5dbb0eed47d0b3cbff222509",
-    "quiz.multi_topic.senior.hard.count3": "sha256:db27f25f850783d9af186fbcfc757d3a5a2b4be4e8ef96840e05cdf6f66b20b4",
-    "quiz.problem_solving.java.mid.count3": "sha256:d32b1655098101ea9bd33bd5fe66ab3b923c810fb08da4b465c1309be3817fd0",
-    "quiz.single_topic.junior.count2": "sha256:5ee654e7db8446f7bf504b4e24b5da7e8a5f9847df257b830b552d669aeb5c94",
-    "quiz.true_false_only.junior.count2": "sha256:2ad9a841dd319d5f75f52f32461447deb8b41a8f664680707c7b457235a96fee"
+    "quiz.attempt_budget.count12": "sha256:211164cb2a8a27557881e80634847145088211a69f5caecf1d5e4c09eeb68f0a",
+    "quiz.injection.topic_content.mid.count2": "sha256:944ddd005bf05d0f863dc738de0f4127c13a886733a5c031c27fd1b0d82b6225",
+    "quiz.mcq_only.mid.count3": "sha256:b7b196d1c1f3178750acbf61b0ada2062a6a53a8ea8928b1126fc9b52a301882",
+    "quiz.multi_topic.mid.count4": "sha256:2b4c76db1a9e727ed60aa1c548fb654625d828b784d0ca03e190042b9f091ee8",
+    "quiz.multi_topic.senior.hard.count3": "sha256:ed3b0ca2c73a9ea81d2c5f2754601db97643eec92887e6482517a82eb9d86c2a",
+    "quiz.problem_solving.java.mid.count3": "sha256:17f18a69bdd4a432d15332be491b5c1ce9698df66c674be49f869f4d3c8d2652",
+    "quiz.single_topic.junior.count2": "sha256:6b1ae8e94cfb039b994b87907310cb9ce57926e63154fdcfa21eaba9235557ca",
+    "quiz.true_false_only.junior.count2": "sha256:36442ea1f9a66ba83a4814c1d694d2444119279823a153a5e4e04a3ca106244c"
   }
 }

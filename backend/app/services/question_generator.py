@@ -20,6 +20,7 @@ from app.schemas.models import (
     QuestionAnswer,
     QuestionAnswerV2,
     QuizChoice,
+    QuizDistractorRationale,
     QuizQuestion,
     QuizQuestionType,
     QuizQuestionV2,
@@ -523,6 +524,10 @@ def _render_grounding_anchors_block(anchors: list[str]) -> str:
     )
 
 
+def _normalise_content_fragment(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip().lower()
+
+
 def _question_is_grounded_to_anchors(
     question: str,
     *,
@@ -542,8 +547,8 @@ def _question_is_grounded_to_anchors(
         anchor_tokens = _grounding_tokens(anchor)
         if not anchor_tokens:
             continue
-        overlap = len(question_tokens & anchor_tokens)
-        if overlap >= 1:
+        overlap = question_tokens & anchor_tokens
+        if any(len(token) >= 5 for token in overlap) or len(overlap) >= 2:
             return True
     return False
 
@@ -2495,7 +2500,10 @@ def _build_quiz_prompt(
     "topic_id": "one of provided topic ids",
     "source_quote": "short direct quote from course content",
     "reasoning_summary": "1-2 sentence why answer is correct",
-    "target_level": "junior|mid|senior"
+    "target_level": "junior|mid|senior",
+    "learning_objective": "what the learner should be able to do after answering",
+    "expected_answer": "the full text of the correct choice",
+    "distractor_rationales": [{"label": "B", "rationale": "why B is wrong"}]
   }
 ]""",
         rules=[
@@ -2503,6 +2511,13 @@ def _build_quiz_prompt(
             "topic_id must be one of the provided ids.",
             "correct_answer must match one choice label.",
             "Avoid trick ambiguity; one clearly correct answer.",
+            "Exactly one choice is defensibly correct; every other choice must be wrong on the documented facts.",
+            "Distractors must be plausible and technically distinct from each other and from the correct answer.",
+            "Vary the position of the correct answer across items; do not default to A.",
+            "source_quote must be a verbatim excerpt of the topic content; never invent a quotation.",
+            "learning_objective states the skill the question assesses.",
+            "expected_answer must repeat the correct choice text exactly.",
+            "distractor_rationales must cover every non-correct choice label with a reason of at least 12 characters.",
             "Distribute questions across topics as evenly as possible.",
             detail_clause,
             "Format explanations as markdown, but keep structure adaptive.",
@@ -2914,6 +2929,7 @@ def _build_fallback_question_items(
             requires_programming=requires_programming,
             topic_title=topic_title,
             grounding_anchors=grounding_anchors,
+            topic_content=source_content,
         )
         if not valid:
             continue
@@ -2933,6 +2949,7 @@ def _validate_question_item(
     requires_programming: bool = False,
     topic_title: str = "",
     grounding_anchors: Optional[list[str]] = None,
+    topic_content: str = "",
 ) -> tuple[bool, str]:
     question = str(item.get("question", "")).strip()
     answer = str(item.get("answer", "")).strip()
@@ -2956,10 +2973,17 @@ def _validate_question_item(
         or _default_learning_objective(problem_solving_mode)
     )
     item["source_section"] = str(item.get("source_section", "")).strip() or "Topic section"
-    item["source_quote"] = (
-        str(item.get("source_quote", "")).strip()
-        or "Generated from the current topic content."
-    )
+    source_quote = str(item.get("source_quote", "")).strip()
+    if topic_content and not problem_solving_mode:
+        if (
+            not source_quote
+            or _normalise_content_fragment(source_quote)
+            not in _normalise_content_fragment(topic_content)
+        ):
+            return False, "source_quote_not_in_content"
+        item["source_quote"] = source_quote
+    else:
+        item["source_quote"] = source_quote or "Generated from the current topic content."
     item["reasoning_summary"] = (
         str(item.get("reasoning_summary", "")).strip()
         or _default_reasoning_summary(problem_solving_mode)
@@ -2992,6 +3016,7 @@ def _validate_quiz_item(
     allowed_types: set[str],
     difficulty: Optional[str],
     level: Optional[str],
+    topic_content: str = "",
 ) -> tuple[bool, str]:
     required = [
         "question",
@@ -3003,6 +3028,9 @@ def _validate_quiz_item(
         "source_quote",
         "reasoning_summary",
         "target_level",
+        "learning_objective",
+        "expected_answer",
+        "distractor_rationales",
     ]
     for key in required:
         if key not in item:
@@ -3017,6 +3045,9 @@ def _validate_quiz_item(
     source_quote = item.get("source_quote")
     reasoning_summary = item.get("reasoning_summary")
     target_level = str(item.get("target_level", "")).strip().lower()
+    learning_objective = str(item.get("learning_objective", "")).strip()
+    expected_answer = str(item.get("expected_answer", "")).strip()
+    distractor_rationales = item.get("distractor_rationales")
 
     if not isinstance(q_text, str) or len(q_text.strip()) < 8:
         return False, "invalid_question"
@@ -3030,12 +3061,23 @@ def _validate_quiz_item(
         return False, "invalid_explanation"
     if not isinstance(source_quote, str) or len(source_quote.strip()) < 8:
         return False, "invalid_source_quote"
+    if topic_content and not is_problem_solving_topic(topic_id):
+        if _normalise_content_fragment(source_quote) not in _normalise_content_fragment(
+            topic_content
+        ):
+            return False, "source_quote_not_in_content"
     if not isinstance(reasoning_summary, str) or len(reasoning_summary.strip()) < 8:
         return False, "invalid_reasoning_summary"
     if target_level not in _VALID_LEVELS:
         return False, "invalid_target_level"
     if _normalise_level(level) != target_level:
         return False, "level_mismatch"
+    if not learning_objective:
+        return False, "invalid_learning_objective"
+    if not expected_answer:
+        return False, "invalid_expected_answer"
+    if not isinstance(distractor_rationales, list):
+        return False, "invalid_distractor_rationales"
 
     if not isinstance(choices, list):
         return False, "invalid_choices_type"
@@ -3069,6 +3111,27 @@ def _validate_quiz_item(
         if correct not in {"A", "B"}:
             return False, "invalid_correct_answer_true_false"
 
+    correct_text = ""
+    for c in choices:
+        if str(c.get("label", "")).strip() == correct:
+            correct_text = str(c.get("text", "")).strip()
+            break
+    if q_type == "mcq" and expected_answer != correct_text:
+        return False, "expected_answer_mismatch"
+
+    rationale_by_label: dict[str, str] = {}
+    for entry in distractor_rationales:
+        if not isinstance(entry, dict):
+            return False, "invalid_distractor_rationales"
+        rationale_label = str(entry.get("label", "")).strip()
+        rationale = str(entry.get("rationale", "")).strip()
+        if rationale_label not in {"A", "B", "C", "D"} or len(rationale) < 12:
+            return False, "invalid_distractor_rationales"
+        rationale_by_label[rationale_label] = rationale
+    for label in labels:
+        if label != correct and label not in rationale_by_label:
+            return False, "missing_distractor_rationale"
+
     diff = str(item.get("difficulty", "medium")).lower()
     if diff not in _VALID_DIFFICULTIES:
         return False, "invalid_difficulty"
@@ -3078,6 +3141,52 @@ def _validate_quiz_item(
     item["difficulty"] = diff
     item["type"] = q_type
     return True, ""
+
+
+def _topic_content_for(
+    item: dict[str, Any],
+    topics_content: list[dict],
+) -> str:
+    topic_id = str(item.get("topic_id", "")).strip()
+    for topic in topics_content:
+        if str(topic.get("id", "")).strip() == topic_id:
+            return str(topic.get("content", ""))
+    return ""
+
+
+def _normalise_answer_position(item: dict[str, Any]) -> dict[str, Any]:
+    choices = item.get("choices")
+    correct = str(item.get("correct_answer", "")).strip()
+    if (
+        not isinstance(choices, list)
+        or len(choices) != 4
+        or correct not in {"A", "B", "C", "D"}
+    ):
+        return item
+    correct_index = next(
+        (
+            index
+            for index, choice in enumerate(choices)
+            if isinstance(choice, dict)
+            and str(choice.get("label", "")).strip() == correct
+        ),
+        None,
+    )
+    if correct_index is None:
+        return item
+    question = _normalise_question(str(item.get("question", "")))
+    if not question:
+        return item
+    digest = hashlib.sha256(question.encode("utf-8")).digest()
+    target = digest[0] % len(choices)
+    shift = (target - correct_index) % len(choices)
+    rotated = choices[-shift:] + choices[:-shift]
+    item["choices"] = [
+        {**choice, "label": chr(ord("A") + index)}
+        for index, choice in enumerate(rotated)
+    ]
+    item["correct_answer"] = chr(ord("A") + target)
+    return item
 
 
 def _build_fallback_quiz_items(
@@ -3139,6 +3248,12 @@ def _build_fallback_quiz_items(
             ]
             correct = "A"
             q_type = "mcq"
+            expected_answer = "Clarify constraints, choose a justified approach, and explain tradeoffs."
+            distractor_rationales = [
+                {"label": "B", "rationale": "Coding before reasoning skips the constraints that shape the solution."},
+                {"label": "C", "rationale": "Micro-optimization before validating core requirements wastes effort."},
+                {"label": "D", "rationale": "Assuming defaults silently hides the edge cases the interviewer needs to hear."},
+            ]
         else:
             stems = [
                 "True or false for {topic_title}: strong interview answers should explicitly state assumptions and tradeoffs before implementation details.",
@@ -3153,6 +3268,10 @@ def _build_fallback_quiz_items(
             ]
             correct = "A"
             q_type = "true_false"
+            expected_answer = "True"
+            distractor_rationales = [
+                {"label": "B", "rationale": "The false option contradicts the documented tradeoff-driven reasoning."},
+            ]
 
         q_norm = _normalise_question(question)
         if not q_norm or q_norm in seen_norm:
@@ -3174,6 +3293,9 @@ def _build_fallback_quiz_items(
             "source_quote": source_quote,
             "reasoning_summary": "Anchor decisions in constraints, then justify tradeoffs clearly.",
             "target_level": target_level,
+            "learning_objective": f"Explain the core tradeoffs of {topic_title} and justify the practical decision.",
+            "expected_answer": expected_answer,
+            "distractor_rationales": distractor_rationales,
         }
         valid, _issue = _validate_quiz_item(
             item,
@@ -3278,6 +3400,7 @@ async def _collect_with_retries(
                 issue_counter[issue] += 1
                 continue
 
+            item = _normalise_answer_position(item)
             q_norm = _normalise_question(str(item.get("question", "")))
             question_text = str(item.get("question", "")).strip()
             if not q_norm or q_norm in dedup or _is_near_duplicate_question(question_text, seen_questions):
@@ -3364,6 +3487,7 @@ async def _collect_with_retries(
                     issue_counter[issue] += 1
                     continue
 
+                item = _normalise_answer_position(item)
                 q_norm = _normalise_question(str(item.get("question", "")))
                 question_text = str(item.get("question", "")).strip()
                 if not q_norm or q_norm in dedup or _is_near_duplicate_question(question_text, seen_questions):
@@ -3454,6 +3578,16 @@ class QuestionGenerator:
             topic_id=topic_id,
             source_quote=str(item.get("source_quote", "")).strip(),
             reasoning_summary=str(item.get("reasoning_summary", "")).strip(),
+            learning_objective=str(item.get("learning_objective", "")).strip(),
+            expected_answer=str(item.get("expected_answer", "")).strip(),
+            distractor_rationales=[
+                QuizDistractorRationale(
+                    label=str(rationale.get("label", "")).strip(),
+                    rationale=str(rationale.get("rationale", "")).strip(),
+                )
+                for rationale in item.get("distractor_rationales", [])
+                if isinstance(rationale, dict)
+            ],
         )
 
     @staticmethod
@@ -3621,6 +3755,7 @@ class QuestionGenerator:
                             requires_programming=requires_programming,
                             topic_title=topic_title,
                             grounding_anchors=active_grounding_anchors,
+                            topic_content=doc_content,
                         )
                         if not valid:
                             malformed_dropped += 1
@@ -4111,6 +4246,7 @@ class QuestionGenerator:
                     requires_programming=bool(mode["requires_programming"]),
                     topic_title=topic_title,
                     grounding_anchors=grounding_anchors,
+                    topic_content=str(mode["section_content"] or doc_content),
                 )
             prompt = _build_prompt(
                 topic_id=topic_id,
@@ -4353,11 +4489,13 @@ class QuestionGenerator:
                             allowed_types,
                             difficulty,
                             level,
+                            topic_content=_topic_content_for(item, topics_content),
                         )
                         if not is_valid:
                             local_malformed += 1
                             issue_counter[issue] += 1
                             continue
+                        item = _normalise_answer_position(item)
                         question_text = str(item.get("question", "")).strip()
                         q_norm = _normalise_question(question_text)
                         if (
@@ -4528,6 +4666,7 @@ class QuestionGenerator:
                     continue
                 dedup_norm.add(q_norm)
                 generated_question_texts.append(question_text)
+                item = _normalise_answer_position(item)
                 question = self._to_quiz_question_v2(item)
                 generated_count += 1
                 yield {"type": "question", "question": question.model_dump()}
@@ -4634,6 +4773,7 @@ class QuestionGenerator:
                 allowed_types,
                 difficulty,
                 level,
+                topic_content=_topic_content_for(item, topics_content),
             )
 
         raw_items, stats = await _collect_with_retries(
@@ -4667,6 +4807,7 @@ class QuestionGenerator:
 
         questions = []
         for item in raw_items:
+            item = _normalise_answer_position(item)
             topic_id = str(item.get("topic_id", "")).strip()
             qid = _question_id(topic_id or "quiz", item["question"])
             choices = [QuizChoice(label=c["label"], text=c["text"]) for c in item["choices"]]
@@ -4682,6 +4823,16 @@ class QuestionGenerator:
                     topic_id=topic_id,
                     source_quote=item["source_quote"].strip(),
                     reasoning_summary=item["reasoning_summary"].strip(),
+                    learning_objective=str(item.get("learning_objective", "")).strip(),
+                    expected_answer=str(item.get("expected_answer", "")).strip(),
+                    distractor_rationales=[
+                        QuizDistractorRationale(
+                            label=str(rationale.get("label", "")).strip(),
+                            rationale=str(rationale.get("rationale", "")).strip(),
+                        )
+                        for rationale in item.get("distractor_rationales", [])
+                        if isinstance(rationale, dict)
+                    ],
                 )
             )
 
