@@ -42,6 +42,7 @@ from app.services.llm_policy import (
     StudyAppLLMNotAssignedError,
     raise_if_policy_blocked_result,
 )
+from app.services.llm_skills import skill_context_block
 from app.services.learning_store import record_generation_run_safe
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
@@ -66,6 +67,17 @@ _MAX_TOPIC_CONTEXT = 9000
 # normalizer's 80-item cap and the uniqueness block's 60-item slice are reached,
 # the oldest history drops out of the prompt, but this block still describes it.
 _MAX_PROGRESS_BLOCK_CHARS = 1200
+# Skill-taxonomy context injected into every generation prompt. The
+# taxonomy is module-authored (trusted), so it is not fenced like the
+# untrusted blocks, but it is still capped so the injection stays a
+# fixed-size addition to the prompt. The full three-domain block
+# (technical + interview + educational) measures ~6.4k-7.9k chars
+# depending on level/session, so 8000 keeps every domain intact for
+# every combination while bounding the injection.
+_MAX_SKILL_CONTEXT_CHARS = 8000
+_SKILL_CONTEXT_LABEL = (
+    "Skill context (apply these when writing questions, explanations, and expected signals)"
+)
 # Per-flow output ceiling. A caller/config/preference value may lower it but
 # never raise it (enforced by ``LLMClient``).
 _MIN_QUESTIONS_MAX_TOKENS_CAP = 600
@@ -302,6 +314,23 @@ def _target_objectives_block(target_objectives: list[str] | None) -> str:
         blob,
         _MAX_TARGET_OBJECTIVES_BLOCK_CHARS,
     )
+
+
+def _skill_context_section(level: str, session_type: str) -> str:
+    """Render the bounded skill-taxonomy context for a generation prompt.
+
+    The taxonomy is module-authored (trusted), so unlike the untrusted
+    blocks it is not fenced; it is still capped so the injection stays
+    a fixed-size addition to every prompt.
+    """
+    block = skill_context_block(
+        level=level,
+        session_type=session_type,
+        include_educational=True,
+    )
+    if not block:
+        return ""
+    return f"{_SKILL_CONTEXT_LABEL}:\n{block[:_MAX_SKILL_CONTEXT_CHARS]}"
 
 
 def _problem_solving_language(preferred_language: str) -> str:
@@ -1778,7 +1807,7 @@ func numIslands(grid [][]byte) int {
 #:
 #: A language is deliberately *absent* from a scenario rather than inheriting
 #: another language's source. Relabelling the Python two-sum implementation
-#: under a ```java fence is a correctness defect (plan item 1.10), so "no entry
+#: under a ```java fence is a correctness defect, so "no entry
 #: here" means "no code block at all", not "reuse something close enough".
 _PROBLEM_SOLVING_CODE_TEMPLATES_BY_LANGUAGE: dict[str, dict[str, str]] = {
     "python": _PROBLEM_SOLVING_PYTHON_CODE_TEMPLATES,
@@ -2130,7 +2159,7 @@ def _problem_solving_fallback_count_with_headroom(missing_count: int, problem_so
 
 
 def _question_system_prompt(problem_solving_mode: bool) -> str:
-    """The ``system`` role for question generation (Stage 2.1).
+    """The ``system`` role for question generation.
 
     The persona used to be the first line of the user turn, which gave
     externally sourced course text the same authority as the instruction.
@@ -2228,6 +2257,8 @@ def _build_prompt(
 ) -> str:
     problem_solving_mode = is_problem_solving_topic(topic_id)
     target_level = _normalise_level(level)
+    session_type = "coding" if problem_solving_mode else "general"
+    skill_section = _skill_context_section(target_level, session_type)
     requested_total = max(1, int(requested_total_count or count or 1))
     existing_seed = _merge_existing_questions(existing_questions, additional_existing_questions)
     diff_clause = ""
@@ -2342,6 +2373,7 @@ def _build_prompt(
             "Do not ask generic interview questions that could fit many unrelated topics with only minor wording changes.",
             "The question itself should make the current topic recognizable before the learner reads the answer.",
             *problem_scope_rules,
+            "expected_signals should reference the relevant interview skills (clarify before coding, verbalise complexity, enumerate edge cases, discuss tradeoffs) where the question calls for them.",
             *_difficulty_generation_rules(problem_solving_mode, difficulty),
             *_question_auxiliary_field_rules(problem_solving_mode),
             "Answers must be grounded in the provided documentation.",
@@ -2385,6 +2417,8 @@ User requested total questions for this checkpoint: {requested_total}.
 This call is generating {count} new questions to fill remaining slots.
 {progress_block}{uniqueness_block}
 {grounding_block}
+
+{skill_section}
 
 {prompt_contract}
 
@@ -2454,9 +2488,10 @@ def _build_quiz_prompt(
     mcp_context: str = "",
     target_objectives: list[str] | None = None,
 ) -> str:
-    """Build the quiz user turn. The creator persona lives in ``system`` (Stage 2.1)."""
+    """Build the quiz user turn. The creator persona lives in ``system``."""
     target_level = _normalise_level(level)
     types = question_types or ["mcq", "true_false"]
+    skill_section = _skill_context_section(target_level, "general")
     existing_seed = _merge_existing_questions(existing_questions, additional_existing_questions)
     diff_clause = ""
     if difficulty:
@@ -2569,6 +2604,8 @@ def _build_quiz_prompt(
 Target candidate level: "{target_level}".
 {type_instructions}
 {progress_block}{targeting_block}{uniqueness_block}
+{skill_section}
+
 {prompt_contract}
 
 {_QUIZ_FEW_SHOT_EXAMPLE}
@@ -2689,7 +2726,7 @@ def _parse_text_qa_pairs(candidate: str) -> list[dict]:
 def _parse_questions_json(raw: str) -> list[dict]:
     """Extract a JSON array of items from an LLM response.
 
-    Stage 2.3 collapsed the salvage chain. The local sliding ``raw_decode``
+    The salvage chain is collapsed. The local sliding ``raw_decode``
     scan and the duplicated fenced re-parse existed only to re-read near-JSON,
     which the shared ``parse_json_object`` already handles (direct, then fenced,
     then first/last delimiter slice) and which ``structured=True`` makes rare.
@@ -4911,7 +4948,7 @@ class QuestionGenerator:
 
 # ── Flashcard generation (STUDY_ENABLE_FLASHCARDS_V1) ──
 
-#: Hard cap on cards generated per request (plan decision).
+#: Hard cap on cards generated per request.
 MAX_CARD_GENERATION_COUNT = 50
 
 #: The flashcard-generation system prompt contract, migrated verbatim
@@ -4931,6 +4968,7 @@ def _build_card_prompt(
     mcp_context: str = "",
 ) -> str:
     """Build the flashcard generation user turn."""
+    skill_section = _skill_context_section("mid", "general")
     if section_title and section_content:
         scope = f'the "{section_title}" section of "{topic_title}"'
         content = _clamp_content(section_content)
@@ -5001,6 +5039,8 @@ def _build_card_prompt(
     return f"""Generate exactly {count} interview-grade flashcards for {scope}.
 {uniqueness_block}
 {grounding_block}
+
+{skill_section}
 
 {prompt_contract}
 
