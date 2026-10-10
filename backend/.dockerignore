@@ -1,0 +1,20 @@
+# The Dockerfile only COPYs pyproject.toml, app/, main.py and docs/ —
+# everything below is local development state that only bloats the
+# build context (and .env holds secrets that should never be uploaded).
+.git
+.venv
+.pytest_cache
+.ruff_cache
+.coverage
+__pycache__
+*.py[cod]
+.env
+.env.example
+tests
+evals
+scripts
+proto
+data
+uv.lock
+.DS_Store
+Dockerfile.dev
