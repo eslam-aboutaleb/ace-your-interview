@@ -283,6 +283,8 @@ export interface GenerateQuestionsV2Response {
   degraded: boolean;
   requested_count: number;
   returned_count: number;
+  /** Wire identifier of the prompt contract: "<prompt_name>@<version>". */
+  generation_version: string;
 }
 
 export interface GenerateQuestionsStreamStartEvent {
@@ -607,6 +609,8 @@ export interface GenerateQuizV2Response {
   degraded: boolean;
   requested_count: number;
   returned_count: number;
+  /** Wire identifier of the prompt contract: "<prompt_name>@<version>". */
+  generation_version: string;
 }
 
 export type QuizMode = "practice" | "exam";
@@ -905,6 +909,8 @@ export interface InterviewTurn {
   degraded?: boolean;
   competency_focus?: string;
   expected_signals?: string[];
+  /** Wire identifier of the prompt contract: "<prompt_name>@<version>". */
+  generation_version?: string;
 }
 
 export interface InterviewReport {
