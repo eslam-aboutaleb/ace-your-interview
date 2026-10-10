@@ -38,9 +38,18 @@ class FakeLLM:
                     "explanation": "LinkedHashMap preserves insertion order while keeping hash-based lookup behavior.",
                     "difficulty": "medium",
                     "topic_id": "custom-java",
-                    "source_quote": "Collections track insertion order behavior.",
+                    "source_quote": "Understand memory model, GC, and runtime behavior.",
                     "reasoning_summary": "Insertion order plus key lookup points to LinkedHashMap.",
                     "target_level": "mid",
+                    "learning_objective": (
+                        "Explain which collection preserves insertion order with hash lookups."
+                    ),
+                    "expected_answer": "LinkedHashMap",
+                    "distractor_rationales": [
+                        {"label": "B", "rationale": "HashSet does not preserve insertion order."},
+                        {"label": "C", "rationale": "TreeSet orders entries by their natural ordering."},
+                        {"label": "D", "rationale": "PriorityQueue orders entries by priority, not insertion."},
+                    ],
                 }
             ]
         elif wants_problem_solving:

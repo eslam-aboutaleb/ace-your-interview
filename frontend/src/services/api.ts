@@ -764,6 +764,10 @@ export async function generateQuestionsV2Stream(
       handlers.onDone?.(event);
       return;
     }
+    if (event.type === "warning") {
+      handlers.onWarning?.(event);
+      return;
+    }
     handlers.onError?.(event);
     if (event.code === "llm_service_approval_required"
       || event.code === "study_app_llm_not_assigned"
@@ -832,6 +836,10 @@ export async function generateQuizV2Stream(
     if (event.type === "done") {
       doneEvent = event;
       handlers.onDone?.(event);
+      return;
+    }
+    if (event.type === "warning") {
+      handlers.onWarning?.(event);
       return;
     }
     handlers.onError?.(event);

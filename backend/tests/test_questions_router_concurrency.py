@@ -73,9 +73,18 @@ def _quiz_item() -> dict:
         "explanation": "LinkedHashMap preserves insertion order with hash lookups.",
         "difficulty": "medium",
         "topic_id": "custom-java",
-        "source_quote": "Collections track insertion order behavior.",
+        "source_quote": "Java basics.",
         "reasoning_summary": "Insertion order plus key lookup points to LinkedHashMap.",
         "target_level": "mid",
+        "learning_objective": (
+            "Explain which collection preserves insertion order with hash lookups."
+        ),
+        "expected_answer": "LinkedHashMap",
+        "distractor_rationales": [
+            {"label": "B", "rationale": "HashSet does not preserve insertion order."},
+            {"label": "C", "rationale": "TreeSet orders entries by their natural ordering."},
+            {"label": "D", "rationale": "PriorityQueue orders entries by priority, not insertion."},
+        ],
     }
 
 

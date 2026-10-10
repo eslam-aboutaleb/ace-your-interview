@@ -36,9 +36,21 @@ class FakeLLM:
             }
 
         self.calls += 1
-        payload = [
-            {
-                "question": f"Quiz question {self.calls}: Which structure preserves insertion order?",
+        payload = [self._item(self.calls)]
+        return {
+            "success": True,
+            "analysis": json.dumps(payload),
+            "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
+            "error": "",
+            "error_code": "",
+        }
+
+    def _item(self, call: int) -> dict:
+        # Distinct stems per call: near-duplicate questions are
+        # dropped by the generator's dedup pass.
+        if call % 2 == 0:
+            return {
+                "question": "Which structure preserves insertion order while offering fast lookup?",
                 "type": "mcq",
                 "choices": [
                     {"label": "A", "text": "LinkedHashMap"},
@@ -50,17 +62,40 @@ class FakeLLM:
                 "explanation": "LinkedHashMap preserves insertion order with hash-based lookup.",
                 "difficulty": "medium",
                 "topic_id": "custom-java",
-                "source_quote": "Collections can preserve insertion order.",
+                "source_quote": "Understand memory model, GC, and runtime behavior.",
                 "reasoning_summary": "Insertion order with key lookups points to LinkedHashMap.",
                 "target_level": "mid",
+                "learning_objective": "Explain which collection preserves insertion order.",
+                "expected_answer": "LinkedHashMap",
+                "distractor_rationales": [
+                    {"label": "B", "rationale": "HashSet does not preserve insertion order."},
+                    {"label": "C", "rationale": "TreeSet sorts elements naturally, not by insertion."},
+                    {"label": "D", "rationale": "PriorityQueue orders by priority, not insertion."},
+                ],
             }
-        ]
         return {
-            "success": True,
-            "analysis": json.dumps(payload),
-            "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
-            "error": "",
-            "error_code": "",
+            "question": "Which collection guarantees logarithmic-time lookups via a balanced tree?",
+            "type": "mcq",
+            "choices": [
+                {"label": "A", "text": "TreeMap"},
+                {"label": "B", "text": "HashMap"},
+                {"label": "C", "text": "LinkedHashMap"},
+                {"label": "D", "text": "ArrayList"},
+            ],
+            "correct_answer": "A",
+            "explanation": "TreeMap backs its entries with a red-black tree for logarithmic lookups.",
+            "difficulty": "medium",
+            "topic_id": "custom-java",
+            "source_quote": "Understand memory model, GC, and runtime behavior.",
+            "reasoning_summary": "Balanced-tree backing gives logarithmic lookup cost.",
+            "target_level": "mid",
+            "learning_objective": "Explain which collection provides logarithmic lookups.",
+            "expected_answer": "TreeMap",
+            "distractor_rationales": [
+                {"label": "B", "rationale": "HashMap uses hashing, not a balanced tree."},
+                {"label": "C", "rationale": "LinkedHashMap keeps insertion order, not tree order."},
+                {"label": "D", "rationale": "ArrayList is an indexed array, not a tree."},
+            ],
         }
 
 
@@ -148,7 +183,7 @@ Static topic body.
         self.assertEqual(events[-1]["type"], "done")
         self.assertEqual(events[-1]["generated_count"], 2)
 
-    def test_quiz_stream_fills_missing_items_with_fallback(self):
+    def test_quiz_stream_reports_a_degraded_partial_on_parse_failure(self):
         self.fake_llm.mode = "invalid"
         status, events = self._stream_events(
             {
@@ -160,9 +195,14 @@ Static topic body.
         )
         self.assertEqual(status, 200)
         question_events = [event for event in events if event.get("type") == "question"]
-        self.assertEqual(len(question_events), 3)
+        # Unparseable provider output is never substituted with
+        # generic questions: the stream reports a degraded partial.
+        self.assertEqual(len(question_events), 0)
         self.assertEqual(events[-1]["type"], "done")
-        self.assertEqual(events[-1]["generated_count"], 3)
+        self.assertEqual(events[-1]["generated_count"], 0)
+        self.assertTrue(events[-1]["degraded"])
+        self.assertEqual(events[-1]["requested_count"], 3)
+        self.assertEqual(events[-1]["returned_count"], 0)
 
     def test_quiz_stream_emits_policy_error_event(self):
         self.fake_llm.mode = "blocked"
