@@ -27,8 +27,6 @@ import {
 import {
   fetchTopics,
   fetchTopic,
-  generateQuiz,
-  generateQuizV2,
   generateQuizV2Stream,
   isQuizStreamError,
   recordLearningAttempt,
@@ -83,6 +81,10 @@ export default function QuizMode() {
   const [generating, setGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState("");
   const [generatedPreviewCount, setGeneratedPreviewCount] = useState(0);
+  const [degradedQuiz, setDegradedQuiz] = useState<{
+    requested: number;
+    returned: number;
+  } | null>(null);
   const [loadingTopics, setLoadingTopics] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -221,6 +223,7 @@ export default function QuizMode() {
     setErrorMsg("");
     setGenerationProgress("Preparing quiz generation...");
     setGeneratedPreviewCount(0);
+    setDegradedQuiz(null);
     setQuestions([]);
     try {
       const selectedTopicIds = Array.from(selectedTopics);
@@ -260,22 +263,6 @@ export default function QuizMode() {
         }
         return merged;
       };
-      const mapLegacyQuestions = (
-        list: Awaited<ReturnType<typeof generateQuiz>>["questions"],
-        startAt: number,
-      ): QuizQuestionV2[] =>
-        list.map((q, idx) => ({
-          question_id: `quiz-legacy-${startAt + idx}`,
-          question: q.question,
-          type: q.type,
-          choices: q.choices,
-          correct_answer: q.correct_answer,
-          explanation: q.explanation,
-          difficulty: q.difficulty,
-          topic_id: q.topic_id || selectedTopicIds[0] || "",
-          source_quote: "Legacy mode did not return source quote.",
-          reasoning_summary: "Review the explanation to reinforce reasoning.",
-        }));
       for (const entry of topicDetails) {
         if (!entry) continue;
         const [id, detail] = entry;
@@ -314,45 +301,6 @@ export default function QuizMode() {
         retries: 0,
         malformed: 0,
       };
-      const topUpMissingQuestions = async (
-        seed: QuizQuestionV2[],
-      ): Promise<QuizQuestionV2[]> => {
-        let merged = mergeUniqueQuestions([], seed).slice(0, questionCount);
-        if (merged.length >= questionCount) return merged;
-
-        try {
-          const v2 = await generateQuizV2({
-            ...req,
-            count: questionCount - merged.length,
-          });
-          merged = mergeUniqueQuestions(merged, v2.questions).slice(0, questionCount);
-          latestProviderInfo = {
-            provider: v2.provider_used,
-            model: v2.model_used,
-            retries: v2.retries_used,
-            malformed: v2.malformed_items_dropped,
-          };
-        } catch {
-          // Continue with legacy fallback.
-        }
-        if (merged.length >= questionCount) return merged;
-
-        const legacy = await generateQuiz({
-          ...req,
-          count: questionCount - merged.length,
-        });
-        merged = mergeUniqueQuestions(
-          merged,
-          mapLegacyQuestions(legacy.questions, merged.length),
-        ).slice(0, questionCount);
-        latestProviderInfo = {
-          provider: legacy.provider_used,
-          model: legacy.model_used,
-          retries: 0,
-          malformed: 0,
-        };
-        return merged;
-      };
 
       const streamedQuestions: QuizQuestionV2[] = [];
       try {
@@ -379,7 +327,16 @@ export default function QuizMode() {
               malformed: event.malformed_items_dropped,
             };
             setProviderInfo(latestProviderInfo);
+            if (event.degraded) {
+              setDegradedQuiz({
+                requested: event.requested_count,
+                returned: event.returned_count,
+              });
+            }
             setGenerationProgress("Quiz generation completed.");
+          },
+          onWarning: (event) => {
+            setGenerationProgress(event.message || "Some topics could not be resolved.");
           },
           onError: (event) => {
             setGenerationProgress(event.message || "Quiz generation failed.");
@@ -393,9 +350,6 @@ export default function QuizMode() {
       }
 
       let finalQuestions = [...streamedQuestions];
-      if (finalQuestions.length < questionCount) {
-        finalQuestions = await topUpMissingQuestions(finalQuestions);
-      }
       if (finalQuestions.length === 0) {
         setErrorMsg("No quiz questions generated. Try again.");
         return;
@@ -752,6 +706,30 @@ export default function QuizMode() {
               />
             </div>
           </div>
+
+          {degradedQuiz && (
+            <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4">
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  Only {degradedQuiz.returned} of {degradedQuiz.requested}{" "}
+                  questions could be generated. The quiz continues with the
+                  available questions.
+                  <button
+                    onClick={() => {
+                      setQuizState("setup");
+                      setDegradedQuiz(null);
+                      handleStartQuiz();
+                    }}
+                    disabled={generating}
+                    className="ml-2 font-bold underline disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Retry generation
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 flex items-center justify-center px-4 sm:px-6 py-10">
             <AnimatePresence mode="wait">

@@ -149,6 +149,9 @@ class GenerateQuestionsV2Response(BaseModel):
     model_used: str = ""
     retries_used: int = 0
     malformed_items_dropped: int = 0
+    degraded: bool = False
+    requested_count: int = 0
+    returned_count: int = 0
 
 
 class TopicSummary(BaseModel):
@@ -472,6 +475,9 @@ class GenerateQuizV2Response(BaseModel):
     model_used: str = ""
     retries_used: int = 0
     malformed_items_dropped: int = 0
+    degraded: bool = False
+    requested_count: int = 0
+    returned_count: int = 0
 
 
 class LearningMode(str, Enum):

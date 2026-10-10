@@ -161,6 +161,24 @@ class QuestionGeneratorPriorProgressTests(unittest.TestCase):
                                 "source_quote": "Keep-alive reuses a connection across requests.",
                                 "reasoning_summary": "Identify the validator header.",
                                 "target_level": "mid",
+                                "learning_objective": (
+                                    "Explain which header validates a cached response."
+                                ),
+                                "expected_answer": "ETag",
+                                "distractor_rationales": [
+                                    {
+                                        "label": "B",
+                                        "rationale": "Age reports freshness lifetime, not a validator.",
+                                    },
+                                    {
+                                        "label": "C",
+                                        "rationale": "Vary selects cache variants, not validators.",
+                                    },
+                                    {
+                                        "label": "D",
+                                        "rationale": "Expires gives an absolute expiry, not a validator.",
+                                    },
+                                ],
                             }
                         ]
                     ),
@@ -186,10 +204,12 @@ class QuestionGeneratorPriorProgressTests(unittest.TestCase):
         stored_question = (
             "Which HTTP header lets a client send a validator for a cached response?"
         )
-        # The seeded dedup state rejects the duplicate the LLM keeps returning,
-        # so the stream falls back to a different question instead of repeating it.
-        self.assertEqual(len(emitted), 1)
+        # The seeded dedup state rejects the duplicate the LLM keeps
+        # returning, and no generic substitution fills the gap: the
+        # stream reports a degraded partial instead of repeating it.
+        self.assertEqual(emitted, [])
         self.assertNotIn(stored_question, emitted)
+        self.assertTrue(events[-1]["degraded"])
         self.assertIn("Already asked for these topics", prompts[0])
         self.assertIn(stored_question, prompts[0])
 
