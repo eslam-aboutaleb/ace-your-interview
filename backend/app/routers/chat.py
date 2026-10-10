@@ -31,7 +31,7 @@ _parser: DocParser | None = None
 _learning_store: LearningStore | None = None
 _mcp_gateway: MCPGateway | None = None
 
-# ── Prompt bounds (Stage 2.2) ────────────────────────────────
+# ── Prompt bounds ────────────────────────────────────────────────
 # Every externally sourced string is bounded before it is fenced, so a single
 # request cannot inflate the prompt beyond the caps below. The Pydantic
 # `max_length` values requested for `user_message` / `ChatMessage.content`
@@ -50,7 +50,7 @@ MAX_MCP_CONTEXT_CHARS = 2500
 #: payload cannot cost unbounded string work before truncation.
 HARD_INPUT_GUARD_CHARS = 200_000
 
-#: Per-flow output ceiling (Stage 2.3). Chat is a free-form markdown flow, so
+#: Per-flow output ceiling. Chat is a free-form markdown flow, so
 #: the cap is a ceiling on the answer, not on a JSON document.
 CHAT_MAX_TOKENS_CAP = 1200
 
@@ -305,7 +305,7 @@ Provide a clear, educational explanation grounded in the context above.
                 f"User asked: {body.user_message[:240]}\n"
                 f"Assistant: {reply[:380]}"
             ).strip()
-            # One shared bound for every stored memory digest (Stage 2.2/3.2).
+            # One shared bound for every stored memory digest.
             memory_cap = max(
                 MAX_MEMORY_PROMPT_CHARS,
                 int(getattr(get_settings(), "memory_summary_max_chars", 1200) or 1200),

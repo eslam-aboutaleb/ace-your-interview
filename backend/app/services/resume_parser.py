@@ -281,7 +281,7 @@ class ResumeParser:
 
     Uses the shared :class:`LLMClient` with a strict JSON output
     contract. A deterministic token-overlap fallback is *not* used for
-    the profile itself: per the plan, LLM extraction failure surfaces
+    the profile itself: LLM extraction failure surfaces
     as a 422 so the user can paste their resume manually instead.
     """
 

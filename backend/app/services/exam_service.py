@@ -1,7 +1,5 @@
 """Timed exam service: question selection, grading, remark re-grade.
 
-Plan: ``1790987112911-analytics-gamification-exam-mode.md``
-
 - Question selection: weak areas (via
   :meth:`LearningStore.get_weak_areas`) plus due cards
   (via the FSRS store) plus explicit deck/topic sources.
@@ -38,7 +36,7 @@ from app.services.llm_client import parse_json_object
 
 logger = logging.getLogger(__name__)
 
-#: Hard ceiling on exam size (plan failure mode: LLM grading cost).
+#: Hard ceiling on exam size (LLM grading cost).
 MAX_QUESTIONS = 50
 #: Score (0-1) required to pass an exam.
 PASS_THRESHOLD = 0.7

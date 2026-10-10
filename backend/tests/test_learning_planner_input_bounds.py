@@ -1,4 +1,4 @@
-"""Stage 2.2: bounds on the learner-supplied strings in the planner layer."""
+"""Bounds on the learner-supplied strings in the planner layer."""
 
 import os
 import tempfile

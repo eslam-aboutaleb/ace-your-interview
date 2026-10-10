@@ -98,7 +98,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("STUDY_REDIS_URL", "REDIS_URL"),
     )
 
-    # Interview memory (Stage 3.2)
+    # Interview memory
     memory_summary_max_chars: int = 3000
     memory_verbatim_turns: int = 4
     memory_answer_excerpt_chars: int = 320

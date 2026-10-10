@@ -1,6 +1,6 @@
 """Gamification service: XP awarding, streaks, daily goals, badges.
 
-XP sources (plan: ``1790987112911-analytics-gamification-exam-mode.md``):
+XP sources:
 
 - ``learning_attempts`` — quiz attempts and interview turns, hooked
   into :meth:`LearningStore.record_attempt` via the attempt listener.
@@ -44,7 +44,7 @@ XP_EXAM_PASS_BONUS = 50
 #: XP required per level (level = total_xp // LEVEL_XP + 1).
 LEVEL_XP = 500
 
-#: Badge rule keys (plan: first review, 7-day streak, 100 cards,
+#: Badge rule keys (first review, 7-day streak, 100 cards,
 #: first exam, exam passed).
 BADGE_FIRST_REVIEW = "first_review"
 BADGE_STREAK_7 = "streak_7"

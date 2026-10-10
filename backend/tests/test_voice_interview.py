@@ -1,6 +1,6 @@
 """Voice interview E2E — scripted STT/TTS, no external services.
 
-Validation target (from the plan): a voice interview session
+Validation target: a voice interview session
 is created, the first question is TTS'd, a spoken answer is
 transcribed, evaluated, and the rubric is returned. The
 per-connection turn budget applies.

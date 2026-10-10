@@ -35,7 +35,7 @@ def optional_context_block(label: str, value: str, max_chars: int) -> str:
     return f"\n\n{label}:\n{text[:max_chars]}"
 
 
-# ── Untrusted-input fencing (Stage 2.2) ────────────────────
+# ── Untrusted-input fencing ────────────────────────────────
 
 OPEN_TAG = "<untrusted_input"
 CLOSE_TAG = "</untrusted_input>"

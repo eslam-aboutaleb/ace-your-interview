@@ -1,6 +1,6 @@
 name: eval-live
 
-# Stage 4.1 tier 2: the live eval.
+# Tier 2: the live eval.
 #
 # Regenerates the checked-in fixture outputs against real providers and reports
 # a reviewable diff against the golden store. Deliberately NOT on push:

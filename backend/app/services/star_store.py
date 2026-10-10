@@ -3,7 +3,7 @@
 Stories are stored per user and retrieved by token-overlap
 (Jaccard) similarity against a query (the question or the
 session's focus areas). Embedding-based retrieval will replace
-the Jaccard ranking when the RAG plan's vector store lands.
+the Jaccard ranking when the vector store lands.
 """
 
 from __future__ import annotations

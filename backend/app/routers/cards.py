@@ -107,7 +107,7 @@ _embedding_client: EmbeddingClient | None = None
 _generation_jobs: dict[str, dict[str, Any]] = {}
 _JOB_TTL_SECONDS = 3600.0
 
-#: Extracted Anki media root (plan decision).
+#: Extracted Anki media root.
 ANKI_MEDIA_ROOT = os.path.join("data", "anki_media")
 
 

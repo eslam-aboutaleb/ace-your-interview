@@ -1,4 +1,4 @@
-"""Tool registry and the bounded model tool loop (Stage 4.2).
+"""Tool registry and the bounded model tool loop.
 
 Public surface:
 

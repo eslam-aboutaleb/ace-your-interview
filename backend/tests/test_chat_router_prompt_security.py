@@ -1,4 +1,4 @@
-"""Stage 2.1/2.2/2.3 + 3.1 contract for the chat follow-up flow."""
+"""Prompt bounds, output caps, and per-user budget contract for the chat follow-up flow."""
 
 import inspect
 import re

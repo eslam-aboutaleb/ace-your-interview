@@ -1,6 +1,6 @@
-"""Plan H tests — response-time, barge-in interrupt, JD→plan.
+"""Voice enhancement tests — response-time, barge-in interrupt, JD→plan.
 
-Covers the plan's validation list:
+Covers:
 - response-time round-trip through ``record_turn``
 - ``interrupt`` cancels an in-flight turn (service + WebSocket level)
 - an interrupted turn that never reached the LLM does not consume

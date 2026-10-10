@@ -1,4 +1,4 @@
-"""Stage 3.1: LLM budget exhaustion must not surface as a generic failure."""
+"""LLM budget exhaustion must not surface as a generic failure."""
 
 import json
 import os
