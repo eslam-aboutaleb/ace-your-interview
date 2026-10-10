@@ -618,6 +618,7 @@ class LearnerProfile(BaseModel):
     target_companies: list[str] = Field(default_factory=list)
     preferred_modalities: list[str] = Field(default_factory=lambda: ["study", "quiz", "interview"])
     confidence_by_track: dict[str, int] = Field(default_factory=dict)
+    timezone: str = Field(default="UTC", max_length=64)
     created_at: str = ""
     updated_at: str = ""
     diagnostic_updated_at: str = ""
@@ -635,6 +636,7 @@ class LearnerProfileUpdateRequest(BaseModel):
     target_companies: Optional[list[str]] = Field(default=None, max_length=12)
     preferred_modalities: Optional[list[str]] = Field(default=None, max_length=4)
     confidence_by_track: Optional[dict[str, int]] = None
+    timezone: Optional[str] = Field(default=None, max_length=64)
 
 
 class CompetencyScore(BaseModel):
@@ -1387,3 +1389,188 @@ class InterviewSessionResponseExtended(InterviewSessionResponse):
     """InterviewSessionResponse whose turns carry the extended rubric."""
 
     turns: list[InterviewTurnExtended] = Field(default_factory=list)
+
+
+# ── Exams (STUDY_ENABLE_EXAMS_V1) ──────────────
+
+
+class ExamSourceRequest(BaseModel):
+    """Question sources for exam creation."""
+
+    topic_ids: list[str] = Field(default_factory=list, max_length=20)
+    deck_ids: list[str] = Field(default_factory=list, max_length=20)
+    weak_areas: bool = False
+
+
+class ExamCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    source: ExamSourceRequest = Field(default_factory=ExamSourceRequest)
+    question_count: int = Field(default=10, ge=1, le=50)
+    duration_minutes: int = Field(default=30, ge=1, le=240)
+    question_types: list[str] = Field(
+        default_factory=lambda: ["mcq"], max_length=2
+    )
+
+
+class ExamQuestion(BaseModel):
+    """A pre-selected exam question (persisted with the session)."""
+
+    question_ref: str
+    type: str  # "mcq" | "written"
+    question_text: str
+    topic_id: str = ""
+    options: list[str] = Field(default_factory=list)
+    correct_answer: Optional[str] = None
+    expected_answer: str = ""
+    source: str = ""
+
+
+class ExamCreateResponse(BaseModel):
+    exam_id: str
+    title: str
+    status: str
+    question_count: int
+    duration_minutes: int
+    questions: list[ExamQuestion] = Field(default_factory=list)
+    created_at: str = ""
+
+
+class ExamStartResponse(BaseModel):
+    exam_id: str
+    started_at: str
+    duration_minutes: int
+    questions: list[ExamQuestion] = Field(default_factory=list)
+
+
+class ExamAnswerRequest(BaseModel):
+    question_ref: str = Field(..., min_length=1, max_length=200)
+    answer_text: str = ""
+    time_ms: int = Field(default=0, ge=0)
+
+
+class ExamSubmitRequest(BaseModel):
+    answers: list[ExamAnswerRequest] = Field(default_factory=list)
+
+
+class ExamQuestionResult(BaseModel):
+    question_ref: str
+    type: str = ""
+    is_correct: Optional[bool] = None
+    score: float = Field(default=0.0, ge=0.0, le=1.0)
+    graded_by: str = ""
+    rubric: Optional[dict[str, Any]] = None
+    feedback: str = ""
+
+
+class ExamSubmitResponse(BaseModel):
+    exam_id: str
+    score: float = Field(default=0.0, ge=0.0, le=1.0)
+    passed: bool = False
+    time_exceeded: bool = False
+    per_question: list[ExamQuestionResult] = Field(default_factory=list)
+    completed_at: str = ""
+
+
+class ExamRemarkResponse(BaseModel):
+    exam_id: str
+    original_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    new_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    diff: float = Field(default=0.0, ge=-1.0, le=1.0)
+    changed: list[ExamQuestionResult] = Field(default_factory=list)
+
+
+class ExamSummaryItem(BaseModel):
+    exam_id: str
+    title: str
+    status: str
+    question_count: int = 0
+    duration_minutes: int = 0
+    score: Optional[float] = None
+    passed: Optional[bool] = None
+    time_exceeded: bool = False
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    created_at: str = ""
+
+
+class ExamListResponse(BaseModel):
+    exams: list[ExamSummaryItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class ExamDetailResponse(BaseModel):
+    exam_id: str
+    title: str
+    status: str
+    question_count: int = 0
+    duration_minutes: int = 0
+    score: Optional[float] = None
+    passed: Optional[bool] = None
+    time_exceeded: bool = False
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    created_at: str = ""
+    questions: list[ExamQuestion] = Field(default_factory=list)
+    results: list[ExamQuestionResult] = Field(default_factory=list)
+
+
+# ── Gamification (STUDY_ENABLE_GAMIFICATION_V1) ──
+
+
+class GamificationSummaryResponse(BaseModel):
+    total_xp: int = 0
+    level: int = 1
+    xp_progress: float = Field(default=0.0, ge=0.0, le=1.0)
+    current_streak: int = 0
+    longest_streak: int = 0
+    daily_goal: int = 3
+    today_progress: int = 0
+    badges: list[str] = Field(default_factory=list)
+
+
+class GamificationGoalUpdateRequest(BaseModel):
+    daily_goal: int = Field(default=3, ge=1, le=50)
+
+
+class GamificationGoalResponse(BaseModel):
+    daily_goal: int
+
+
+# ── Analytics (read-only, unflagged) ─────────────
+
+
+class HeatmapDay(BaseModel):
+    date: str
+    count: int = 0
+    types: dict[str, int] = Field(default_factory=dict)
+
+
+class HeatmapResponse(BaseModel):
+    days: list[HeatmapDay] = Field(default_factory=list)
+    weeks: int = 52
+
+
+class RetentionBucket(BaseModel):
+    bucket: str
+    reviews: int = 0
+    successful: int = 0
+    recall_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class RetentionResponse(BaseModel):
+    buckets: list[RetentionBucket] = Field(default_factory=list)
+
+
+class MasteryPoint(BaseModel):
+    date: str
+    mastery: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class MasteryTopicCurve(BaseModel):
+    topic_id: str
+    points: list[MasteryPoint] = Field(default_factory=list)
+
+
+class MasteryCurveResponse(BaseModel):
+    points: list[MasteryPoint] = Field(default_factory=list)
+    topics: list[MasteryTopicCurve] = Field(default_factory=list)

@@ -1609,3 +1609,179 @@ export interface VoiceInterviewStartMessage {
   type: "interview_start";
   config: CreateInterviewSessionRequestExtended;
 }
+
+// ── Exams (STUDY_ENABLE_EXAMS_V1) ──────────
+
+export interface ExamSourceRequest {
+  topic_ids: string[];
+  deck_ids: string[];
+  weak_areas: boolean;
+}
+
+export interface ExamCreateRequest {
+  title: string;
+  source?: ExamSourceRequest;
+  question_count: number;
+  duration_minutes: number;
+  question_types: string[];
+}
+
+export interface ExamQuestion {
+  question_ref: string;
+  type: "mcq" | "written";
+  question_text: string;
+  topic_id: string;
+  options: string[];
+  correct_answer: string | null;
+  expected_answer: string;
+  source: string;
+}
+
+export interface ExamCreateResponse {
+  exam_id: string;
+  title: string;
+  status: string;
+  question_count: number;
+  duration_minutes: number;
+  questions: ExamQuestion[];
+  created_at: string;
+}
+
+export interface ExamStartResponse {
+  exam_id: string;
+  started_at: string;
+  duration_minutes: number;
+  questions: ExamQuestion[];
+}
+
+export interface ExamAnswerRequest {
+  question_ref: string;
+  answer_text: string;
+  time_ms: number;
+}
+
+export interface ExamSubmitRequest {
+  answers: ExamAnswerRequest[];
+}
+
+export interface ExamQuestionResult {
+  question_ref: string;
+  type: string;
+  is_correct: boolean | null;
+  score: number;
+  graded_by: string;
+  rubric: Record<string, unknown> | null;
+  feedback: string;
+}
+
+export interface ExamSubmitResponse {
+  exam_id: string;
+  score: number;
+  passed: boolean;
+  time_exceeded: boolean;
+  per_question: ExamQuestionResult[];
+  completed_at: string;
+}
+
+export interface ExamRemarkResponse {
+  exam_id: string;
+  original_score: number;
+  new_score: number;
+  diff: number;
+  changed: ExamQuestionResult[];
+}
+
+export interface ExamSummaryItem {
+  exam_id: string;
+  title: string;
+  status: string;
+  question_count: number;
+  duration_minutes: number;
+  score: number | null;
+  passed: boolean | null;
+  time_exceeded: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface ExamListResponse {
+  exams: ExamSummaryItem[];
+  total: number;
+}
+
+export interface ExamDetailResponse {
+  exam_id: string;
+  title: string;
+  status: string;
+  question_count: number;
+  duration_minutes: number;
+  score: number | null;
+  passed: boolean | null;
+  time_exceeded: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  questions: ExamQuestion[];
+  results: ExamQuestionResult[];
+}
+
+// ── Gamification (STUDY_ENABLE_GAMIFICATION_V1) ──
+
+export interface GamificationSummaryResponse {
+  total_xp: number;
+  level: number;
+  xp_progress: number;
+  current_streak: number;
+  longest_streak: number;
+  daily_goal: number;
+  today_progress: number;
+  badges: string[];
+}
+
+export interface GamificationGoalUpdateRequest {
+  daily_goal: number;
+}
+
+export interface GamificationGoalResponse {
+  daily_goal: number;
+}
+
+// ── Analytics (read-only) ──────────────────
+
+export interface HeatmapDay {
+  date: string;
+  count: number;
+  types: Record<string, number>;
+}
+
+export interface HeatmapResponse {
+  days: HeatmapDay[];
+  weeks: number;
+}
+
+export interface RetentionBucket {
+  bucket: string;
+  reviews: number;
+  successful: number;
+  recall_rate: number;
+}
+
+export interface RetentionResponse {
+  buckets: RetentionBucket[];
+}
+
+export interface MasteryPoint {
+  date: string;
+  mastery: number;
+}
+
+export interface MasteryTopicCurve {
+  topic_id: string;
+  points: MasteryPoint[];
+}
+
+export interface MasteryCurveResponse {
+  points: MasteryPoint[];
+  topics: MasteryTopicCurve[];
+}

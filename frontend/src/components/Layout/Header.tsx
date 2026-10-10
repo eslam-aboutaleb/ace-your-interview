@@ -17,6 +17,8 @@ import {
   Menu,
   X,
   Star,
+  Trophy,
+  TrendingUp,
 } from "lucide-react";
 import { useProgressStore } from "@/store/progressStore";
 import { useAuthStore } from "@/store/authStore";
@@ -124,6 +126,18 @@ export default function Header() {
             label: "STAR Stories",
             icon: <Star className="w-4 h-4" />,
             active: location.pathname.startsWith("/star-stories"),
+          },
+          {
+            to: "/analytics",
+            label: "Analytics",
+            icon: <TrendingUp className="w-4 h-4" />,
+            active: location.pathname.startsWith("/analytics"),
+          },
+          {
+            to: "/exams",
+            label: "Exams",
+            icon: <Trophy className="w-4 h-4" />,
+            active: location.pathname.startsWith("/exams"),
           },
           {
             to: "/user-settings",
