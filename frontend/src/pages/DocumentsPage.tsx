@@ -70,8 +70,13 @@ export default function DocumentsPage() {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(
     new Set(),
   );
+  const [retryAction, setRetryAction] = useState<(() => void) | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<number | null>(null);
+  const lastUploadFileRef = useRef<File | null>(null);
+  const lastDeleteIdRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -79,6 +84,7 @@ export default function DocumentsPage() {
       setDocuments(res.documents || []);
       setErrorMsg("");
       setDisabledNotice("");
+      setRetryAction(null);
       return res.documents || [];
     } catch (err: any) {
       if (err?.response?.status === 503) {
@@ -87,8 +93,12 @@ export default function DocumentsPage() {
             "(STUDY_ENABLE_RAG_V1=false).",
         );
         setErrorMsg("");
+        setRetryAction(null);
       } else {
         setErrorMsg("Could not load documents. Please retry.");
+        setRetryAction(() => {
+          void load();
+        });
       }
       return [];
     }
@@ -134,12 +144,15 @@ export default function DocumentsPage() {
       setErrorMsg(
         "Unsupported file type. Allowed: PDF, TXT, MD, DOCX.",
       );
+      setRetryAction(null);
       return;
     }
     if (file.size > MAX_FILE_SIZE) {
       setErrorMsg("File exceeds the 25 MB limit.");
+      setRetryAction(null);
       return;
     }
+    lastUploadFileRef.current = file;
     setUploading(true);
     setErrorMsg("");
     setUploadProgress(0);
@@ -154,26 +167,34 @@ export default function DocumentsPage() {
           "Document RAG is not enabled on this server " +
             "(STUDY_ENABLE_RAG_V1=false).",
         );
+        setRetryAction(null);
       } else if (status === 415) {
         setErrorMsg(
           typeof detail === "string"
             ? detail
             : "Unsupported file type. Allowed: PDF, TXT, MD, DOCX.",
         );
+        setRetryAction(null);
       } else if (status === 413) {
         setErrorMsg("File exceeds the 25 MB limit.");
+        setRetryAction(null);
       } else if (status === 429) {
         setErrorMsg(
           typeof detail === "string"
             ? detail
             : "Daily document limit reached.",
         );
+        setRetryAction(null);
       } else {
         setErrorMsg(
           typeof detail === "string"
             ? detail
             : "Upload failed. Please retry.",
         );
+        setRetryAction(() => {
+          const last = lastUploadFileRef.current;
+          if (last) void handleFiles([last] as unknown as FileList);
+        });
       }
     } finally {
       setUploading(false);
@@ -187,15 +208,21 @@ export default function DocumentsPage() {
   const handleDelete = async (documentId: string) => {
     if (deletingIds.has(documentId)) return;
     setDeletingIds((prev) => new Set(prev).add(documentId));
+    lastDeleteIdRef.current = documentId;
     try {
       await deleteDocument(documentId);
       setDocuments((prev) =>
         prev.filter((doc) => doc.document_id !== documentId),
       );
+      setRetryAction(null);
     } catch (err: any) {
       setErrorMsg(
         err?.response?.data?.detail || "Delete failed. Please retry.",
       );
+      setRetryAction(() => {
+        const last = lastDeleteIdRef.current;
+        if (last) void handleDelete(last);
+      });
     } finally {
       setDeletingIds((prev) => {
         const next = new Set(prev);
@@ -244,7 +271,20 @@ export default function DocumentsPage() {
         {errorMsg && (
           <div className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <span>{errorMsg}</span>
+            <span className="flex-1">{errorMsg}</span>
+            {retryAction && (
+              <button
+                onClick={() => {
+                  const action = retryAction;
+                  setRetryAction(null);
+                  setErrorMsg("");
+                  action();
+                }}
+                className="font-bold underline hover:text-red-900 flex-shrink-0"
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
 

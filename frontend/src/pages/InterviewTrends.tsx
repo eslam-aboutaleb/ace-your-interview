@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { AlertTriangle, LineChart, Loader2, RefreshCw } from "lucide-react";
 import { pageTransition, pageVariants } from "@/utils/animations";
 import { fetchInterviewTrends } from "@/services/api";
+import { useApi } from "@/hooks/useApi";
 import type { InterviewTrendPoint, InterviewTrendsResponse } from "@/types";
 
 type RubricKey =
@@ -22,9 +23,6 @@ const DIMENSIONS: Array<{ key: RubricKey; label: string; color: string }> = [
 ];
 
 export default function InterviewTrendsPage() {
-  const [data, setData] = useState<InterviewTrendsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
   const [enabledDims, setEnabledDims] = useState<Record<RubricKey, boolean>>({
     technical_accuracy: true,
     reasoning_depth: true,
@@ -33,23 +31,13 @@ export default function InterviewTrendsPage() {
     confidence_signal: false,
   });
 
-  const load = async () => {
-    setLoading(true);
-    setErrorMsg("");
-    try {
-      const trends = await fetchInterviewTrends(50);
-      setData(trends);
-    } catch (err) {
-      console.error(err);
-      setErrorMsg("Could not load interview trends.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
+  const { data, error, loading, retry } = useApi<InterviewTrendsResponse>(
+    async () => fetchInterviewTrends(50),
+    {
+      errorMessage: "Could not load interview trends.",
+      fixedErrorMessage: true,
+    },
+  );
 
   const points = useMemo<InterviewTrendPoint[]>(
     () => data?.points || [],
@@ -81,7 +69,7 @@ export default function InterviewTrendsPage() {
             </p>
           </div>
           <button
-            onClick={load}
+            onClick={() => void retry()}
             disabled={loading}
             className="btn-secondary inline-flex items-center justify-center gap-2 disabled:opacity-50"
           >
@@ -106,10 +94,10 @@ export default function InterviewTrendsPage() {
           </div>
         )}
 
-        {errorMsg && (
-          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+        {error && (
+          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2" role="alert">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <span>{errorMsg}</span>
+            <span>{error}</span>
           </div>
         )}
       </div>

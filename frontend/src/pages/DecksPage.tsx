@@ -59,6 +59,9 @@ export default function DecksPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [disabledNotice, setDisabledNotice] = useState("");
+  const [retryAction, setRetryAction] = useState<(() => void) | null>(
+    null,
+  );
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(
     null,
   );
@@ -68,6 +71,7 @@ export default function DecksPage() {
   const [newDeckName, setNewDeckName] = useState("");
   const [newDeckDescription, setNewDeckDescription] = useState("");
   const [importing, setImporting] = useState(false);
+  const lastImportFileRef = useRef<File | null>(null);
   const [importProgress, setImportProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -85,8 +89,12 @@ export default function DecksPage() {
             "(STUDY_ENABLE_FLASHCARDS_V1=false).",
         );
         setErrorMsg("");
+        setRetryAction(null);
       } else {
         setErrorMsg("Could not load decks. Please retry.");
+        setRetryAction(() => {
+          void loadDecks();
+        });
       }
       return [];
     }
@@ -113,6 +121,7 @@ export default function DecksPage() {
       setErrorMsg(
         err?.response?.data?.detail || "Could not load cards.",
       );
+      setRetryAction(null);
     } finally {
       setCardsLoading(false);
     }
@@ -133,6 +142,7 @@ export default function DecksPage() {
     if (!name || creating) return;
     setCreating(true);
     setErrorMsg("");
+    setRetryAction(null);
     try {
       const deck = await createDeck({
         name,
@@ -147,6 +157,7 @@ export default function DecksPage() {
       setErrorMsg(
         err?.response?.data?.detail || "Could not create deck.",
       );
+      setRetryAction(null);
     } finally {
       setCreating(false);
     }
@@ -163,6 +174,7 @@ export default function DecksPage() {
       setErrorMsg(
         err?.response?.data?.detail || "Could not delete deck.",
       );
+      setRetryAction(null);
     }
   };
 
@@ -171,8 +183,10 @@ export default function DecksPage() {
     const file = files[0];
     if (file.size > MAX_IMPORT_BYTES) {
       setErrorMsg("File exceeds the 50 MB import cap.");
+      setRetryAction(null);
       return;
     }
+    lastImportFileRef.current = file;
     setImporting(true);
     setErrorMsg("");
     setImportProgress(0);
@@ -185,17 +199,23 @@ export default function DecksPage() {
           ? `Imported ${res.imported} card(s). ${res.errors.join("; ")}`
           : "",
       );
+      setRetryAction(null);
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
       if (status === 413) {
         setErrorMsg("File exceeds the 50 MB import cap.");
+        setRetryAction(null);
       } else {
         setErrorMsg(
           typeof detail === "string"
             ? detail
             : "Import failed. Please retry.",
         );
+        setRetryAction(() => {
+          const last = lastImportFileRef.current;
+          if (last) void handleImport([last] as unknown as FileList);
+        });
       }
     } finally {
       setImporting(false);
@@ -266,7 +286,20 @@ export default function DecksPage() {
         {errorMsg && (
           <div className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <span>{errorMsg}</span>
+            <span className="flex-1">{errorMsg}</span>
+            {retryAction && (
+              <button
+                onClick={() => {
+                  const action = retryAction;
+                  setRetryAction(null);
+                  setErrorMsg("");
+                  action();
+                }}
+                className="font-bold underline hover:text-red-900 flex-shrink-0"
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
 
@@ -743,6 +776,8 @@ function StudyPanel({
   const [revealed, setRevealed] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [rateError, setRateError] = useState("");
+  const lastRatingRef = useRef<LearningReviewRating | null>(null);
 
   const loadSession = useCallback(async () => {
     setLoading(true);
@@ -771,6 +806,8 @@ function StudyPanel({
   const handleRate = async (rating: LearningReviewRating) => {
     if (!current || submitting) return;
     setSubmitting(true);
+    setRateError("");
+    lastRatingRef.current = rating;
     try {
       await reviewDeckCard(deckId, {
         card_id: current.card_id,
@@ -790,7 +827,7 @@ function StudyPanel({
         setStartedAt(Date.now());
       }
     } catch (err: any) {
-      setError(
+      setRateError(
         err?.response?.data?.detail || "Review failed. Please retry.",
       );
     } finally {
@@ -873,6 +910,22 @@ function StudyPanel({
               )}
             </button>
           ))}
+        </div>
+      )}
+      {rateError && (
+        <div className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span className="flex-1">{rateError}</span>
+          <button
+            onClick={() => {
+              const rating = lastRatingRef.current;
+              setRateError("");
+              if (rating) void handleRate(rating);
+            }}
+            className="font-bold underline hover:text-red-900 flex-shrink-0"
+          >
+            Retry
+          </button>
         </div>
       )}
     </div>

@@ -311,6 +311,7 @@ export default function VoicePanel({
                     : "bg-gray-700 hover:bg-gray-600"
                 }`}
                 title={voice.isRecording ? "Stop recording" : "Start speaking"}
+                aria-label={voice.isRecording ? "Stop recording" : "Start speaking"}
               >
                 {voice.isRecording ? (
                   <MicOff className="w-5 h-5 text-white" />
@@ -335,6 +336,7 @@ export default function VoicePanel({
                   disabled={!textInput.trim()}
                   className="p-1 text-udemy-purple hover:text-udemy-purple-light disabled:text-gray-600
                     transition-colors"
+                  aria-label="Send message"
                 >
                   <Send className="w-4 h-4" />
                 </button>
@@ -345,6 +347,7 @@ export default function VoicePanel({
                 onClick={handleStop}
                 className="p-2 text-gray-400 hover:text-red-400 transition-colors"
                 title="End voice session"
+                aria-label="End voice session"
               >
                 <X className="w-5 h-5" />
               </button>

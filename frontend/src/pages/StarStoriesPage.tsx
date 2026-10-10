@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   suggestStarStories,
   updateStarStory,
 } from "@/services/api";
+import { useApi } from "@/hooks/useApi";
 import { normalizeEscapedMultilineText } from "@/utils/textNormalization";
 import type { StarStory, StarStoryCreateRequest } from "@/types";
 
@@ -33,9 +34,6 @@ const EMPTY_FORM: StarStoryCreateRequest = {
 };
 
 export default function StarStoriesPage() {
-  const [stories, setStories] = useState<StarStory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
@@ -46,23 +44,20 @@ export default function StarStoriesPage() {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<StarStory[]>([]);
   const [suggesting, setSuggesting] = useState(false);
+  const [mutationError, setMutationError] = useState("");
 
-  const loadStories = useCallback(async () => {
-    setLoading(true);
-    setErrorMsg("");
-    try {
+  const { data, error, loading, setData } = useApi<StarStory[]>(
+    async () => {
       const res = await fetchStarStories();
-      setStories(res.stories);
-    } catch {
-      setErrorMsg("Could not load STAR stories.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return res.stories;
+    },
+    {
+      errorMessage: "Could not load STAR stories.",
+      fixedErrorMessage: true,
+    },
+  );
 
-  useEffect(() => {
-    loadStories();
-  }, [loadStories]);
+  const stories = data ?? [];
 
   const handleSuggest = async () => {
     const q = query.trim();
@@ -100,20 +95,20 @@ export default function StarStoriesPage() {
   const handleSave = async () => {
     if (!form.title.trim() || !form.action.trim()) return;
     setSaving(true);
-    setErrorMsg("");
+    setMutationError("");
     try {
       if (editingId) {
         const updated = await updateStarStory(editingId, form);
-        setStories((prev) =>
-          prev.map((s) => (s.story_id === editingId ? updated : s)),
+        setData((prev) =>
+          (prev ?? []).map((s) => (s.story_id === editingId ? updated : s)),
         );
       } else {
         const created = await createStarStory(form);
-        setStories((prev) => [created, ...prev]);
+        setData((prev) => [created, ...(prev ?? [])]);
       }
       resetForm();
     } catch {
-      setErrorMsg("Could not save the story.");
+      setMutationError("Could not save the story.");
     } finally {
       setSaving(false);
     }
@@ -123,10 +118,10 @@ export default function StarStoriesPage() {
     if (!window.confirm("Delete this STAR story?")) return;
     try {
       await deleteStarStory(storyId);
-      setStories((prev) => prev.filter((s) => s.story_id !== storyId));
+      setData((prev) => (prev ?? []).filter((s) => s.story_id !== storyId));
       if (expandedId === storyId) setExpandedId(null);
     } catch {
-      setErrorMsg("Could not delete the story.");
+      setMutationError("Could not delete the story.");
     }
   };
 
@@ -159,10 +154,10 @@ export default function StarStoriesPage() {
       </div>
 
       <div className="max-w-[1340px] mx-auto px-4 sm:px-6 py-8 space-y-6">
-        {errorMsg && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+        {(error || mutationError) && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2" role="alert">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <span>{errorMsg}</span>
+            <span>{error || mutationError}</span>
           </div>
         )}
 
