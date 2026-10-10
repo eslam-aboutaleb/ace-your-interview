@@ -70,10 +70,13 @@ class RunAsyncTests(unittest.TestCase):
 
         with _Store() as store:
             async def _exercise():
-                # get_review_queue's parameters are keyword-only, so the
-                # positional path is exercised through a small wrapper.
+                # get_fsrs_review_queue's parameters are
+                # keyword-only, so the positional path is
+                # exercised through a small wrapper.
                 queued = await store.run_async(
-                    lambda user_id: store.get_review_queue(user_id=user_id, limit=5),
+                    lambda user_id: store.get_fsrs_review_queue(
+                        user_id=user_id, limit=5
+                    ),
                     "alice",
                 )
                 return queued
@@ -87,54 +90,69 @@ class RunAsyncTests(unittest.TestCase):
 
         with _Store() as store:
             queued = asyncio.run(
-                store.run_async(store.get_review_queue, user_id="alice", limit=5)
+                store.run_async(
+                    store.get_fsrs_review_queue, user_id="alice", limit=5
+                )
             )
             self.assertEqual(queued["items"], [])
 
 
 class RepeatAttemptTests(unittest.TestCase):
-    def test_second_attempt_updates_mastery_instead_of_inserting_a_row(self):
+    def test_second_attempt_upserts_the_same_card(self):
         with _Store() as store:
-            first = _attempt(store, is_correct=False, confidence=5)
-            second = _attempt(store, is_correct=True, confidence=4)
+            _attempt(store, is_correct=False, confidence=5)
+            _attempt(store, is_correct=True, confidence=4)
 
-            self.assertEqual(store._conn.execute("SELECT COUNT(*) FROM learning_attempts").fetchone()[0], 2)
-            progress = store._conn.execute(
-                "SELECT mastery_score, attempts, correct_attempts, avg_confidence, review_bucket, due_at"
-                " FROM question_progress WHERE question_id = 'q1'"
-            ).fetchone()
-            self.assertEqual(progress["attempts"], 2)
-            self.assertEqual(progress["correct_attempts"], 1)
-            # A confidence-5 miss is the strongest negative signal, so the
-            # corrective answer must raise mastery above the first attempt.
-            self.assertGreater(progress["mastery_score"], first["mastery_score"])
-            self.assertAlmostEqual(
-                progress["mastery_score"], second["mastery_score"], places=9
+            self.assertEqual(
+                store._conn.execute(
+                    "SELECT COUNT(*) FROM learning_attempts"
+                ).fetchone()[0],
+                2,
             )
-            # The running average is (5 + 4) / 2.
-            self.assertAlmostEqual(progress["avg_confidence"], 4.5, places=6)
-            self.assertEqual(progress["review_bucket"], second["review_bucket"])
-            self.assertEqual(progress["due_at"], second["due_at"])
+            # Both attempts land on the same fsrs_cards row
+            # (keyed on user_id + card_id), not two rows.
+            card = store._conn.execute(
+                "SELECT reps, lapses FROM fsrs_cards "
+                "WHERE user_id = ? AND card_id = ?",
+                ("alice", "q1"),
+            ).fetchone()
+            self.assertIsNotNone(card)
+            # A confidence-5 miss (again) then a
+            # confidence-4 hit (easy): 2 reps, 1 lapse.
+            self.assertEqual(card["reps"], 2)
+            self.assertEqual(card["lapses"], 1)
 
-    def test_a_wrong_repeat_answer_lowers_mastery_and_demotes_the_bucket(self):
+    def test_a_wrong_repeat_answer_adds_a_lapse_and_demotes_the_card(self):
         with _Store() as store:
             first = _attempt(store, is_correct=True, confidence=5)
             second = _attempt(store, is_correct=False, confidence=1)
-            progress = store._conn.execute(
-                "SELECT mastery_score, review_bucket FROM question_progress WHERE question_id = 'q1'"
+            card = store._conn.execute(
+                "SELECT state, lapses FROM fsrs_cards "
+                "WHERE user_id = ? AND card_id = ?",
+                ("alice", "q1"),
             ).fetchone()
-            self.assertLess(progress["mastery_score"], first["mastery_score"])
-            self.assertLess(progress["review_bucket"], second["review_bucket"] + 1)
+            # The wrong repeat answer is a lapse and demotes
+            # the card out of the review state, due sooner
+            # than the confident correct answer before it.
+            self.assertEqual(card["lapses"], 1)
+            self.assertNotEqual(card["state"], "review")
+            self.assertLess(second["due_at"], first["due_at"])
 
-    def test_mastery_stays_inside_the_unit_interval_over_many_attempts(self):
+    def test_retention_stays_inside_the_unit_interval_over_many_attempts(self):
         with _Store() as store:
             for index in range(30):
-                _attempt(store, is_correct=index % 2 == 0, confidence=5, question_id=f"q{index}")
-            row = store._conn.execute(
-                "SELECT MIN(mastery_score), MAX(mastery_score) FROM question_progress"
-            ).fetchone()
-            self.assertGreaterEqual(row[0], 0.0)
-            self.assertLessEqual(row[1], 1.0)
+                _attempt(
+                    store,
+                    is_correct=index % 2 == 0,
+                    confidence=5,
+                    question_id=f"q{index}",
+                )
+            mastery = store.get_fsrs_topic_mastery(
+                user_id="alice", limit=10
+            )
+            for topic in mastery["topics"]:
+                self.assertGreaterEqual(topic["mastery_score"], 0.0)
+                self.assertLessEqual(topic["mastery_score"], 1.0)
 
 
 class TopicMasteryTests(unittest.TestCase):
@@ -144,9 +162,10 @@ class TopicMasteryTests(unittest.TestCase):
             _attempt(store, question_id="q2", topic_id="01-backend", is_correct=False, confidence=1)
             _attempt(store, question_id="q3", topic_id="06-frontend", is_correct=True, confidence=4)
 
-            out = store.get_topic_mastery(user_id="alice", limit=10)
+            out = store.get_fsrs_topic_mastery(user_id="alice", limit=10)
             topics = {t["topic_id"]: t for t in out["topics"]}
             self.assertEqual(sorted(topics), ["01-backend", "06-frontend"])
+            # 01-backend: q1 (easy) + q2 (again) = 2 reps.
             self.assertEqual(topics["01-backend"]["attempts"], 2)
             self.assertEqual(topics["06-frontend"]["attempts"], 1)
             for topic in out["topics"]:
@@ -155,7 +174,10 @@ class TopicMasteryTests(unittest.TestCase):
 
     def test_topic_mastery_is_empty_for_an_unknown_user(self):
         with _Store() as store:
-            self.assertEqual(store.get_topic_mastery(user_id="nobody"), {"topics": []})
+            self.assertEqual(
+                store.get_fsrs_topic_mastery(user_id="nobody"),
+                {"topics": []},
+            )
 
 
 class CustomTopicReaderTests(unittest.TestCase):

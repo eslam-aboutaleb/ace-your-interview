@@ -379,13 +379,21 @@ class BackfillTests(unittest.TestCase):
         third = self.store.backfill_fsrs_from_progress()
         self.assertEqual(first["inserted"], 1)
         self.assertEqual(second["inserted"], 0)
-        self.assertTrue(third["skipped"])
+        self.assertEqual(third["inserted"], 0)
+        # The per-row INSERT OR IGNORE guard — not a global
+        # "fsrs_cards is populated" skip — is what makes the
+        # repeat runs no-ops.
+        self.assertFalse(third["skipped"])
         cards = self.store._conn.execute(
             "SELECT COUNT(*) FROM fsrs_cards"
         ).fetchone()[0]
         self.assertEqual(cards, 1)
 
-    def test_backfill_skips_when_fsrs_cards_populated(self):
+    def test_backfill_migrates_each_user_independently(self):
+        # A card that already exists for one user must not stop
+        # another user's legacy rows from migrating. Mixed-state
+        # databases (some users migrated, others not) rely on the
+        # per-row (user_id, card_id) guard, not a global skip.
         self.store.record_review(
             user_id="alice",
             card_id="q1",
@@ -394,9 +402,23 @@ class BackfillTests(unittest.TestCase):
             response_time_ms=100,
         )
         self._progress_row("alice", "q2", "topic-a", 0.9, 3)
+        self._progress_row("bob", "q3", "topic-b", 0.5, 2)
         result = self.store.backfill_fsrs_from_progress()
-        self.assertTrue(result["skipped"])
-        self.assertEqual(result["inserted"], 0)
+        self.assertFalse(result["skipped"])
+        # alice's q1 already exists and is ignored; her q2 and
+        # bob's q3 still migrate.
+        self.assertEqual(result["inserted"], 2)
+        cards = self.store._conn.execute(
+            "SELECT user_id, card_id FROM fsrs_cards ORDER BY user_id, card_id"
+        ).fetchall()
+        self.assertEqual(
+            [(row["user_id"], row["card_id"]) for row in cards],
+            [("alice", "q1"), ("alice", "q2"), ("bob", "q3")],
+        )
+        # A second run migrates nothing new but never skips.
+        again = self.store.backfill_fsrs_from_progress()
+        self.assertEqual(again["inserted"], 0)
+        self.assertFalse(again["skipped"])
 
     def test_backfilled_cards_are_reviewable(self):
         self._progress_row("alice", "q1", "topic-a", 0.9, 3)
@@ -443,6 +465,168 @@ class TopicMasteryTests(unittest.TestCase):
         for topic in mastery["topics"]:
             self.assertGreaterEqual(topic["mastery_score"], 0.0)
             self.assertLessEqual(topic["mastery_score"], 1.0)
+
+    def test_fsrs_topic_mastery_reports_accuracy_and_due_count(self):
+        # Two easy reviews (successful) and one again review
+        # (a lapse) on topic-a; topic-b has a single good
+        # review. Accuracy rolls up from the review log.
+        for rating in ("easy", "easy", "again"):
+            self.store.record_review(
+                user_id="alice",
+                card_id=f"q-{rating}",
+                topic_id="topic-a",
+                rating=rating,
+                response_time_ms=100,
+            )
+        self.store.record_review(
+            user_id="alice",
+            card_id="q-good",
+            topic_id="topic-b",
+            rating="good",
+            response_time_ms=100,
+        )
+        mastery = self.store.get_fsrs_topic_mastery(user_id="alice")
+        topics = {t["topic_id"]: t for t in mastery["topics"]}
+        # topic-a: 2 of 3 reviews were good/easy.
+        self.assertEqual(topics["topic-a"]["accuracy"], round(2 / 3, 4))
+        self.assertEqual(topics["topic-b"]["accuracy"], 1.0)
+        # Nothing is due yet (fresh reviews schedule forward).
+        self.assertEqual(topics["topic-a"]["due_count"], 0)
+        self.assertEqual(topics["topic-b"]["due_count"], 0)
+
+
+class AttemptDualWriteTests(unittest.TestCase):
+    """Quiz attempts and interview turns dual-write into fsrs_cards."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.store = LearningStore(
+            os.path.join(self._td.name, "learning.db")
+        )
+
+    def test_attempt_creates_fsrs_card_and_log(self):
+        self.store.record_attempt(
+            user_id="alice",
+            question_id="q1",
+            topic_id="topic-a",
+            user_answer="wrong",
+            is_correct=False,
+            confidence=2,
+            response_time_ms=900,
+            mode="quiz",
+        )
+        card = self.store._conn.execute(
+            "SELECT card_id, topic_id, source_type, state, lapses "
+            "FROM fsrs_cards WHERE user_id = ? AND card_id = ?",
+            ("alice", "q1"),
+        ).fetchone()
+        self.assertIsNotNone(card)
+        self.assertEqual(card["topic_id"], "topic-a")
+        # study/quiz modes map to the "question" source type.
+        self.assertEqual(card["source_type"], "question")
+        # Incorrect → again → learning state + a lapse.
+        self.assertEqual(card["state"], "learning")
+        self.assertEqual(card["lapses"], 1)
+        log = self.store._conn.execute(
+            "SELECT rating, review_duration_ms FROM fsrs_review_log "
+            "WHERE user_id = ? AND card_id = ?",
+            ("alice", "q1"),
+        ).fetchone()
+        self.assertEqual(log["rating"], "again")
+        self.assertEqual(log["review_duration_ms"], 900)
+
+    def test_attempt_upserts_existing_card(self):
+        self.store.record_review(
+            user_id="alice",
+            card_id="q1",
+            topic_id="topic-a",
+            rating="good",
+            response_time_ms=100,
+        )
+        self.store.record_attempt(
+            user_id="alice",
+            question_id="q1",
+            topic_id="topic-a",
+            user_answer="wrong",
+            is_correct=False,
+            confidence=2,
+            response_time_ms=900,
+            mode="quiz",
+        )
+        card = self.store._conn.execute(
+            "SELECT reps, lapses FROM fsrs_cards WHERE user_id = ? AND card_id = ?",
+            ("alice", "q1"),
+        ).fetchone()
+        # One manual review + one attempt = 2 reps, 1 lapse.
+        self.assertEqual(card["reps"], 2)
+        self.assertEqual(card["lapses"], 1)
+
+    def test_attempt_derives_fsrs_rating_from_confidence(self):
+        # The (is_correct, confidence) pair is mapped onto
+        # the FSRS ratings; the resulting card state and
+        # lapse counter reflect the derived rating. For a
+        # brand-new card only "easy" graduates to the
+        # review state — "hard"/"good" stay in learning.
+        cases = (
+            (False, 5, "learning", 1),   # incorrect → again
+            (True, 1, "learning", 0),    # correct, low confidence → hard
+            (True, 3, "learning", 0),    # correct, neutral → good
+            (True, 5, "review", 0),      # correct, confident → easy
+        )
+        for idx, (is_correct, confidence, state, lapses) in enumerate(cases):
+            with self.subTest(case=idx):
+                question_id = f"q-derive-{idx}"
+                self.store.record_attempt(
+                    user_id="alice",
+                    question_id=question_id,
+                    topic_id="topic-a",
+                    user_answer="a",
+                    is_correct=is_correct,
+                    confidence=confidence,
+                    response_time_ms=900,
+                    mode="quiz",
+                )
+                card = self.store._conn.execute(
+                    "SELECT state, lapses FROM fsrs_cards "
+                    "WHERE user_id = ? AND card_id = ?",
+                    ("alice", question_id),
+                ).fetchone()
+                self.assertEqual(card["state"], state)
+                self.assertEqual(card["lapses"], lapses)
+
+    def test_interview_turn_creates_interview_source_card(self):
+        # Interview turns are recorded as attempts with an
+        # ``interview:``-prefixed question id; they land in
+        # fsrs_cards as interview-sourced cards so the
+        # planner sees interview evidence.
+        self.store.record_attempt(
+            user_id="alice",
+            question_id="interview:session-1:0",
+            topic_id="01-backend",
+            user_answer="wrong",
+            is_correct=False,
+            confidence=2,
+            response_time_ms=1500,
+            mode="study",
+        )
+        card = self.store._conn.execute(
+            "SELECT card_id, topic_id, source_type, state, lapses "
+            "FROM fsrs_cards WHERE user_id = ? AND card_id = ?",
+            ("alice", "interview:session-1:0"),
+        ).fetchone()
+        self.assertIsNotNone(card)
+        self.assertEqual(card["topic_id"], "01-backend")
+        self.assertEqual(card["source_type"], "interview")
+        # Incorrect turn → again → learning state + a lapse.
+        self.assertEqual(card["state"], "learning")
+        self.assertEqual(card["lapses"], 1)
+        log = self.store._conn.execute(
+            "SELECT rating FROM fsrs_review_log "
+            "WHERE user_id = ? AND card_id = ?",
+            ("alice", "interview:session-1:0"),
+        ).fetchone()
+        self.assertEqual(log["rating"], "again")
 
 
 if __name__ == "__main__":

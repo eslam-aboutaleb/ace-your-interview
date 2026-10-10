@@ -238,7 +238,18 @@ class LearningRouterFSRSContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(res.status_code, 200)
-        self.assertIn("review_bucket", res.json())
+        # The response now carries the FSRS card state
+        # instead of the legacy mastery/bucket fields.
+        body = res.json()
+        self.assertIn("state", body)
+        self.assertIn("due_at", body)
+        self.assertIn("lapses", body)
+        self.assertIn("leech", body)
+        # A confident correct answer derives "easy", which
+        # graduates a new card to the review state.
+        self.assertEqual(body["state"], "review")
+        self.assertEqual(body["lapses"], 0)
+        self.assertFalse(body["leech"])
 
 
 if __name__ == "__main__":

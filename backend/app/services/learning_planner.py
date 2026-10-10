@@ -11,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Callable, TypeVar
 
+from app.services import fsrs_scheduler
+
 T = TypeVar("T")
 
 _TRACKS = ("backend", "frontend", "system_design", "ai_stack")
@@ -437,25 +439,88 @@ class LearningPlannerStore:
             return None
         return (target - _utc_now().date()).days
 
-    def _question_progress_rows(self, *, user_id: str) -> list[sqlite3.Row]:
-        if not self._table_exists("question_progress"):
+    def _question_progress_rows(self, *, user_id: str) -> list[dict[str, Any]]:
+        """Per-topic learning evidence, read from the FSRS tables.
+
+        The planner consumes the consolidated FSRS scheduler
+        (``fsrs_cards`` + ``fsrs_review_log``) instead of the
+        legacy ``question_progress`` buckets. ``attempts`` is the
+        total review count (``reps``), ``correct_attempts`` the
+        successful reviews (``reps - lapses``), and
+        ``mastery_score`` the mean FSRS retention estimate. FSRS
+        does not track self-reported confidence, so a neutral 3
+        keeps the confidence-gap term meaningful.
+        """
+        if not self._table_exists("fsrs_cards"):
             return []
-        return self._conn.execute(
+        now_iso = _to_iso(_utc_now())
+        cards = self._conn.execute(
             """
-            SELECT
-                topic_id,
-                SUM(attempts) AS attempts,
-                SUM(correct_attempts) AS correct_attempts,
-                AVG(mastery_score) AS mastery_score,
-                AVG(avg_confidence) AS avg_confidence,
-                SUM(CASE WHEN due_at <= ? THEN 1 ELSE 0 END) AS due_count
-            FROM question_progress
+            SELECT topic_id, card_id, stability, difficulty,
+                   due_at, last_review_at, reps, lapses, suspended
+            FROM fsrs_cards
             WHERE user_id = ?
-            GROUP BY topic_id
-            ORDER BY topic_id ASC
+            ORDER BY topic_id ASC, card_id ASC
             """,
-            (_to_iso(_utc_now()), user_id),
+            (user_id,),
         ).fetchall()
+        topics: dict[str, dict[str, Any]] = {}
+        for card in cards:
+            topic_id = str(card["topic_id"])
+            entry = topics.setdefault(
+                topic_id,
+                {
+                    "topic_id": topic_id,
+                    "attempts": 0,
+                    "correct_attempts": 0,
+                    "retention": [],
+                    "due_count": 0,
+                },
+            )
+            reps = int(card["reps"] or 0)
+            lapses = int(card["lapses"] or 0)
+            entry["attempts"] += reps
+            entry["correct_attempts"] += max(0, reps - lapses)
+            entry["retention"].append(
+                fsrs_scheduler.retention_estimate(
+                    {
+                        "stability": (
+                            float(card["stability"])
+                            if card["stability"] is not None
+                            else None
+                        ),
+                        "last_review_at": (
+                            str(card["last_review_at"])
+                            if card["last_review_at"] is not None
+                            else None
+                        ),
+                    }
+                )
+            )
+            if (
+                int(card["suspended"] or 0) == 0
+                and str(card["due_at"] or "") <= now_iso
+            ):
+                entry["due_count"] += 1
+        rows: list[dict[str, Any]] = []
+        for entry in topics.values():
+            retention = entry.pop("retention")
+            rows.append(
+                {
+                    "topic_id": entry["topic_id"],
+                    "attempts": entry["attempts"],
+                    "correct_attempts": entry["correct_attempts"],
+                    "mastery_score": (
+                        sum(retention) / len(retention)
+                        if retention
+                        else 0.0
+                    ),
+                    "avg_confidence": 3.0,
+                    "due_count": entry["due_count"],
+                }
+            )
+        rows.sort(key=lambda row: row["topic_id"])
+        return rows
 
     def _latest_interview_reports(self, *, user_id: str, limit: int = 5) -> list[dict[str, Any]]:
         if not self._table_exists("interview_reports"):

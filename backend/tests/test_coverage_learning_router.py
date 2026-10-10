@@ -195,12 +195,14 @@ class FsrsFeatureGateTests(LearningRouterCoverageTestBase):
         self.assertIn("items", response.json())
         self.assertEqual(self.store.calls, ["get_fsrs_review_queue"])
 
-    def test_review_queue_falls_back_to_the_legacy_queue(self):
+    def test_review_queue_uses_fsrs_regardless_of_the_flag(self):
+        # The legacy question_progress fallback is retired:
+        # the review queue is always read from fsrs_cards.
         self._set_flags(fsrs=False)
         self.store.calls.clear()
         response = self.client.get("/api/learning/review-queue")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.store.calls, ["get_review_queue"])
+        self.assertEqual(self.store.calls, ["get_fsrs_review_queue"])
 
     def test_topic_mastery_prefers_fsrs_when_enabled(self):
         self.store.calls.clear()
@@ -208,12 +210,14 @@ class FsrsFeatureGateTests(LearningRouterCoverageTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.store.calls, ["get_fsrs_topic_mastery"])
 
-    def test_topic_mastery_falls_back_to_the_legacy_query(self):
+    def test_topic_mastery_uses_fsrs_regardless_of_the_flag(self):
+        # The legacy question_progress fallback is retired:
+        # topic mastery is always read from fsrs_cards.
         self._set_flags(fsrs=False)
         self.store.calls.clear()
         response = self.client.get("/api/learning/mastery")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.store.calls, ["get_topic_mastery"])
+        self.assertEqual(self.store.calls, ["get_fsrs_topic_mastery"])
 
 
 class WeakAreasAndBoundsTests(LearningRouterCoverageTestBase):
