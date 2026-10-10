@@ -17,6 +17,8 @@ from app.schemas.models import (
     LearningAttemptResponse,
     LearningReviewRequest,
     LearningReviewResponse,
+    NextObjectiveItem,
+    NextObjectivesResponse,
     ProfileDiagnosticResponse,
     RecommendationsResponse,
     ReviewQueueResponse,
@@ -24,6 +26,7 @@ from app.schemas.models import (
     TopicMasteryResponse,
     WeakAreasResponse,
 )
+from app.services.doc_parser import DocParser
 from app.services.learning_planner import LearningPlannerStore
 from app.services.learning_store import LearningStore
 
@@ -33,12 +36,18 @@ logger = logging.getLogger(__name__)
 
 _store: LearningStore | None = None
 _planner: LearningPlannerStore | None = None
+_parser: DocParser | None = None
 
 
-def init(store: LearningStore, planner: LearningPlannerStore):
-    global _store, _planner
+def init(
+    store: LearningStore,
+    planner: LearningPlannerStore,
+    parser: DocParser | None = None,
+):
+    global _store, _planner, _parser
     _store = store
     _planner = planner
+    _parser = parser
     _run_startup_fsrs_backfill(store)
 
 
@@ -89,6 +98,7 @@ async def record_attempt(
         confidence=body.confidence,
         response_time_ms=body.response_time_ms,
         mode=body.mode.value,
+        learning_objective=body.learning_objective,
     )
     return LearningAttemptResponse(**saved)
 
@@ -244,3 +254,43 @@ async def study_plan(
         daily_items=daily_items,
     )
     return StudyPlanResponse(**data)
+
+
+@router.get("/next-objectives", response_model=NextObjectivesResponse)
+async def next_objectives(
+    topic_ids: list[str] = Query(default=[]),
+    limit: int = Query(default=5, ge=1, le=20),
+    user: dict = Depends(require_auth),
+):
+    """Rank learning objectives for the next quiz by (1 - accuracy) * uncertainty."""
+    _ensure_enabled()
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Learning store not initialised")
+    clean_ids = [tid.strip() for tid in topic_ids if tid.strip()]
+    ranked = await _store.run_async(
+        _store.select_next_objectives,
+        user_id=user["user"],
+        topic_ids=clean_ids,
+        limit=limit,
+    )
+    objectives: list[NextObjectiveItem] = []
+    for item in ranked:
+        topic_id = str(item["topic_id"])
+        title = ""
+        if _parser is not None:
+            topic = _parser.get_topic(topic_id)
+            if topic is not None:
+                title = topic.title
+        objectives.append(
+            NextObjectiveItem(
+                topic_id=topic_id,
+                topic_title=title,
+                learning_objective=str(item["learning_objective"]),
+                attempts=int(item["attempts"]),
+                correct_attempts=int(item["correct_attempts"]),
+                accuracy=float(item["accuracy"]),
+                uncertainty=float(item["uncertainty"]),
+                priority=float(item["priority"]),
+            )
+        )
+    return NextObjectivesResponse(objectives=objectives)

@@ -426,6 +426,11 @@ class QuizQuestion(BaseModel):
     topic_id: str = ""
 
 
+class QuizMode(str, Enum):
+    PRACTICE = "practice"
+    EXAM = "exam"
+
+
 class GenerateQuizRequest(BaseModel):
     topic_ids: list[str]
     count: int = Field(default=10, ge=1, le=100)
@@ -435,6 +440,9 @@ class GenerateQuizRequest(BaseModel):
     response_detail: Optional[ResponseDetailEnum] = None
     preferred_language: Optional[str] = Field(default=None, max_length=60)
     llm_config: Optional[LLMConfigRequest] = None
+    mode: QuizMode = QuizMode.PRACTICE
+    time_limit_seconds: Optional[int] = Field(default=None, ge=1, le=3600)
+    target_objectives: list[str] = Field(default_factory=list, max_length=20)
 
 
 class GenerateQuizResponse(BaseModel):
@@ -477,6 +485,7 @@ class GenerateQuizV2Response(BaseModel):
 class LearningMode(str, Enum):
     STUDY = "study"
     QUIZ = "quiz"
+    EXAM = "exam"
 
 
 class LearningAttemptRequest(BaseModel):
@@ -487,6 +496,7 @@ class LearningAttemptRequest(BaseModel):
     confidence: int = Field(default=3, ge=1, le=5)
     response_time_ms: int = Field(default=0, ge=0)
     mode: LearningMode
+    learning_objective: str = Field(default="", max_length=2000)
 
 
 class LearningAttemptResponse(BaseModel):
@@ -622,6 +632,7 @@ class CompetencyScore(BaseModel):
     track: str = ""
     score: float = Field(default=0.0, ge=0.0, le=100.0)
     confidence_gap: float = Field(default=0.0, ge=0.0, le=100.0)
+    uncertainty: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence_count: int = Field(default=0, ge=0)
     priority: float = Field(default=0.0, ge=0.0, le=100.0)
     source: str = ""
@@ -636,6 +647,21 @@ class ProfileDiagnosticResponse(BaseModel):
     strongest_competencies: list[str] = Field(default_factory=list)
     urgent_competencies: list[str] = Field(default_factory=list)
     competencies: list[CompetencyScore] = Field(default_factory=list)
+
+
+class NextObjectiveItem(BaseModel):
+    topic_id: str
+    topic_title: str = ""
+    learning_objective: str
+    attempts: int = Field(default=0, ge=0)
+    correct_attempts: int = Field(default=0, ge=0)
+    accuracy: float = Field(default=0.0, ge=0.0, le=1.0)
+    uncertainty: float = Field(default=0.0, ge=0.0, le=1.0)
+    priority: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class NextObjectivesResponse(BaseModel):
+    objectives: list[NextObjectiveItem] = Field(default_factory=list)
 
 
 class RecommendationItem(BaseModel):

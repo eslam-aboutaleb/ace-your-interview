@@ -101,6 +101,11 @@ _PROGRESS_BLOCK_LABEL = (
     "Learner progress on this topic so far "
     "(use it to continue from where they stopped, never to repeat covered material)"
 )
+_TARGET_OBJECTIVES_BLOCK_LABEL = (
+    "Learning objectives the learner is weakest on "
+    "(prioritize questions that assess these objectives)"
+)
+_MAX_TARGET_OBJECTIVES_BLOCK_CHARS = 800
 _BASE_MAX_ATTEMPTS = 5
 _MAX_TOTAL_ATTEMPTS = 18
 _MAX_RECOVERY_ATTEMPTS = 24
@@ -285,6 +290,24 @@ def _progress_block(prior_progress: str) -> str:
         _PROGRESS_BLOCK_LABEL,
         prior_progress,
         _MAX_PROGRESS_BLOCK_CHARS,
+    )
+
+
+def _target_objectives_block(target_objectives: list[str] | None) -> str:
+    # ``target_objectives`` are learning objectives derived from stored
+    # learner history, so they are fenced like any other untrusted block.
+    objectives = [
+        str(obj).strip()
+        for obj in (target_objectives or [])
+        if str(obj).strip()
+    ]
+    if not objectives:
+        return ""
+    blob = "\n".join(f"- {obj}" for obj in objectives[:20])
+    return untrusted_block(
+        _TARGET_OBJECTIVES_BLOCK_LABEL,
+        blob,
+        _MAX_TARGET_OBJECTIVES_BLOCK_CHARS,
     )
 
 
@@ -2441,6 +2464,7 @@ def _build_quiz_prompt(
     additional_existing_questions: Optional[list[str]] = None,
     prior_progress: str = "",
     mcp_context: str = "",
+    target_objectives: list[str] | None = None,
 ) -> str:
     """Build the quiz user turn. The creator persona lives in ``system`` (Stage 2.1)."""
     target_level = _normalise_level(level)
@@ -2481,6 +2505,7 @@ def _build_quiz_prompt(
         )
     mcp_block = untrusted_block("external_context", mcp_context, 2500)
     progress_block = _progress_block(prior_progress)
+    targeting_block = _target_objectives_block(target_objectives)
     uniqueness_block = ""
     if existing_seed:
         existing_blob = "\n".join([f"- {q}" for q in existing_seed[:60]])
@@ -2519,6 +2544,11 @@ def _build_quiz_prompt(
             "expected_answer must repeat the correct choice text exactly.",
             "distractor_rationales must cover every non-correct choice label with a reason of at least 12 characters.",
             "Distribute questions across topics as evenly as possible.",
+            (
+                "Prioritize questions that assess the provided target learning objectives."
+                if target_objectives
+                else ""
+            ),
             detail_clause,
             "Format explanations as markdown, but keep structure adaptive.",
             "long explanations must be split into short readable paragraphs with blank lines.",
@@ -2550,7 +2580,7 @@ def _build_quiz_prompt(
     return f"""Create exactly {count} quiz questions from the documentation below.{diff_clause}
 Target candidate level: "{target_level}".
 {type_instructions}
-{progress_block}{uniqueness_block}
+{progress_block}{targeting_block}{uniqueness_block}
 {prompt_contract}
 
 {_QUIZ_FEW_SHOT_EXAMPLE}
@@ -4384,6 +4414,7 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
+        target_objectives: list[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(1, int(count or 1))
         effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
@@ -4428,6 +4459,7 @@ class QuestionGenerator:
                 additional_existing_questions=additional_existing_questions,
                 prior_progress=prior_progress,
                 mcp_context=mcp_context,
+                target_objectives=target_objectives,
             )
             base_prompt = prompt
             max_tokens_cap = _questions_max_tokens_cap(1)
@@ -4695,6 +4727,7 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
+        target_objectives: list[str] | None = None,
     ) -> GenerateQuizResponse:
         v2 = await self.generate_quiz_v2(
             topics_content=topics_content,
@@ -4708,6 +4741,7 @@ class QuestionGenerator:
             user_identity=user_identity,
             prior_progress=prior_progress,
             additional_existing_questions=additional_existing_questions,
+            target_objectives=target_objectives,
         )
         legacy_questions = [
             QuizQuestion(
@@ -4741,6 +4775,7 @@ class QuestionGenerator:
         user_identity: Optional[dict] = None,
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
+        target_objectives: list[str] | None = None,
     ) -> GenerateQuizV2Response:
         effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
         mcp_context = await self._mcp_context_for_flow(
@@ -4763,6 +4798,7 @@ class QuestionGenerator:
             additional_existing_questions=additional_existing_questions,
             prior_progress=prior_progress,
             mcp_context=mcp_context,
+            target_objectives=target_objectives,
         )
         allowed_topics = {str(tc["id"]) for tc in topics_content}
         allowed_types = set(question_types or ["mcq", "true_false"])

@@ -731,6 +731,7 @@ async def generate_quiz(
         user_identity=user,
         prior_progress=prior_progress,
         additional_existing_questions=additional_existing,
+        target_objectives=list(body.target_objectives),
     )
     await _capture_grouped_questions(
         user_id=user["user"],
@@ -781,6 +782,7 @@ async def generate_quiz_v2(
         user_identity=user,
         prior_progress=prior_progress,
         additional_existing_questions=additional_existing,
+        target_objectives=list(body.target_objectives),
     )
     await _capture_grouped_questions(
         user_id=user["user"],
@@ -847,6 +849,7 @@ async def generate_quiz_v2_stream(
             user_identity=user,
             prior_progress=prior_progress,
             additional_existing_questions=additional_existing,
+            target_objectives=list(body.target_objectives),
         ):
             if event.get("type") == "question":
                 captured.append(event.get("question") or {})
