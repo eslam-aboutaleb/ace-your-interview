@@ -543,6 +543,9 @@ export interface GenerateQuizRequest {
   response_detail?: ResponseDetail;
   preferred_language?: string;
   llm_config?: LLMConfig;
+  mode?: QuizMode;
+  time_limit_seconds?: number | null;
+  target_objectives?: string[];
 }
 
 export interface TopicPreferencesResponse {
@@ -574,7 +577,9 @@ export interface GenerateQuizV2Response {
   malformed_items_dropped: number;
 }
 
-export type LearningMode = "study" | "quiz";
+export type QuizMode = "practice" | "exam";
+
+export type LearningMode = "study" | "quiz" | "exam";
 
 export interface LearningAttemptRequest {
   question_id: string;
@@ -584,6 +589,7 @@ export interface LearningAttemptRequest {
   confidence: number;
   response_time_ms: number;
   mode: LearningMode;
+  learning_objective?: string;
 }
 
 export interface LearningAttemptResponse {
@@ -719,6 +725,7 @@ export interface CompetencyScore {
   track: string;
   score: number;
   confidence_gap: number;
+  uncertainty: number;
   evidence_count: number;
   priority: number;
   source: string;
@@ -733,6 +740,21 @@ export interface ProfileDiagnosticResponse {
   strongest_competencies: string[];
   urgent_competencies: string[];
   competencies: CompetencyScore[];
+}
+
+export interface NextObjectiveItem {
+  topic_id: string;
+  topic_title: string;
+  learning_objective: string;
+  attempts: number;
+  correct_attempts: number;
+  accuracy: number;
+  uncertainty: number;
+  priority: number;
+}
+
+export interface NextObjectivesResponse {
+  objectives: NextObjectiveItem[];
 }
 
 export type RecommendationType =
