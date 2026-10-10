@@ -152,6 +152,9 @@ class GenerateQuestionsV2Response(BaseModel):
     degraded: bool = False
     requested_count: int = 0
     returned_count: int = 0
+    #: Wire identifier of the prompt contract that produced this
+    #: payload: ``"<prompt_name>@<version>"``.
+    generation_version: str = ""
 
 
 class TopicSummary(BaseModel):
@@ -486,6 +489,9 @@ class GenerateQuizV2Response(BaseModel):
     degraded: bool = False
     requested_count: int = 0
     returned_count: int = 0
+    #: Wire identifier of the prompt contract that produced this
+    #: payload: ``"<prompt_name>@<version>"``.
+    generation_version: str = ""
 
 
 class LearningMode(str, Enum):
@@ -816,6 +822,9 @@ class InterviewTurn(BaseModel):
     #: The full contract the turn was evaluated against; empty for
     #: legacy turns that predate contract persistence.
     question_contract: dict[str, Any] = Field(default_factory=dict)
+    #: Wire identifier of the prompt contract that produced the
+    #: question and the evaluation: ``"<prompt_name>@<version>"``.
+    generation_version: str = ""
 
 
 class InterviewReport(BaseModel):

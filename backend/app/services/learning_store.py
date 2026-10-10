@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Mapping, TypeVar
+from uuid import uuid4
 
 from app.services import fsrs_scheduler
 from app.services.topic_catalog import (
@@ -72,6 +74,69 @@ def accuracy_uncertainty(
 # backfill_fsrs_from_progress to carry the retired
 # question_progress schedule onto migrated fsrs_cards rows.
 _LEGACY_BUCKET_INTERVAL_DAYS = (0, 1, 3, 7, 14, 30)
+
+
+logger = logging.getLogger(__name__)
+
+
+async def record_generation_run_safe(
+    run_store: Any,
+    *,
+    user_identity: dict | None,
+    metadata: Mapping[str, Any],
+    flow: str,
+    prompt_name: str = "",
+    prompt_version: str = "",
+    attempts: int = 1,
+    terminal_reason: str = "",
+    finish_reason: str = "",
+    error_code: str = "",
+) -> None:
+    """Persist one generation-run row, never failing the generation.
+
+    Extracts the row fields from a completion result's metadata and
+    the caller's retry outcome, then writes through the store's
+    async executor when it has one. Telemetry is best-effort: any
+    failure is logged and swallowed.
+    """
+    if run_store is None:
+        return
+    record = getattr(run_store, "record_generation_run", None)
+    if record is None:
+        return
+    row = {
+        "run_id": str(uuid4()),
+        "user_id": str((user_identity or {}).get("user", "") or ""),
+        "flow": str(flow or ""),
+        "provider": str(metadata.get("provider", "") or ""),
+        "model": str(metadata.get("model", "") or ""),
+        "prompt_name": str(prompt_name or ""),
+        "prompt_version": str(prompt_version or ""),
+        "attempts": int(attempts or 1),
+        "terminal_reason": str(terminal_reason or ""),
+        "input_tokens": int(metadata.get("input_tokens", 0) or 0),
+        "output_tokens": int(metadata.get("output_tokens", 0) or 0),
+        "finish_reason": str(finish_reason or ""),
+        "error_code": str(error_code or ""),
+    }
+    # A single SQLite insert is microseconds, so it is
+    # written inline rather than on the store's async
+    # executor. Awaiting an executor future would suspend
+    # the generation task on a Future; a background task
+    # created on a short-lived event loop (for example a
+    # per-request test portal) is then orphaned when the
+    # loop closes before the future resolves, and a
+    # fire-and-forget thread can outlive a test's tempdir
+    # cleanup. Writing inline keeps the generation task
+    # in a single loop step and the row on disk before
+    # the caller returns. Telemetry is best-effort: a
+    # failed write is logged and swallowed.
+    try:
+        record(**row)
+    except Exception:
+        logger.warning(
+            "generation_run persist failed flow=%s", flow, exc_info=True
+        )
 
 
 class LearningStore:
@@ -377,6 +442,111 @@ class LearningStore:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cards_deck ON cards(user_id, deck_id)"
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS generation_runs (
+                    run_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    flow TEXT NOT NULL,
+                    provider TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL DEFAULT '',
+                    prompt_name TEXT NOT NULL DEFAULT '',
+                    prompt_version TEXT NOT NULL DEFAULT '',
+                    attempts INTEGER NOT NULL DEFAULT 1,
+                    terminal_reason TEXT NOT NULL DEFAULT '',
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    finish_reason TEXT NOT NULL DEFAULT '',
+                    error_code TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_generation_runs_user_time
+                ON generation_runs(user_id, flow, created_at DESC)
+                """
+            )
+
+    def record_generation_run(
+        self,
+        *,
+        run_id: str,
+        user_id: str,
+        flow: str,
+        provider: str = "",
+        model: str = "",
+        prompt_name: str = "",
+        prompt_version: str = "",
+        attempts: int = 1,
+        terminal_reason: str = "",
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        finish_reason: str = "",
+        error_code: str = "",
+        created_at: str = "",
+    ) -> None:
+        """Persist one generation-run telemetry row.
+
+        One row per completed generation flow (a full
+        ``_collect_with_retries`` cycle or an interview answer
+        evaluation), carrying the provider/model/prompt identity,
+        the retry outcome, and the token/finish-reason summary of
+        the final call. Telemetry only: a failed write must never
+        fail the generation itself.
+        """
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO generation_runs(
+                        run_id, user_id, flow, provider, model, prompt_name,
+                        prompt_version, attempts, terminal_reason, input_tokens,
+                        output_tokens, finish_reason, error_code, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(run_id),
+                        str(user_id),
+                        str(flow),
+                        str(provider or ""),
+                        str(model or ""),
+                        str(prompt_name or ""),
+                        str(prompt_version or ""),
+                        max(1, int(attempts or 1)),
+                        str(terminal_reason or ""),
+                        max(0, int(input_tokens or 0)),
+                        max(0, int(output_tokens or 0)),
+                        str(finish_reason or ""),
+                        str(error_code or ""),
+                        str(created_at or _to_iso(_utc_now())),
+                    ),
+                )
+
+    def get_generation_runs(
+        self,
+        *,
+        user_id: str,
+        flow: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return a user's generation-run rows, newest first."""
+        query = (
+            "SELECT run_id, user_id, flow, provider, model, prompt_name, "
+            "prompt_version, attempts, terminal_reason, input_tokens, "
+            "output_tokens, finish_reason, error_code, created_at "
+            "FROM generation_runs WHERE user_id = ?"
+        )
+        params: list[Any] = [str(user_id)]
+        if flow:
+            query += " AND flow = ?"
+            params.append(str(flow))
+        query += " ORDER BY created_at DESC, run_id DESC LIMIT ?"
+        params.append(max(1, int(limit or 100)))
+        with self._lock:
+            rows = self._conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
 
     def record_attempt(
         self,

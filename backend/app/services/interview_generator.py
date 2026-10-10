@@ -18,6 +18,7 @@ from app.services.llm_client import (
     TERMINAL_ERROR_CODES,
     LLMClient,
     parse_json_object,
+    supported_options,
 )
 from app.services.llm_policy import (
     APPROVAL_REQUIRED_CODE,
@@ -25,9 +26,14 @@ from app.services.llm_policy import (
     STUDY_APP_NOT_ASSIGNED_CODE,
     raise_if_policy_blocked_result,
 )
+from app.services.learning_store import record_generation_run_safe
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
 from app.services.prompt_blocks import render_contract
+from app.services.prompt_registry import (
+    PromptTemplate,
+    default_registry,
+)
 from app.services.question_text import normalise_question
 from app.services.star_store import StarStore
 
@@ -142,12 +148,17 @@ class InterviewGenerator:
         mcp_gateway: MCPGateway | None = None,
         company_pack_store: CompanyPackStore | None = None,
         star_store: StarStore | None = None,
+        run_store: Any = None,
     ):
         self.llm = llm
         self.parser = parser
         self.mcp = mcp_gateway
         self.company_packs = company_pack_store
         self.star_store = star_store
+        #: Optional :class:`~app.services.learning_store.LearningStore`
+        #: (or any object exposing ``record_generation_run``) that
+        #: persists one telemetry row per completed answer evaluation.
+        self.run_store = run_store
 
     @staticmethod
     def _format_recent_turns(turns: list[dict[str, Any]]) -> str:
@@ -1031,12 +1042,22 @@ Candidate answer:
 
         attempts = 0
         start = time.monotonic()
+        question_template = default_registry.get("interview_question")
         while attempts < _MAX_ATTEMPTS and (time.monotonic() - start) < _QUESTION_RETRY_TIMEOUT_SECONDS:
             attempts += 1
             result = await self.llm.completion(
                 prompt,
                 llm_config,
                 user_identity=user_identity,
+                **supported_options(
+                    self.llm,
+                    {
+                        "task": "final",
+                        "attempts": attempts,
+                        "prompt_name": question_template.name,
+                        "prompt_version": question_template.version,
+                    },
+                ),
             )
             raise_if_policy_blocked_result(result)
             if _is_non_retryable_result(result):
@@ -1115,17 +1136,34 @@ Candidate answer:
                 )
         prompt = base_prompt
 
+        evaluation_template = default_registry.get("interview_evaluation")
         attempts = 0
         start = time.monotonic()
         terminal_reason = "retries_exhausted"
+        metadata: dict[str, Any] = {}
+        last_finish_reason = ""
+        last_error_code = ""
         while attempts < _MAX_ATTEMPTS and (time.monotonic() - start) < _EVAL_RETRY_TIMEOUT_SECONDS:
             attempts += 1
             result = await self.llm.completion(
                 prompt,
                 llm_config,
                 user_identity=user_identity,
+                **supported_options(
+                    self.llm,
+                    {
+                        "task": "final",
+                        "attempts": attempts,
+                        "terminal_reason": terminal_reason,
+                        "prompt_name": evaluation_template.name,
+                        "prompt_version": evaluation_template.version,
+                    },
+                ),
             )
             raise_if_policy_blocked_result(result)
+            metadata = result.get("metadata", {})
+            last_finish_reason = str(result.get("finish_reason", "") or "")
+            last_error_code = str(result.get("error_code", "") or "")
             if _is_non_retryable_result(result):
                 # Re-sending the identical prompt cannot fix a provider outage,
                 # an exhausted budget, or a truncated response.
@@ -1139,6 +1177,19 @@ Candidate answer:
                 )
                 normalized["follow_up_note"] = format_markdown_readable(
                     normalized.get("follow_up_note", "")
+                )
+                normalized["generation_version"] = evaluation_template.generation_version
+                await record_generation_run_safe(
+                    self.run_store,
+                    user_identity=user_identity,
+                    metadata=metadata,
+                    flow="interview_evaluation",
+                    prompt_name=evaluation_template.name,
+                    prompt_version=evaluation_template.version,
+                    attempts=attempts,
+                    terminal_reason="",
+                    finish_reason=last_finish_reason,
+                    error_code=last_error_code,
                 )
                 return normalized
             prompt = (
@@ -1160,6 +1211,18 @@ Candidate answer:
         improvements = ["Add clearer structure and include one concrete example, tradeoff, or metric."]
         # No invented numbers: a degraded turn carries no rubric so it cannot be
         # averaged into the report or written to the spaced-repetition store.
+        await record_generation_run_safe(
+            self.run_store,
+            user_identity=user_identity,
+            metadata=metadata,
+            flow="interview_evaluation",
+            prompt_name=evaluation_template.name,
+            prompt_version=evaluation_template.version,
+            attempts=attempts,
+            terminal_reason=terminal_reason,
+            finish_reason=last_finish_reason,
+            error_code=last_error_code,
+        )
         return {
             "rubric": dict(_DEGRADED_RUBRIC),
             "strengths": strengths,
@@ -1171,6 +1234,7 @@ Candidate answer:
                 note_seed="Use a tighter answer structure so the interviewer can hear the constraint, the tradeoff, and the concrete outcome.",
             ),
             "degraded": True,
+            "generation_version": evaluation_template.generation_version,
         }
 
     def build_report(
@@ -1324,3 +1388,24 @@ Candidate answer:
             ),
             "created_at": created_at,
         }
+
+
+# ── Interview prompt contracts (registered after the class so the
+# user-prompt builders can bind the staticmethods above) ──────────
+# The interview flows fold their persona into the user turn, so these
+# templates carry no separate system prompt; ``build_user_prompt``
+# binds the production builders the eval harness also imports.
+default_registry.register(
+    PromptTemplate(
+        name="interview_question",
+        version="1",
+        build_user_prompt=InterviewGenerator._question_prompt,
+    )
+)
+default_registry.register(
+    PromptTemplate(
+        name="interview_evaluation",
+        version="1",
+        build_user_prompt=InterviewGenerator._evaluate_prompt,
+    )
+)

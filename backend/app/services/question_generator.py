@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import logging
 import re
@@ -29,6 +28,7 @@ from app.services.llm_client import (
     TERMINAL_ERROR_CODES,
     LLMClient,
     parse_json_object,
+    supported_options,
 )
 from app.services.llm_policy import (
     APPROVAL_REQUIRED_CODE,
@@ -42,6 +42,7 @@ from app.services.llm_policy import (
     StudyAppLLMNotAssignedError,
     raise_if_policy_blocked_result,
 )
+from app.services.learning_store import record_generation_run_safe
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
 from app.services.question_text import normalise_question
@@ -50,6 +51,7 @@ from app.services.prompt_blocks import (
     render_contract,
     untrusted_block,
 )
+from app.services.prompt_registry import default_registry
 from app.services.topic_catalog import (
     PROBLEM_SOLVING_DEFAULT_LANGUAGE,
     is_problem_solving_topic,
@@ -80,20 +82,11 @@ def _questions_max_tokens_cap(count: int) -> int:
     )
 
 
-def _supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
-    """Drop call options ``client.completion`` does not accept.
-
-    ``LLMClient`` takes the full Stage-2 option set, but the client is injected,
-    so a narrower implementation may be in use. Filter against the bound
-    signature rather than assuming one shape.
-    """
-    try:
-        params = inspect.signature(client.completion).parameters
-    except (TypeError, ValueError):
-        return dict(options)
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return options
-    return {key: value for key, value in options.items() if key in params}
+#: The option-narrowing shim now lives in :mod:`app.services.llm_client`
+#: as :func:`supported_options`; the module-level alias keeps the
+#: historical call sites (and their tests) working against the one
+#: shared implementation.
+_supported_options = supported_options
 
 
 
@@ -2141,18 +2134,15 @@ def _question_system_prompt(problem_solving_mode: bool) -> str:
 
     The persona used to be the first line of the user turn, which gave
     externally sourced course text the same authority as the instruction.
+    The contract lives in the prompt registry; this selects the
+    registered template for the requested mode.
     """
-    if problem_solving_mode:
-        return (
-            "You are an expert algorithm interviewer and problem-solving educator. "
-            "You write interview-grade algorithmic questions with fully worked, commented "
-            "solutions, and you always respond with a single JSON array and never with prose."
-        )
-    return (
-        "You are an expert technical interviewer and educator. You write interview-grade "
-        "questions with direct, detailed study answers grounded in the supplied course "
-        "material, and you always respond with a single JSON array and never with prose."
+    name = (
+        "question_generation_problem_solving"
+        if problem_solving_mode
+        else "question_generation"
     )
+    return default_registry.get(name).system_prompt
 
 
 def _problem_solving_few_shot_example(language: str) -> str:
@@ -2406,11 +2396,9 @@ reasoning_summary, target_level.
 {untrusted_blocks}{mcp_block}"""
 
 
-_QUIZ_SYSTEM_PROMPT = (
-    "You are an expert technical quiz creator. You write multiple-choice and true/false "
-    "questions whose explanations are grounded in the supplied course material, and you "
-    "always respond with a single JSON array and never with prose."
-)
+#: The quiz-generation system prompt contract, migrated verbatim into
+#: the prompt registry as ``quiz_generation@1``.
+_QUIZ_SYSTEM_PROMPT = default_registry.get("quiz_generation").system_prompt
 
 _QUIZ_FEW_SHOT_EXAMPLE = (
     "Worked example showing the required shape (its content is illustrative, not reusable "
@@ -3231,6 +3219,10 @@ async def _collect_with_retries(
     hard_requirements: Optional[list[str]] = None,
     retry_guidance: str = "",
     system_prompt: str = "",
+    prompt_name: str = "",
+    prompt_version: str = "",
+    flow: str = "",
+    run_store: Any = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     existing_seed = _normalise_existing_questions(existing_questions)
     dedup: set[str] = {_normalise_question(q) for q in existing_seed}
@@ -3238,14 +3230,18 @@ async def _collect_with_retries(
     valid_items: list[dict[str, Any]] = []
     malformed_items = 0
     retries_used = 0
+    attempt_count = 0
     issue_counter: Counter[str] = Counter()
     metadata: dict[str, Any] = {}
     max_tokens_cap = _questions_max_tokens_cap(target_count)
     prompt = base_prompt
     last_error = ""
+    last_error_code = ""
+    last_finish_reason = ""
     terminal_reason = ""
 
     for _ in range(_attempt_budget(target_count)):
+        attempt_count += 1
         result = await llm.completion(
             prompt,
             llm_config,
@@ -3257,11 +3253,17 @@ async def _collect_with_retries(
                     "system": system_prompt,
                     "structured": True,
                     "max_tokens_cap": max_tokens_cap,
+                    "attempts": attempt_count,
+                    "terminal_reason": terminal_reason,
+                    "prompt_name": prompt_name,
+                    "prompt_version": prompt_version,
                 },
             ),
         )
         raise_if_policy_blocked_result(result)
         metadata = result.get("metadata", {})
+        last_finish_reason = str(result.get("finish_reason", "") or "")
+        last_error_code = str(result.get("error_code", "") or "")
         if not result.get("success"):
             last_error = result.get("error", "unknown_error")
             error_code = str(result.get("error_code") or "")
@@ -3348,6 +3350,7 @@ async def _collect_with_retries(
                 hard_requirements=hard_requirements,
                 recovery_guidance=retry_guidance,
             )
+            attempt_count += 1
             result = await llm.completion(
                 single_prompt,
                 llm_config,
@@ -3359,11 +3362,17 @@ async def _collect_with_retries(
                         "system": system_prompt,
                         "structured": True,
                         "max_tokens_cap": max_tokens_cap,
+                        "attempts": attempt_count,
+                        "terminal_reason": terminal_reason,
+                        "prompt_name": prompt_name,
+                        "prompt_version": prompt_version,
                     },
                 ),
             )
             raise_if_policy_blocked_result(result)
             metadata = result.get("metadata", {})
+            last_finish_reason = str(result.get("finish_reason", "") or "")
+            last_error_code = str(result.get("error_code", "") or "")
             if not result.get("success"):
                 error_code = str(result.get("error_code") or "")
                 if error_code in TERMINAL_ERROR_CODES:
@@ -3423,20 +3432,48 @@ async def _collect_with_retries(
         )
 
     stats = {
-        "metadata": metadata,
+        "metadata": dict(
+            metadata,
+            prompt_name=prompt_name,
+            prompt_version=prompt_version,
+        ),
         "retries_used": retries_used,
         "malformed_items_dropped": malformed_items,
         "terminal_reason": terminal_reason,
+        "prompt_name": prompt_name,
+        "prompt_version": prompt_version,
+        "attempts": attempt_count,
     }
+    await record_generation_run_safe(
+        run_store,
+        user_identity=user_identity,
+        metadata=metadata,
+        flow=flow,
+        prompt_name=prompt_name,
+        prompt_version=prompt_version,
+        attempts=attempt_count,
+        terminal_reason=terminal_reason,
+        finish_reason=last_finish_reason,
+        error_code=last_error_code,
+    )
     return valid_items[:target_count], stats
 
 
 class QuestionGenerator:
     """Uses LiteLLM to generate interview Q&A and quizzes."""
 
-    def __init__(self, llm_client: LLMClient, mcp_gateway: MCPGateway | None = None):
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        mcp_gateway: MCPGateway | None = None,
+        run_store: Any = None,
+    ):
         self.llm = llm_client
         self.mcp = mcp_gateway
+        #: Optional :class:`~app.services.learning_store.LearningStore`
+        #: (or any object exposing ``record_generation_run``) that
+        #: persists one telemetry row per completed generation flow.
+        self.run_store = run_store
 
     async def _mcp_context_for_flow(
         self,
@@ -3557,6 +3594,7 @@ class QuestionGenerator:
 
         async def _generate_one(*, include_section: bool, relaxed: bool = False) -> dict[str, Any]:
             retries_used = 0
+            attempt_count = 0
             malformed_dropped = 0
             metadata: dict[str, Any] = {}
             issue_counter: Counter[str] = Counter()
@@ -3593,6 +3631,7 @@ class QuestionGenerator:
 
             try:
                 for _ in range(_attempt_budget(1)):
+                    attempt_count += 1
                     result = await self.llm.completion(
                         prompt,
                         llm_config,
@@ -3604,6 +3643,18 @@ class QuestionGenerator:
                                 "system": system_prompt,
                                 "structured": True,
                                 "max_tokens_cap": max_tokens_cap,
+                                "attempts": attempt_count,
+                                "terminal_reason": terminal_reason,
+                                "prompt_name": (
+                                    "question_generation_problem_solving"
+                                    if problem_solving_mode
+                                    else "question_generation"
+                                ),
+                                "prompt_version": default_registry.latest_version(
+                                    "question_generation_problem_solving"
+                                    if problem_solving_mode
+                                    else "question_generation"
+                                ),
                             },
                         ),
                     )
@@ -4091,6 +4142,7 @@ class QuestionGenerator:
         model_used = ""
         retries_used = 0
         malformed_items_dropped = 0
+        generation_version = ""
         raw_items: list[dict[str, Any]] = []
         existing_seed = _merge_existing_questions(
             existing_questions, additional_existing_questions
@@ -4196,6 +4248,18 @@ class QuestionGenerator:
                     else None
                 ),
                 retry_guidance=retry_guidance,
+                prompt_name=(
+                    "question_generation_problem_solving"
+                    if problem_solving_mode
+                    else "question_generation"
+                ),
+                prompt_version=default_registry.latest_version(
+                    "question_generation_problem_solving"
+                    if problem_solving_mode
+                    else "question_generation"
+                ),
+                flow="questions",
+                run_store=self.run_store,
             )
             retries_used += int(pass_stats.get("retries_used", 0))
             malformed_items_dropped += int(pass_stats.get("malformed_items_dropped", 0))
@@ -4204,6 +4268,10 @@ class QuestionGenerator:
                 provider_used = str(pass_metadata.get("provider"))
             if pass_metadata.get("model"):
                 model_used = str(pass_metadata.get("model"))
+            pass_prompt_name = str(pass_stats.get("prompt_name", "") or "")
+            pass_prompt_version = str(pass_stats.get("prompt_version", "") or "")
+            if pass_prompt_name:
+                generation_version = f"{pass_prompt_name}@{pass_prompt_version}"
             if str(pass_stats.get("terminal_reason") or ""):
                 # A truncated response or an exhausted budget will not change on
                 # the next pass, so stop here and fall back deterministically.
@@ -4289,6 +4357,7 @@ class QuestionGenerator:
             degraded=fallback_injected,
             requested_count=target_count,
             returned_count=len(questions),
+            generation_version=generation_version,
         )
 
     async def generate_quiz_v2_stream(
@@ -4335,6 +4404,7 @@ class QuestionGenerator:
 
         async def _generate_one() -> dict[str, Any]:
             local_retries = 0
+            local_attempts = 0
             local_malformed = 0
             metadata: dict[str, Any] = {}
             issue_counter: Counter[str] = Counter()
@@ -4356,6 +4426,7 @@ class QuestionGenerator:
             terminal_reason = ""
             try:
                 for _ in range(_attempt_budget(1)):
+                    local_attempts += 1
                     result = await self.llm.completion(
                         prompt,
                         llm_config,
@@ -4367,6 +4438,12 @@ class QuestionGenerator:
                                 "system": _QUIZ_SYSTEM_PROMPT,
                                 "structured": True,
                                 "max_tokens_cap": max_tokens_cap,
+                                "attempts": local_attempts,
+                                "terminal_reason": terminal_reason,
+                                "prompt_name": "quiz_generation",
+                                "prompt_version": default_registry.latest_version(
+                                    "quiz_generation"
+                                ),
                             },
                         ),
                     )
@@ -4686,6 +4763,10 @@ class QuestionGenerator:
             target_count=count,
             validator=validator,
             existing_questions=additional_existing_questions,
+            prompt_name="quiz_generation",
+            prompt_version=default_registry.latest_version("quiz_generation"),
+            flow="quiz",
+            run_store=self.run_store,
         )
 
         questions = []
@@ -4721,6 +4802,9 @@ class QuestionGenerator:
 
         metadata = stats.get("metadata", {})
         topic_ids = sorted({tc["id"] for tc in topics_content})
+        prompt_name = str(stats.get("prompt_name", "") or "")
+        prompt_version = str(stats.get("prompt_version", "") or "")
+        generation_version = f"{prompt_name}@{prompt_version}" if prompt_name else ""
         return GenerateQuizV2Response(
             questions=questions,
             topics_used=topic_ids,
@@ -4731,6 +4815,7 @@ class QuestionGenerator:
             degraded=len(questions) < count,
             requested_count=count,
             returned_count=len(questions),
+            generation_version=generation_version,
         )
 
     async def generate_cards(
@@ -4794,6 +4879,10 @@ class QuestionGenerator:
             validator=validator,
             existing_questions=existing_cards,
             system_prompt=_CARD_SYSTEM_PROMPT,
+            prompt_name="card_generation",
+            prompt_version=default_registry.latest_version("card_generation"),
+            flow="cards",
+            run_store=self.run_store,
         )
 
         cards: list[dict[str, Any]] = []
@@ -4825,12 +4914,9 @@ class QuestionGenerator:
 #: Hard cap on cards generated per request (plan decision).
 MAX_CARD_GENERATION_COUNT = 50
 
-_CARD_SYSTEM_PROMPT = (
-    "You are an expert technical educator. You write interview-grade "
-    "flashcards: a concise question on the front and a direct, detailed "
-    "answer on the back, both grounded in the supplied course material. "
-    "You always respond with a single JSON array and never with prose."
-)
+#: The flashcard-generation system prompt contract, migrated verbatim
+#: into the prompt registry as ``card_generation@1``.
+_CARD_SYSTEM_PROMPT = default_registry.get("card_generation").system_prompt
 
 
 def _build_card_prompt(
