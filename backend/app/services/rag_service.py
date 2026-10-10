@@ -14,17 +14,23 @@ import re
 from typing import Any
 from uuid import uuid4
 
+from app.services.llm_client import supported_options
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.prompt_blocks import (
     UNTRUSTED_CLAUSE,
     render_contract,
     untrusted_block,
 )
+from app.services.prompt_registry import default_registry
 
 logger = logging.getLogger(__name__)
 
 RETRIEVAL_TOP_K = 5
 CHUNK_CONTEXT_MAX_CHARS = 12_000
+#: The RAG answer prompt contract, migrated verbatim into the
+#: prompt registry as ``rag_answer@1``.
+_RAG_ANSWER_PROMPT_NAME = "rag_answer"
+_RAG_ANSWER_PROMPT_VERSION = default_registry.latest_version("rag_answer")
 
 _CITATION_FENCE_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
 
@@ -137,6 +143,15 @@ class RagService:
             prompt,
             llm_config,
             user_identity=user_identity,
+            **supported_options(
+                self._llm_client,
+                {
+                    "task": "final",
+                    "attempts": 1,
+                    "prompt_name": _RAG_ANSWER_PROMPT_NAME,
+                    "prompt_version": _RAG_ANSWER_PROMPT_VERSION,
+                },
+            ),
         )
         raise_if_policy_blocked_result(result)
 
@@ -292,6 +307,15 @@ Citations that failed verification (quotes were not exact substrings):
                 prompt,
                 llm_config,
                 user_identity=user_identity,
+                **supported_options(
+                    self._llm_client,
+                    {
+                        "task": "final",
+                        "attempts": 1,
+                        "prompt_name": _RAG_ANSWER_PROMPT_NAME,
+                        "prompt_version": _RAG_ANSWER_PROMPT_VERSION,
+                    },
+                ),
             )
             raise_if_policy_blocked_result(result)
         except Exception as e:

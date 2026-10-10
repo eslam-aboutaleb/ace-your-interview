@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import math
 import re
@@ -13,6 +12,7 @@ from app.services.llm_client import (
     TERMINAL_ERROR_CODES,
     LLMClient,
     parse_json_object,
+    supported_options,
 )
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.mcp_gateway import MCPGateway
@@ -21,6 +21,7 @@ from app.services.prompt_blocks import (
     render_contract,
     untrusted_block,
 )
+from app.services.prompt_registry import default_registry
 from app.services.topic_catalog import (
     PROBLEM_SOLVING_DEFAULT_LANGUAGE,
     PROBLEM_SOLVING_DESCRIPTION,
@@ -39,27 +40,15 @@ _MIN_CONTENT_CHARS = 90
 _STREAM_BATCH_SIZE = 12
 _MAX_STREAM_HEADINGS_CONTEXT = 120
 _MAX_TOKENS_CAP = 1500
-_INSTRUCTOR_SYSTEM_PROMPT = (
-    "You are an expert programming interview instructor. You write language-specific "
-    "problem-solving curricula that move from beginner to advanced, and you always "
-    "respond with a single JSON object and never with prose."
-)
+#: The problem-solving instructor system prompt contract, migrated
+#: verbatim into the prompt registry as ``problem_solving_instructor@1``.
+_INSTRUCTOR_SYSTEM_PROMPT = default_registry.get("problem_solving_instructor").system_prompt
 
-
-def _supported_options(client: Any, options: dict[str, Any]) -> dict[str, Any]:
-    """Drop call options ``client.completion`` does not accept.
-
-    ``LLMClient`` takes the full Stage-2 option set, but the client is injected,
-    so a narrower implementation may be in use. Filter against the bound
-    signature rather than assuming one shape.
-    """
-    try:
-        params = inspect.signature(client.completion).parameters
-    except (TypeError, ValueError):
-        return dict(options)
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return options
-    return {key: value for key, value in options.items() if key in params}
+#: The option-narrowing shim now lives in :mod:`app.services.llm_client`
+#: as :func:`supported_options`; the module-level alias keeps the
+#: historical call sites (and their tests) working against the one
+#: shared implementation.
+_supported_options = supported_options
 
 
 
@@ -450,7 +439,9 @@ class ProblemSolvingGenerator:
             accepted_headings: set[str] = set()
             attempt_title = title
             attempt_description = description
+            batch_attempts = 0
             for _ in range(_MAX_ATTEMPTS):
+                batch_attempts += 1
                 result = await self.llm.completion(
                     prompt,
                     llm_config,
@@ -462,6 +453,11 @@ class ProblemSolvingGenerator:
                             "system": _INSTRUCTOR_SYSTEM_PROMPT,
                             "structured": True,
                             "max_tokens_cap": _MAX_TOKENS_CAP,
+                            "attempts": batch_attempts,
+                            "prompt_name": "problem_solving_instructor",
+                            "prompt_version": default_registry.latest_version(
+                                "problem_solving_instructor"
+                            ),
                         },
                     ),
                 )

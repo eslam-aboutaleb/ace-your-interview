@@ -157,6 +157,7 @@ class InterviewStore:
             ("competency_focus", "TEXT NOT NULL DEFAULT ''"),
             ("expected_signals_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("question_contract_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("generation_version", "TEXT NOT NULL DEFAULT ''"),
         ):
             if column not in turn_columns:
                 self._conn.execute(
@@ -483,6 +484,7 @@ class InterviewStore:
         response_time_ms: int,
         degraded: bool = False,
         contract: dict[str, Any] | None = None,
+        generation_version: str = "",
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         now = _utc_now_iso()
         try:
@@ -494,8 +496,9 @@ class InterviewStore:
                             session_id, user_id, turn_index, question, user_answer,
                             rubric_json, strengths_json, improvements_json,
                             follow_up_note, response_time_ms, degraded, created_at,
-                            competency_focus, expected_signals_json, question_contract_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            competency_focus, expected_signals_json, question_contract_json,
+                            generation_version
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             session_id,
@@ -513,6 +516,7 @@ class InterviewStore:
                             str((contract or {}).get("competency_focus") or ""),
                             self._dumps((contract or {}).get("expected_signals") or []),
                             self._dumps(contract or {}),
+                            str(generation_version or ""),
                         ),
                     )
 
@@ -567,6 +571,7 @@ class InterviewStore:
                 (contract or {}).get("expected_signals") or []
             ),
             "question_contract": dict(contract or {}),
+            "generation_version": str(generation_version or ""),
             "created_at": now,
         }
         session = self.get_session(user_id=user_id, session_id=session_id)
@@ -579,7 +584,8 @@ class InterviewStore:
                 SELECT session_id, turn_index, question, user_answer, rubric_json,
                        strengths_json, improvements_json, follow_up_note,
                        response_time_ms, degraded, created_at,
-                       competency_focus, expected_signals_json, question_contract_json
+                       competency_focus, expected_signals_json, question_contract_json,
+                       generation_version
                 FROM interview_turns
                 WHERE user_id = ? AND session_id = ?
                 ORDER BY turn_index ASC
@@ -607,6 +613,9 @@ class InterviewStore:
                     ),
                     "question_contract": self._loads_dict(
                         row["question_contract_json"] if "question_contract_json" in row.keys() else ""
+                    ),
+                    "generation_version": (
+                        row["generation_version"] if "generation_version" in row.keys() else ""
                     ),
                     "created_at": row["created_at"],
                 }
