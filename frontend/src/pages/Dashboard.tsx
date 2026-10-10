@@ -9,6 +9,9 @@ import {
   ChevronRight,
   MessageSquare,
   Target,
+  Flame,
+  Trophy,
+  Zap,
 } from "lucide-react";
 import {
   containerVariants,
@@ -23,6 +26,7 @@ import {
   fetchTopicMastery,
   fetchTopics,
   fetchForecast,
+  fetchGamificationSummary,
 } from "@/services/api";
 import { useProgressStore } from "@/store/progressStore";
 import { useAuthStore } from "@/store/authStore";
@@ -31,6 +35,7 @@ import SkeletonCards from "@/components/common/SkeletonCards";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
 import type {
   ForecastResponse,
+  GamificationSummaryResponse,
   LearnerProfile,
   RecommendationItem,
   TopicSummary,
@@ -77,6 +82,8 @@ export default function Dashboard() {
   const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
   const [profile, setProfile] = useState<LearnerProfile | null>(null);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
+  const [gamification, setGamification] =
+    useState<GamificationSummaryResponse | null>(null);
   const [interviewStats, setInterviewStats] = useState({
     total_sessions: 0,
     completed_sessions: 0,
@@ -141,6 +148,11 @@ export default function Dashboard() {
       .then((res) => setRecommendations(res.items || []))
       .catch(() => {
         setRecommendations([]);
+      });
+    fetchGamificationSummary()
+      .then(setGamification)
+      .catch(() => {
+        setGamification(null);
       });
   }, [isAuthenticated, loadTopics, setMastery]);
 
@@ -320,12 +332,82 @@ export default function Dashboard() {
                         }}
                       />
                     </div>
-                    <span className="text-[10px] text-udemy-text-muted text-center leading-tight">
-                      {label}
-                    </span>
+                  <span className="text-[10px] text-udemy-text-muted text-center leading-tight">
+                    {label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      )}
+
+      {/* Gamification */}
+      {gamification && (
+        <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-4">
+          <div className="udemy-card p-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold mb-1 flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-udemy-purple" />
+                  Gamification
+                </h2>
+                <p className="text-xs text-udemy-text-muted">
+                  XP, streaks, and badges for consistent study.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {gamification.badges.map((badge) => (
+                  <span
+                    key={badge}
+                    title={badge}
+                    className="inline-flex items-center gap-1 rounded-full border border-udemy-border bg-white px-2.5 py-1 text-xs font-medium"
+                  >
+                    <Zap className="w-3 h-3 text-udemy-purple" />
+                    {badge.replace(/_/g, " ")}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
+              <MiniStat
+                label="Level"
+                value={`${gamification.level}`}
+              />
+              <MiniStat
+                label="Total XP"
+                value={`${gamification.total_xp}`}
+              />
+              <MiniStat
+                label="Streak"
+                value={`${gamification.current_streak}d`}
+              />
+              <MiniStat
+                label="Today"
+                value={`${gamification.today_progress}/${gamification.daily_goal}`}
+              />
+              <div className="rounded-lg border border-udemy-border p-3">
+                <div className="text-xs text-udemy-text-muted">
+                  XP to next level
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <div className="flex-1">
+                    <ProgressBar
+                      percent={Math.round(
+                        gamification.xp_progress * 100,
+                      )}
+                    />
                   </div>
-                );
-              })}
+                  <span className="text-sm font-bold text-udemy-purple">
+                    {Math.round(gamification.xp_progress * 100)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center gap-2 text-xs text-udemy-text-muted">
+              <Flame className="w-3.5 h-3.5 text-orange-500" />
+              Longest streak: {gamification.longest_streak} days
             </div>
           </div>
         </div>

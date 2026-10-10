@@ -391,6 +391,27 @@ class CardStore:
         ).fetchone()
         return self._card_with_fsrs_row_to_dict(row) if row else None
 
+    def find_card_by_fsrs_id(
+        self, *, user_id: str, fsrs_card_id: str
+    ) -> dict | None:
+        """Look up a deck card by its linked ``fsrs_cards`` id.
+
+        Used by the exam service to map a due FSRS card
+        back to its flashcard front/back.
+        """
+        row = self._conn.execute(
+            f"""
+            SELECT c.user_id, c.card_id, c.deck_id, c.front, c.back, c.source_ref,
+                c.tags_json, c.fsrs_card_id, c.suspended, c.created_at, c.updated_at,
+                {self._fsrs_columns()}
+            FROM cards c
+            JOIN fsrs_cards f ON f.user_id = c.user_id AND f.card_id = c.fsrs_card_id
+            WHERE c.user_id = ? AND c.fsrs_card_id = ?
+            """,
+            (user_id, fsrs_card_id),
+        ).fetchone()
+        return self._card_with_fsrs_row_to_dict(row) if row else None
+
     def update_card(
         self,
         *,

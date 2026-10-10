@@ -116,6 +116,7 @@ class LearningPlannerStore:
                     target_companies_json TEXT NOT NULL,
                     preferred_modalities_json TEXT NOT NULL,
                     confidence_by_track_json TEXT NOT NULL,
+                    timezone TEXT NOT NULL DEFAULT 'UTC',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     diagnostic_updated_at TEXT NOT NULL
@@ -142,6 +143,17 @@ class LearningPlannerStore:
                 )
                 """
             )
+            profile_columns = {
+                str(row["name"])
+                for row in self._conn.execute(
+                    "PRAGMA table_info(learner_profiles)"
+                ).fetchall()
+            }
+            if "timezone" not in profile_columns:
+                self._conn.execute(
+                    "ALTER TABLE learner_profiles "
+                    "ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'"
+                )
             existing_columns = {
                 str(row["name"])
                 for row in self._conn.execute(
@@ -174,6 +186,7 @@ class LearningPlannerStore:
             "target_companies": [],
             "preferred_modalities": list(_DEFAULT_MODALITIES),
             "confidence_by_track": dict(_DEFAULT_CONFIDENCE),
+            "timezone": "UTC",
             "created_at": now_iso,
             "updated_at": now_iso,
             "diagnostic_updated_at": "",
@@ -260,6 +273,7 @@ class LearningPlannerStore:
             "confidence_by_track": self._sanitize_confidence_map(
                 _loads_json_dict(str(row["confidence_by_track_json"]))
             ),
+            "timezone": str(row["timezone"] or "UTC"),
             "created_at": str(row["created_at"]),
             "updated_at": str(row["updated_at"]),
             "diagnostic_updated_at": str(row["diagnostic_updated_at"]),
@@ -287,8 +301,8 @@ class LearningPlannerStore:
                         preferred_session_minutes, current_level, target_level,
                         primary_track, focus_topic_ids_json, target_companies_json,
                         preferred_modalities_json, confidence_by_track_json,
-                        created_at, updated_at, diagnostic_updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        timezone, created_at, updated_at, diagnostic_updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO NOTHING
                     """,
                     (
@@ -304,6 +318,7 @@ class LearningPlannerStore:
                         json.dumps(default["target_companies"], ensure_ascii=True),
                         json.dumps(default["preferred_modalities"], ensure_ascii=True),
                         json.dumps(default["confidence_by_track"], ensure_ascii=True),
+                        default["timezone"],
                         default["created_at"],
                         default["updated_at"],
                         default["diagnostic_updated_at"],
@@ -356,6 +371,9 @@ class LearningPlannerStore:
         confidence_by_track = self._sanitize_confidence_map(
             payload.get("confidence_by_track", existing["confidence_by_track"])
         )
+        timezone = str(
+            payload.get("timezone", existing.get("timezone") or "UTC") or "UTC"
+        ).strip()[:64] or "UTC"
 
         created_at = existing["created_at"] or now_iso
         diagnostic_updated_at = existing["diagnostic_updated_at"]
@@ -368,8 +386,8 @@ class LearningPlannerStore:
                         preferred_session_minutes, current_level, target_level,
                         primary_track, focus_topic_ids_json, target_companies_json,
                         preferred_modalities_json, confidence_by_track_json,
-                        created_at, updated_at, diagnostic_updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        timezone, created_at, updated_at, diagnostic_updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         target_role = excluded.target_role,
                         target_date = excluded.target_date,
@@ -382,6 +400,7 @@ class LearningPlannerStore:
                         target_companies_json = excluded.target_companies_json,
                         preferred_modalities_json = excluded.preferred_modalities_json,
                         confidence_by_track_json = excluded.confidence_by_track_json,
+                        timezone = excluded.timezone,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -397,6 +416,7 @@ class LearningPlannerStore:
                         json.dumps(target_companies, ensure_ascii=True),
                         json.dumps(preferred_modalities, ensure_ascii=True),
                         json.dumps(confidence_by_track, ensure_ascii=True),
+                        timezone,
                         created_at,
                         now_iso,
                         diagnostic_updated_at,
