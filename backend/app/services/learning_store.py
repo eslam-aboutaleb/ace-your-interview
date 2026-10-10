@@ -25,7 +25,44 @@ from app.services.topic_catalog import (
     is_problem_solving_topic,
 )
 
+logger = logging.getLogger(__name__)
+
 T = TypeVar("T")
+
+# ── Gamification hooks (STUDY_ENABLE_GAMIFICATION_V1) ──
+# Module-level listener registries so the gamification
+# service can ride along with every recorded attempt and
+# card review without the store importing it (no cycle).
+# Listeners run synchronously after the event is
+# persisted; a failing listener never blocks learning.
+_attempt_listeners: list[Callable[..., Any]] = []
+_review_listeners: list[Callable[..., Any]] = []
+
+
+def register_attempt_listener(fn: Callable[..., Any]) -> None:
+    """Register a callback invoked after each learning attempt."""
+    _attempt_listeners.append(fn)
+
+
+def register_review_listener(fn: Callable[..., Any]) -> None:
+    """Register a callback invoked after each card review."""
+    _review_listeners.append(fn)
+
+
+def _notify_attempt_listeners(**payload: Any) -> None:
+    for listener in tuple(_attempt_listeners):
+        try:
+            listener(**payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("gamification attempt listener failed")
+
+
+def _notify_review_listeners(**payload: Any) -> None:
+    for listener in tuple(_review_listeners):
+        try:
+            listener(**payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("gamification review listener failed")
 
 
 def _utc_now() -> datetime:
@@ -619,6 +656,18 @@ class LearningStore:
                     response_time_ms=response_time_ms,
                 )
 
+        _notify_attempt_listeners(
+            user_id=user_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            topic_id=topic_id,
+            is_correct=is_correct,
+            confidence=confidence,
+            response_time_ms=response_time_ms,
+            mode=mode,
+            created_at=now_iso,
+        )
+
         return {
             "attempt_id": attempt_id,
             "topic_id": topic_id,
@@ -887,6 +936,17 @@ class LearningStore:
                     now_iso=now_iso,
                     response_time_ms=response_time_ms,
                 )
+
+        _notify_review_listeners(
+            user_id=user_id,
+            card_id=card_id,
+            topic_id=topic_id,
+            review_log_id=log_id,
+            rating=rating,
+            response_time_ms=response_time_ms,
+            source_type=source_type,
+            created_at=now_iso,
+        )
 
         log_entry = dict(log_entry)
         log_entry["id"] = log_id

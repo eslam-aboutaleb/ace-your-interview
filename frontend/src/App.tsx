@@ -21,6 +21,8 @@ import InterviewSessionPage from "@/pages/InterviewSessionPage";
 import InterviewReportPage from "@/pages/InterviewReportPage";
 import InterviewTrendsPage from "@/pages/InterviewTrends";
 import StarStoriesPage from "@/pages/StarStoriesPage";
+import AnalyticsPage from "@/pages/AnalyticsPage";
+import ExamPage from "@/pages/ExamPage";
 import { fetchUserSettings, updateUserPreferences } from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -301,6 +303,22 @@ export default function App() {
               element={
                 <ErrorBoundary>
                   <StarStoriesPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="analytics"
+              element={
+                <ErrorBoundary>
+                  <AnalyticsPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="exams"
+              element={
+                <ErrorBoundary>
+                  <ExamPage />
                 </ErrorBoundary>
               }
             />

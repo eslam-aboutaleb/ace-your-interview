@@ -14,10 +14,13 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings, resolve_auth_secret_key
 from app.dependencies import require_auth
 from app.routers import (
+    analytics,
     auth,
     cards,
     chat,
     documents,
+    exams,
+    gamification,
     hints,
     interview_sessions,
     learning,
@@ -60,6 +63,15 @@ from app.services.rate_limit import (
 from app.services.user_settings_store import UserSettingsStore, resolve_credentials_encryption_secret
 from app.services.auth import decode_jwt_token
 from app.services.card_store import CardStore
+from app.services.exam_store import ExamStore
+from app.services.exam_service import ExamService
+from app.services.gamification_store import GamificationStore
+from app.services.gamification_service import (
+    GamificationService,
+    register_gamification_hooks,
+)
+from app.services.analytics_service import AnalyticsService
+from app.services.question_generator import QuestionGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +208,28 @@ async def lifespan(application: FastAPI):
         llm_client=_llm_client,
         embedding_client=embedding_client,
     )
+    exam_store = ExamStore(settings.learning_db_path)
+    question_generator = QuestionGenerator(
+        _llm_client, mcp_gateway=_mcp_gateway
+    )
+    gamification_store = GamificationStore(settings.learning_db_path)
+    gamification_service = GamificationService(
+        store=gamification_store,
+        planner=_learning_planner,
+    )
+    exam_service = ExamService(
+        store=exam_store,
+        learning_store=_learning_store,
+        card_store=card_store,
+        doc_parser=parser,
+        question_generator=question_generator,
+        llm_client=_llm_client,
+        gamification_service=gamification_service,
+    )
+    analytics_service = AnalyticsService(
+        settings.learning_db_path, _learning_store
+    )
+    register_gamification_hooks(gamification_service)
 
     # Wire routers to shared instances
     questions.init(_llm_client, parser, _learning_store, _mcp_gateway, _progress_store)
@@ -231,6 +265,9 @@ async def lifespan(application: FastAPI):
     )
     hints.init(HintService(_llm_client, settings.learning_db_path))
     voice.init(_llm_client, _user_settings_store)
+    exams.init(exam_store, exam_service)
+    gamification.init(gamification_service)
+    analytics.init(analytics_service)
 
     logger.info("Loaded %d topics from curriculum %s", len(parser.list_topics()), parser.source_path)
 
@@ -328,6 +365,9 @@ def create_app() -> FastAPI:
     application.include_router(interview_sessions.router, dependencies=auth_dep)
     application.include_router(hints.router, dependencies=auth_dep)
     application.include_router(star_stories.router, dependencies=auth_dep)
+    application.include_router(exams.exams_router, dependencies=auth_dep)
+    application.include_router(gamification.gamification_router, dependencies=auth_dep)
+    application.include_router(analytics.analytics_router)
     application.include_router(voice.router)  # WebSocket handles its own auth
 
     @application.exception_handler(LLMServiceApprovalRequiredError)

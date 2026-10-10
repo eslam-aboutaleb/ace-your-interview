@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     enable_adaptive_learning: bool = True
     enable_fsrs_v1: bool = True
     enable_flashcards_v1: bool = True
+    # Timed exam mode with auto-grading and remark
+    # re-grade (rollout flag, default on).
+    enable_exams_v1: bool = True
+    # Gamification: XP, streaks, daily goals, badges
+    # (rollout flag, default on).
+    enable_gamification_v1: bool = True
     enable_mock_interview_v1: bool = True
     # Interview personalization: resume/JD parsing, hints, STAR bank,
     # company packs (rollout flag, default on).
