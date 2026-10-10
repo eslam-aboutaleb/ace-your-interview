@@ -721,6 +721,37 @@ class StudyPlanResponse(BaseModel):
     days_plan: list[StudyPlanDay] = Field(default_factory=list)
 
 
+class StudyPlanFromJDRequest(BaseModel):
+    """Build a study plan from a job description.
+
+    The JD is analysed against the stored resume profile;
+    high-confidence gap/focus-area matches are mapped to
+    curriculum topic IDs and persisted as the learner's
+    ``focus_topic_ids`` before the study plan is built.
+    """
+
+    jd_text: str = Field(..., min_length=1, max_length=20000)
+    days: int = Field(default=7, ge=1, le=31)
+    daily_items: int = Field(default=3, ge=1, le=10)
+    # Optional track filter narrows the topic matching.
+    track: Optional[TrackEnum] = None
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class StudyPlanFromJDResponse(StudyPlanResponse):
+    """Study plan plus the JD→topic mapping transparency.
+
+    ``mapped_topic_ids`` are the high-confidence curriculum
+    matches persisted as focus topics; ``unmapped_focus_areas``
+    are gaps that had no confident topic match and therefore
+    stay as plain focus-area strings.
+    """
+
+    mapped_topic_ids: list[str] = Field(default_factory=list)
+    unmapped_focus_areas: list[str] = Field(default_factory=list)
+    focus_topic_ids: list[str] = Field(default_factory=list)
+
+
 # ── Mock Interview Models ────────────────────────────────────
 class RubricScore(BaseModel):
     """Rubric values are ``None`` when a turn was evaluated in degraded mode."""
@@ -1097,6 +1128,7 @@ class ResumeUploadResponse(BaseModel):
 
 class JDAnalysisRequest(BaseModel):
     jd_text: str = Field(..., min_length=1, max_length=20000)
+    llm_config: Optional[LLMConfigRequest] = None
 
 
 class JDAnalysisResponse(BaseModel):

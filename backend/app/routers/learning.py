@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import get_settings
 from app.dependencies import require_auth
+from app.routers import interview_sessions as interview_sessions_router
 from app.schemas.models import (
     CalibrationResponse,
     ForecastResponse,
@@ -22,6 +25,8 @@ from app.schemas.models import (
     ProfileDiagnosticResponse,
     RecommendationsResponse,
     ReviewQueueResponse,
+    StudyPlanFromJDRequest,
+    StudyPlanFromJDResponse,
     StudyPlanResponse,
     TopicMasteryResponse,
     WeakAreasResponse,
@@ -63,6 +68,70 @@ def _ensure_enabled() -> None:
 def _ensure_fsrs_enabled() -> None:
     if not _fsrs_enabled():
         raise HTTPException(status_code=404, detail="FSRS scheduling disabled")
+
+
+def _normalise_topic_token(value: str) -> str:
+    """Lowercase and strip non-alphanumerics for matching."""
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _skill_matches_topic(skill_key: str, title_key: str) -> bool:
+    """High-confidence match between a skill and a topic title.
+
+    The normalised skill must equal the normalised title, or
+    the shorter of the two — when it is at least four
+    characters — must be contained in the longer. The length
+    floor keeps short substrings ("sql" inside "mysql") from
+    producing false-positive matches.
+    """
+    if not skill_key or not title_key:
+        return False
+    if skill_key == title_key:
+        return True
+    shorter, longer = (
+        (skill_key, title_key)
+        if len(skill_key) <= len(title_key)
+        else (title_key, skill_key)
+    )
+    return len(shorter) >= 4 and shorter in longer
+
+
+def map_skills_to_topic_ids(
+    skills: list[str],
+    topics: list[Any],
+) -> tuple[dict[str, str], list[str]]:
+    """Map skill strings to curriculum topic IDs.
+
+    A skill maps to a topic only on a high-confidence title
+    match (see :func:`_skill_matches_topic`). Skills with no
+    confident match are returned unmapped so they stay as
+    plain focus-area strings — a topic ID is never invented.
+    Returns ``(mapped, unmapped)`` where ``mapped`` maps the
+    original skill text to its topic ID.
+    """
+    mapped: dict[str, str] = {}
+    unmapped: list[str] = []
+    seen: set[str] = set()
+    for skill in skills:
+        cleaned = str(skill or "").strip()
+        if not cleaned:
+            continue
+        key = _normalise_topic_token(cleaned)
+        if key in seen:
+            continue
+        seen.add(key)
+        topic_id = ""
+        for topic in topics:
+            if _skill_matches_topic(
+                key, _normalise_topic_token(getattr(topic, "title", ""))
+            ):
+                topic_id = getattr(topic, "id", "")
+                break
+        if topic_id:
+            mapped[cleaned] = topic_id
+        else:
+            unmapped.append(cleaned)
+    return mapped, unmapped
 
 
 def _run_startup_fsrs_backfill(store: LearningStore) -> None:
@@ -294,3 +363,72 @@ async def next_objectives(
             )
         )
     return NextObjectivesResponse(objectives=objectives)
+
+
+@router.post("/plan-from-jd", response_model=StudyPlanFromJDResponse)
+async def study_plan_from_jd(
+    body: StudyPlanFromJDRequest,
+    user: dict = Depends(require_auth),
+):
+    """Build a study plan from a job description.
+
+    The JD is analysed against the stored resume profile;
+    high-confidence gap/focus-area matches are mapped to
+    curriculum topic IDs, persisted as the learner's
+    ``focus_topic_ids``, and the study plan is built from
+    the updated profile.
+    """
+    _ensure_enabled()
+    if _planner is None:
+        raise HTTPException(status_code=503, detail="Learning planner not initialised")
+    if not get_settings().enable_interview_plus_v1:
+        raise HTTPException(status_code=404, detail="Interview personalization disabled")
+
+    services = interview_sessions_router.get_jd_analysis_services()
+    if services is None:
+        raise HTTPException(status_code=503, detail="JD analysis services not initialised")
+    jd_analyzer, parser, resume_store = services
+
+    profile = resume_store.get(user["user"])
+    analysis = await jd_analyzer.analyze(
+        jd_text=body.jd_text,
+        profile=profile,
+        llm_config=body.llm_config,
+        user_identity=user,
+    )
+
+    skills = list(analysis.get("gaps") or [])
+    for area in analysis.get("recommended_focus_areas") or []:
+        if area not in skills:
+            skills.append(area)
+
+    topics = parser.list_topics(track=body.track.value if body.track else None)
+    mapped, unmapped = map_skills_to_topic_ids(skills, topics)
+    mapped_topic_ids = list(dict.fromkeys(mapped.values()))
+
+    existing = await _planner.run_async(
+        _planner.get_profile, user_id=user["user"]
+    )
+    merged_ids = list(
+        dict.fromkeys(
+            list(existing.get("focus_topic_ids") or []) + mapped_topic_ids
+        )
+    )[:12]
+    await _planner.run_async(
+        _planner.upsert_profile,
+        user_id=user["user"],
+        payload={"focus_topic_ids": merged_ids},
+    )
+
+    plan = await _planner.run_async(
+        _planner.build_study_plan,
+        user_id=user["user"],
+        days=body.days,
+        daily_items=body.daily_items,
+    )
+    return StudyPlanFromJDResponse(
+        **plan,
+        mapped_topic_ids=mapped_topic_ids,
+        unmapped_focus_areas=unmapped,
+        focus_topic_ids=merged_ids,
+    )
