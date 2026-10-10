@@ -35,6 +35,9 @@ htmlcov/
 *.swo
 .DS_Store
 
+# Agent tooling state (plans, worktrees, session state — local only)
+.kilo/
+
 # PWA generated assets
 sw.js
 workbox-*.js
