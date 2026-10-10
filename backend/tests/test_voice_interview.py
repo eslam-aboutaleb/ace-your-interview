@@ -162,11 +162,20 @@ class VoiceInterviewSessionTests(unittest.TestCase):
         # The question was spoken aloud and returned as audio.
         self.assertIn(started["question"], self.tts.spoken)
         self.assertEqual(started["audio_bytes"], b"\x00\x01\x02")
-        # The question is persisted as the current question.
+        # The question and its assessment contract are persisted as
+        # the current question.
         context = self.store.get_session_context(
             user_id="u1", session_id=self.session_row["session_id"]
         )
         self.assertEqual(context["current_question"], started["question"])
+        self.assertEqual(
+            context["current_question_contract"]["competency_focus"],
+            "system design",
+        )
+        self.assertEqual(
+            context["current_question_contract"]["expected_signals"],
+            ["constraints", "tradeoffs"],
+        )
 
     def test_answer_is_transcribed_evaluated_and_recorded(self):
         started = _run(self.interview.start())
@@ -179,13 +188,41 @@ class VoiceInterviewSessionTests(unittest.TestCase):
         # Feedback was spoken aloud.
         self.assertTrue(self.tts.spoken[-1].startswith("Overall score: 80"))
         # The turn was recorded with the transcript as the answer,
-        # against the question that was asked.
+        # against the question that was asked, and carries the
+        # question's assessment contract.
         turns = self.store.get_turns(
             user_id="u1", session_id=self.session_row["session_id"]
         )
         self.assertEqual(len(turns), 1)
         self.assertEqual(turns[0]["user_answer"], SCRIPTED_TRANSCRIPT)
         self.assertEqual(turns[0]["question"], started["question"])
+        self.assertEqual(turns[0]["competency_focus"], "system design")
+        self.assertEqual(turns[0]["expected_signals"], ["constraints", "tradeoffs"])
+        self.assertEqual(
+            turns[0]["question_contract"]["competency_focus"], "system design"
+        )
+
+    def test_answer_evaluates_against_the_persisted_contract(self):
+        _run(self.interview.start())
+        prompts: list[str] = []
+        original_completion = self.llm.completion
+
+        async def _capturing(prompt, llm_config=None, user_identity=None, **kwargs):
+            prompts.append(prompt)
+            return await original_completion(
+                prompt, llm_config, user_identity, **kwargs
+            )
+
+        self.llm.completion = _capturing
+        _run(self.interview.answer(b"\x00" * 200))
+
+        self.assertTrue(prompts)
+        # The evaluator received the assessment contract, not just the
+        # question text.
+        self.assertIn("Assessment contract", prompts[-1])
+        self.assertIn("competency_focus", prompts[-1])
+        self.assertIn("system design", prompts[-1])
+        self.assertIn("constraints", prompts[-1])
 
     def test_turn_count_cap_completes_and_builds_report(self):
         _run(self.interview.start())

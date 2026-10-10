@@ -369,6 +369,7 @@ def _interview_prompt_parts(case_input: dict[str, Any]) -> tuple[str, str]:
         str(case_input.get("question", "")),
         str(case_input.get("answer", "")),
         int(case_input.get("turn_index", 0) or 0),
+        question_contract=case_input.get("question_contract"),
     )
     return question_prompt, evaluate_prompt
 
@@ -1512,6 +1513,7 @@ async def _live_regenerate(
                         question=str(case_input.get("question", "")),
                         user_answer=str(case_input.get("answer", "")),
                         turn_index=int(case_input.get("turn_index", 0) or 0),
+                        question_contract=case_input.get("question_contract"),
                     ),
                     ensure_ascii=True,
                 )

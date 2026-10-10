@@ -124,6 +124,7 @@ class InterviewStore:
                 "feedback_mode": "TEXT NOT NULL DEFAULT 'concise'",
                 "memory_summary": "TEXT NOT NULL DEFAULT ''",
                 "company": "TEXT NOT NULL DEFAULT ''",
+                "current_question_contract_json": "TEXT NOT NULL DEFAULT ''",
             }
             for column, ddl in required_columns.items():
                 if column not in existing_columns:
@@ -132,7 +133,7 @@ class InterviewStore:
             self._migrate_interview_turns()
 
     def _migrate_interview_turns(self) -> None:
-        """Add ``degraded`` and make ``(session_id, turn_index)`` unique.
+        """Add the assessment-contract columns and make ``(session_id, turn_index)`` unique.
 
         Both steps are idempotent so an already-migrated database is a no-op.
         The de-duplication must run before the unique index is created:
@@ -148,6 +149,19 @@ class InterviewStore:
             self._conn.execute(
                 "ALTER TABLE interview_turns ADD COLUMN degraded INTEGER NOT NULL DEFAULT 0"
             )
+        # The question's assessment contract is persisted per turn so the
+        # evaluator can score the answer against what the question asked.
+        # Added before the unique-index early return so databases that were
+        # already migrated for the constraint still receive the columns.
+        for column, ddl in (
+            ("competency_focus", "TEXT NOT NULL DEFAULT ''"),
+            ("expected_signals_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("question_contract_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ):
+            if column not in turn_columns:
+                self._conn.execute(
+                    f"ALTER TABLE interview_turns ADD COLUMN {column} {ddl}"
+                )
 
         existing_indexes = {
             str(row["name"])
@@ -219,6 +233,11 @@ class InterviewStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "current_question": row["current_question"],
+            "current_question_contract": self._loads_dict(
+                row["current_question_contract_json"]
+                if "current_question_contract_json" in row.keys()
+                else ""
+            ),
             "memory_summary": row["memory_summary"] if "memory_summary" in row.keys() else "",
             "report_ready": bool(int(row["report_ready"])) if "report_ready" in row.keys() else False,
             "company": row["company"] if "company" in row.keys() else "",
@@ -295,6 +314,7 @@ class InterviewStore:
             "created_at": now,
             "updated_at": now,
             "current_question": "",
+            "current_question_contract": {},
             "memory_summary": "",
             "report_ready": False,
             "company": company.strip(),
@@ -383,6 +403,7 @@ class InterviewStore:
         user_id: str,
         session_id: str,
         question: str,
+        contract: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         session = self.get_session_context(user_id=user_id, session_id=session_id)
         if not session:
@@ -397,10 +418,20 @@ class InterviewStore:
                 self._conn.execute(
                     """
                     UPDATE interview_sessions
-                    SET current_question = ?, asked_questions_json = ?, updated_at = ?
+                    SET current_question = ?,
+                        current_question_contract_json = ?,
+                        asked_questions_json = ?,
+                        updated_at = ?
                     WHERE user_id = ? AND session_id = ?
                     """,
-                    (q, self._dumps(asked), now, user_id, session_id),
+                    (
+                        q,
+                        self._dumps(contract or {}),
+                        self._dumps(asked),
+                        now,
+                        user_id,
+                        session_id,
+                    ),
                 )
         return self.get_session(user_id=user_id, session_id=session_id)
 
@@ -451,6 +482,7 @@ class InterviewStore:
         follow_up_note: str,
         response_time_ms: int,
         degraded: bool = False,
+        contract: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         now = _utc_now_iso()
         try:
@@ -461,8 +493,9 @@ class InterviewStore:
                         INSERT INTO interview_turns(
                             session_id, user_id, turn_index, question, user_answer,
                             rubric_json, strengths_json, improvements_json,
-                            follow_up_note, response_time_ms, degraded, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            follow_up_note, response_time_ms, degraded, created_at,
+                            competency_focus, expected_signals_json, question_contract_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             session_id,
@@ -477,6 +510,9 @@ class InterviewStore:
                             max(0, int(response_time_ms)),
                             1 if degraded else 0,
                             now,
+                            str((contract or {}).get("competency_focus") or ""),
+                            self._dumps((contract or {}).get("expected_signals") or []),
+                            self._dumps(contract or {}),
                         ),
                     )
 
@@ -526,6 +562,11 @@ class InterviewStore:
             "follow_up_note": follow_up_note,
             "response_time_ms": max(0, int(response_time_ms)),
             "degraded": bool(degraded),
+            "competency_focus": str((contract or {}).get("competency_focus") or ""),
+            "expected_signals": list(
+                (contract or {}).get("expected_signals") or []
+            ),
+            "question_contract": dict(contract or {}),
             "created_at": now,
         }
         session = self.get_session(user_id=user_id, session_id=session_id)
@@ -537,7 +578,8 @@ class InterviewStore:
                 """
                 SELECT session_id, turn_index, question, user_answer, rubric_json,
                        strengths_json, improvements_json, follow_up_note,
-                       response_time_ms, degraded, created_at
+                       response_time_ms, degraded, created_at,
+                       competency_focus, expected_signals_json, question_contract_json
                 FROM interview_turns
                 WHERE user_id = ? AND session_id = ?
                 ORDER BY turn_index ASC
@@ -559,6 +601,13 @@ class InterviewStore:
                     "follow_up_note": row["follow_up_note"],
                     "response_time_ms": int(row["response_time_ms"]),
                     "degraded": bool(int(row["degraded"])) if "degraded" in row.keys() else False,
+                    "competency_focus": row["competency_focus"] if "competency_focus" in row.keys() else "",
+                    "expected_signals": self._loads_list(
+                        row["expected_signals_json"] if "expected_signals_json" in row.keys() else "[]"
+                    ),
+                    "question_contract": self._loads_dict(
+                        row["question_contract_json"] if "question_contract_json" in row.keys() else ""
+                    ),
                     "created_at": row["created_at"],
                 }
             )

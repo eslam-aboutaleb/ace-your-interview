@@ -269,8 +269,10 @@ class VoiceInterviewSession:
             user_id=self.user_id,
             session_id=self.session_id,
             question=question["question"],
+            contract=question,
         )
         self.session["current_question"] = question["question"]
+        self.session["current_question_contract"] = question
         audio = await self.voice.generate_speech(question["question"])
         return {
             "session_id": self.session_id,
@@ -315,6 +317,10 @@ class VoiceInterviewSession:
 
     async def _evaluate_answer(self, user_answer: str) -> dict[str, Any]:
         question = str(self.session.get("current_question") or "").strip()
+        # The question's assessment contract was persisted when the
+        # question was asked; legacy sessions have none and evaluate
+        # against the question text only.
+        question_contract = self.session.get("current_question_contract") or None
         turn_index = self.turns_completed + 1
         eval_payload = await self.generator.evaluate_answer(
             session=self.session,
@@ -323,6 +329,7 @@ class VoiceInterviewSession:
             turn_index=turn_index,
             llm_config=self.llm_config,
             user_identity=self.user_identity,
+            question_contract=question_contract,
         )
         # Internal drift signal for the eval harness; never spoken.
         eval_payload.pop("follow_up_note_repaired", None)
@@ -340,6 +347,7 @@ class VoiceInterviewSession:
             follow_up_note=eval_payload["follow_up_note"],
             response_time_ms=0,
             degraded=degraded,
+            contract=question_contract,
         )
         if updated_session:
             self.session = updated_session

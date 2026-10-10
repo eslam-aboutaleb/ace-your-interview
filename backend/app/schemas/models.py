@@ -715,6 +715,9 @@ class InterviewSession(BaseModel):
     created_at: str
     updated_at: str
     current_question: str = ""
+    #: The full assessment contract of the current question, persisted
+    #: with the session so the answer can be scored against what was asked.
+    current_question_contract: dict[str, Any] = Field(default_factory=dict)
     report_ready: bool = False
 
 
@@ -729,10 +732,16 @@ class InterviewTurn(BaseModel):
     follow_up_note: str = ""
     response_time_ms: int = 0
     created_at: str
-    degraded: bool = False
     #: True when the provider could not produce a usable evaluation. The answer
     #: was still saved; the rubric carries no numbers.
     degraded: bool = False
+    #: The question's assessment contract, persisted with the turn so the
+    #: evaluation can be replayed against what the question asked for.
+    competency_focus: str = ""
+    expected_signals: list[str] = Field(default_factory=list)
+    #: The full contract the turn was evaluated against; empty for
+    #: legacy turns that predate contract persistence.
+    question_contract: dict[str, Any] = Field(default_factory=dict)
 
 
 class InterviewReport(BaseModel):
