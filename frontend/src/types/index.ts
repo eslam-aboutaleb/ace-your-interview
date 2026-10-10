@@ -503,6 +503,11 @@ export interface QuizChoice {
   text: string;
 }
 
+export interface QuizDistractorRationale {
+  label: string;
+  rationale: string;
+}
+
 export interface QuizQuestion {
   question: string;
   type: QuizQuestionType;
@@ -524,6 +529,9 @@ export interface QuizQuestionV2 {
   topic_id: string;
   source_quote: string;
   reasoning_summary: string;
+  learning_objective: string;
+  expected_answer: string;
+  distractor_rationales: QuizDistractorRationale[];
 }
 
 export interface GenerateQuizRequest {

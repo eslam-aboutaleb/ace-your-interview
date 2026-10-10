@@ -12,8 +12,10 @@ ever opened.
 """
 
 import asyncio
+import hashlib
 import json
 import unittest
+from collections import Counter
 
 from app.services import question_generator as qg
 from app.services.question_generator import QuestionGenerator
@@ -83,7 +85,11 @@ def _generator(results=None, mcp=None) -> QuestionGenerator:
 
 
 def _item(question: str, answer: str = "A grounded answer.", **overrides) -> dict:
-    item = {"question": question, "answer": answer}
+    item = {
+        "question": question,
+        "answer": answer,
+        "source_quote": "Pooling bounds concurrent connections",
+    }
     item.update(overrides)
     return item
 
@@ -244,6 +250,103 @@ class GroundingTests(unittest.TestCase):
             problem_solving_mode=False,
         )
         self.assertTrue(grounded)
+
+    def test_a_single_short_shared_token_is_not_grounded(self):
+        self.assertFalse(
+            qg._question_is_grounded_to_anchors(
+                "Explain how the log works in practice",
+                topic_title="Database internals",
+                anchors=["write-ahead log durability"],
+                problem_solving_mode=False,
+            )
+        )
+
+    def test_two_shared_tokens_are_grounded(self):
+        self.assertTrue(
+            qg._question_is_grounded_to_anchors(
+                "Explain how the log and the lock interact",
+                topic_title="Database internals",
+                anchors=["write-ahead log and lock durability"],
+                problem_solving_mode=False,
+            )
+        )
+
+    def test_a_shared_token_of_five_or_more_characters_is_grounded(self):
+        self.assertTrue(
+            qg._question_is_grounded_to_anchors(
+                "Explain how durability is guaranteed",
+                topic_title="Database internals",
+                anchors=["write-ahead log durability"],
+                problem_solving_mode=False,
+            )
+        )
+
+
+class NormaliseAnswerPositionTests(unittest.TestCase):
+    def _mcq(self, question: str) -> dict:
+        return {
+            "question": question,
+            "type": "mcq",
+            "choices": [
+                {"label": "A", "text": "First"},
+                {"label": "B", "text": "Second"},
+                {"label": "C", "text": "Third"},
+                {"label": "D", "text": "Fourth"},
+            ],
+            "correct_answer": "A",
+        }
+
+    def test_the_correct_answer_lands_on_the_hash_derived_slot(self):
+        question = "Which structure preserves insertion order while offering fast lookup?"
+        normalised = qg._normalise_answer_position(self._mcq(question))
+        digest = hashlib.sha256(
+            qg._normalise_question(question).encode("utf-8")
+        ).digest()
+        expected_label = chr(ord("A") + digest[0] % 4)
+        self.assertEqual(normalised["correct_answer"], expected_label)
+        correct_text = next(
+            choice["text"]
+            for choice in normalised["choices"]
+            if choice["label"] == expected_label
+        )
+        self.assertEqual(correct_text, "First")
+        self.assertEqual(
+            [choice["label"] for choice in normalised["choices"]],
+            ["A", "B", "C", "D"],
+        )
+
+    def test_the_position_distribution_covers_all_four_slots(self):
+        positions: Counter[str] = Counter()
+        for index in range(400):
+            item = self._mcq(f"Question number {index} about a distinct topic?")
+            positions[qg._normalise_answer_position(item)["correct_answer"]] += 1
+        self.assertEqual(set(positions), {"A", "B", "C", "D"})
+        for count in positions.values():
+            self.assertGreater(count, 40)
+
+    def test_normalisation_is_idempotent(self):
+        item = self._mcq(
+            "Which structure preserves insertion order while offering fast lookup?"
+        )
+        once = qg._normalise_answer_position(item)
+        twice = qg._normalise_answer_position(dict(once))
+        self.assertEqual(once, twice)
+
+    def test_true_false_items_keep_the_documented_order(self):
+        item = {
+            "question": "True or false: pooling bounds concurrent connections?",
+            "type": "true_false",
+            "choices": [
+                {"label": "A", "text": "True"},
+                {"label": "B", "text": "False"},
+            ],
+            "correct_answer": "A",
+        }
+        normalised = qg._normalise_answer_position(item)
+        self.assertEqual(normalised["correct_answer"], "A")
+        self.assertEqual(
+            [choice["text"] for choice in normalised["choices"]], ["True", "False"]
+        )
 
     def test_the_problem_solving_reasoning_summary_leads_with_the_invariant(self):
         self.assertIn("invariant", qg._default_reasoning_summary(True))
@@ -684,6 +787,13 @@ def _quiz_item(**overrides) -> dict:
         "reasoning_summary": "insertion order plus hash lookup points to LinkedHashMap",
         "target_level": "mid",
         "difficulty": "medium",
+        "learning_objective": "Explain which collection preserves insertion order with hash lookup.",
+        "expected_answer": "LinkedHashMap",
+        "distractor_rationales": [
+            {"label": "B", "rationale": "HashSet does not preserve insertion order."},
+            {"label": "C", "rationale": "TreeSet orders entries by their natural ordering."},
+            {"label": "D", "rationale": "PriorityQueue orders entries by priority, not insertion."},
+        ],
     }
     item.update(overrides)
     return item
@@ -1927,6 +2037,9 @@ class ValidateQuizItemMissingKeyTests(unittest.TestCase):
             "source_quote",
             "reasoning_summary",
             "target_level",
+            "learning_objective",
+            "expected_answer",
+            "distractor_rationales",
         ):
             with self.subTest(key=key):
                 item = _quiz_item()
@@ -1934,6 +2047,93 @@ class ValidateQuizItemMissingKeyTests(unittest.TestCase):
                 ok, issue = qg._validate_quiz_item(item, TOPICS, TYPES, None, "mid")
                 self.assertFalse(ok)
                 self.assertEqual(issue, f"missing_{key}")
+
+    def test_a_legacy_item_without_the_evidence_fields_is_rejected(self):
+        legacy = _quiz_item()
+        for key in ("learning_objective", "expected_answer", "distractor_rationales"):
+            legacy.pop(key)
+        ok, issue = qg._validate_quiz_item(legacy, TOPICS, TYPES, None, "mid")
+        self.assertFalse(ok)
+        self.assertEqual(issue, "missing_learning_objective")
+
+    def test_a_quiz_quote_that_is_not_in_the_topic_content_is_rejected(self):
+        item = _quiz_item(source_quote="An invented quotation about pooling.")
+        ok, issue = qg._validate_quiz_item(
+            item,
+            TOPICS,
+            TYPES,
+            None,
+            "mid",
+            topic_content="A pool bounds concurrent connections and reuses warm ones.",
+        )
+        self.assertFalse(ok)
+        self.assertEqual(issue, "source_quote_not_in_content")
+
+    def test_a_quiz_quote_must_be_a_verbatim_excerpt_of_the_content(self):
+        item = _quiz_item(source_quote="a pool bounds concurrent connections")
+        ok, issue = qg._validate_quiz_item(
+            item,
+            TOPICS,
+            TYPES,
+            None,
+            "mid",
+            topic_content="A pool bounds concurrent connections and reuses warm ones.",
+        )
+        self.assertTrue(ok, issue)
+
+    def test_problem_solving_quiz_topics_skip_the_content_check(self):
+        item = _quiz_item(
+            topic_id=PROBLEM_SOLVING_TOPIC_ID,
+            source_quote="any quotation at all",
+        )
+        ok, issue = qg._validate_quiz_item(
+            item,
+            TOPICS | {PROBLEM_SOLVING_TOPIC_ID},
+            TYPES,
+            None,
+            "mid",
+            topic_content="unrelated content",
+        )
+        self.assertTrue(ok, issue)
+
+    def test_distractor_rationales_must_cover_every_wrong_choice(self):
+        item = _quiz_item()
+        item["distractor_rationales"] = item["distractor_rationales"][:2]
+        ok, issue = qg._validate_quiz_item(item, TOPICS, TYPES, None, "mid")
+        self.assertFalse(ok)
+        self.assertEqual(issue, "missing_distractor_rationale")
+
+    def test_distractor_rationales_must_be_substantive(self):
+        item = _quiz_item()
+        item["distractor_rationales"] = [
+            {"label": "B", "rationale": "too short"},
+            {"label": "C", "rationale": "TreeSet orders entries by their natural ordering."},
+            {"label": "D", "rationale": "PriorityQueue orders entries by priority, not insertion."},
+        ]
+        ok, issue = qg._validate_quiz_item(item, TOPICS, TYPES, None, "mid")
+        self.assertFalse(ok)
+        self.assertEqual(issue, "invalid_distractor_rationales")
+
+    def test_expected_answer_must_repeat_the_correct_choice_text(self):
+        ok, issue = qg._validate_quiz_item(
+            _quiz_item(expected_answer="HashSet"), TOPICS, TYPES, None, "mid"
+        )
+        self.assertFalse(ok)
+        self.assertEqual(issue, "expected_answer_mismatch")
+
+    def test_an_empty_expected_answer_is_rejected(self):
+        ok, issue = qg._validate_quiz_item(
+            _quiz_item(expected_answer=""), TOPICS, TYPES, None, "mid"
+        )
+        self.assertFalse(ok)
+        self.assertEqual(issue, "invalid_expected_answer")
+
+    def test_an_empty_learning_objective_is_rejected(self):
+        ok, issue = qg._validate_quiz_item(
+            _quiz_item(learning_objective=""), TOPICS, TYPES, None, "mid"
+        )
+        self.assertFalse(ok)
+        self.assertEqual(issue, "invalid_learning_objective")
 
     def test_a_three_choice_mcq_is_rejected_by_the_label_check(self):
         item = _quiz_item(
