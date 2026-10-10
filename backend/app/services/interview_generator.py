@@ -26,6 +26,10 @@ from app.services.llm_policy import (
     STUDY_APP_NOT_ASSIGNED_CODE,
     raise_if_policy_blocked_result,
 )
+from app.services.llm_skills import (
+    interview_skill_block,
+    skills_for_session,
+)
 from app.services.learning_store import record_generation_run_safe
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
@@ -42,6 +46,7 @@ logger = logging.getLogger(__name__)
 _MAX_ATTEMPTS = 100
 _QUESTION_RETRY_TIMEOUT_SECONDS = 30.0
 _EVAL_RETRY_TIMEOUT_SECONDS = 60.0
+_MAX_SKILL_BLOCK_CHARS = 3000
 
 #: Outcomes a retry loop must not spin on. Re-sending the identical prompt at the
 #: identical caps cannot fix a budget rejection, a truncated response, a provider
@@ -56,7 +61,7 @@ _NON_RETRYABLE_ERROR_CODES: frozenset[str] = frozenset(
     }
 )
 
-#: Shared JSON salvage parser (Stage 2.3). Kept as a module alias so the rest of
+#: Shared JSON salvage parser. Kept as a module alias so the rest of
 #: this module keeps one spelling for "turn an LLM response into a dict".
 _extract_json = parse_json_object
 _normalise_question = normalise_question
@@ -180,6 +185,22 @@ class InterviewGenerator:
     @staticmethod
     def _is_behavioral_session(session: dict[str, Any]) -> bool:
         return str(session.get("interview_type", "")).strip().lower() == "behavioral"
+
+    @staticmethod
+    def _session_type_for_skills(session: dict[str, Any]) -> str:
+        if InterviewGenerator._is_coding_session(session):
+            return "coding"
+        if InterviewGenerator._is_behavioral_session(session):
+            return "behavioral"
+        haystack = " ".join(
+            [
+                str(session.get("track") or ""),
+                str(session.get("target_role") or ""),
+            ]
+        ).lower().replace("-", " ")
+        if "system design" in haystack:
+            return "system-design"
+        return "general"
 
     @staticmethod
     def _interviewer_style(session: dict[str, Any]) -> str:
@@ -438,6 +459,23 @@ class InterviewGenerator:
         progression_rules = InterviewGenerator._question_progression_rules(session)
         company_pack_block = InterviewGenerator._company_pack_block(session)
         star_story_block = InterviewGenerator._star_story_block(session)
+        selected_skills = skills_for_session(
+            level=str(session.get("level") or ""),
+            session_type=InterviewGenerator._session_type_for_skills(session),
+            include_educational=False,
+        )
+        interview_block = interview_skill_block(selected_skills["interview"])[
+            :_MAX_SKILL_BLOCK_CHARS
+        ]
+        interview_skill_section = (
+            (
+                "\nInterview skills this question should probe "
+                "(weave the relevant ones into the question and expected_signals):\n"
+                f"{interview_block}"
+            )
+            if interview_block
+            else ""
+        )
         style_rule = (
             "Be encouraging and confidence-building while still assessing rigor."
             if interviewer_style == "supportive"
@@ -476,6 +514,7 @@ class InterviewGenerator:
                     "senior: architecture-aware coding, performance constraints, and maintainability.",
                     "Keep question <= 65 words.",
                     "expected_signals must contain 2-5 concise bullets and include algorithmic clarity + complexity awareness.",
+                    "expected_signals should reference the relevant interview skills for this session type where the question calls for them.",
                     "No markdown or extra text.",
                 ],
             )
@@ -497,7 +536,7 @@ Session configuration:
 - resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
 - session_memory_summary: {memory_block}
 {company_pack_block}
-{star_story_block}
+{star_story_block}{interview_skill_section}
 
 Recent turns:
 {InterviewGenerator._format_recent_turns(turns)}
@@ -518,6 +557,7 @@ Already asked questions (do not repeat semantically):
             f"Keep question <= {question_word_limit} words.",
             "expected_signals must contain 2-5 concise bullets.",
             "expected_signals should describe observable evidence in a strong answer.",
+            "expected_signals should reference the relevant interview skills for this session type where the question calls for them.",
             *InterviewGenerator._rule_lines_from_block(behavioral_rules),
             "No markdown or extra text.",
         ]
@@ -548,7 +588,7 @@ Session configuration:
 - resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
 - session_memory_summary: {memory_block}
 {company_pack_block}
-{star_story_block}
+{star_story_block}{interview_skill_section}
 
 Recent turns:
 {InterviewGenerator._format_recent_turns(turns)}
@@ -571,6 +611,23 @@ Already asked questions (do not repeat semantically):
         feedback_mode = InterviewGenerator._feedback_mode(session)
         memory_summary = str(session.get("memory_summary", "")).strip()
         memory_block = memory_summary[:1200] if memory_summary else "(none)"
+        selected_skills = skills_for_session(
+            level=str(session.get("level") or ""),
+            session_type=InterviewGenerator._session_type_for_skills(session),
+            include_educational=False,
+        )
+        interview_block = interview_skill_block(selected_skills["interview"])[
+            :_MAX_SKILL_BLOCK_CHARS
+        ]
+        interview_skill_section = (
+            (
+                "\nInterview skills the candidate should demonstrate "
+                "(score their demonstration of the relevant ones):\n"
+                f"{interview_block}"
+            )
+            if interview_block
+            else ""
+        )
         behavioral_rules = ""
         if InterviewGenerator._is_behavioral_session(session):
             behavioral_rules = """
@@ -642,6 +699,8 @@ Already asked questions (do not repeat semantically):
                 "Keep scoring strict and evidence-based.",
                 "Use the provided question and answer only; do not invent missing implementation details.",
                 contract_rule,
+                "Score the candidate's demonstration of the relevant interview skills (clarify before coding, verbalise complexity, enumerate edge cases, discuss tradeoffs, STAR structure) as part of reasoning_depth and communication_clarity; do not reward content the question did not ask for.",
+                "In `### What to improve next`, name the specific interview skill the candidate should practice next.",
                 "strengths/improvements must each have 1-4 concise bullets.",
                 "If answer is weak or vague, score low rather than guessing intent.",
                 "strengths/improvements should remain plain short strings.",
@@ -686,7 +745,7 @@ Question:
 {question}
 {contract_section}
 Candidate answer:
-{answer[:12000]}
+{answer[:12000]}{interview_skill_section}
 
 {contract}
 """
@@ -868,20 +927,20 @@ Candidate answer:
     def _default_follow_up_focus_lines(session: dict[str, Any]) -> list[str]:
         if InterviewGenerator._is_coding_session(session):
             return [
-                "Start by naming the invariant, the chosen data structure, and why the brute-force baseline is too expensive.",
-                "Walk one edge case and explain how the update order keeps the invariant true.",
-                "State time and space clearly, then mention the tradeoff or constraint that would force a different approach.",
+                "Name the invariant and the data structure (clarify before coding), and why the brute-force baseline is too expensive (brute force first).",
+                "Walk one edge case (enumerate edge cases) and explain how the update order keeps the invariant true.",
+                "State time and space clearly (verbalise complexity), then mention the tradeoff or constraint that would force a different approach (discuss tradeoffs).",
             ]
         if InterviewGenerator._is_behavioral_session(session):
             return [
-                "Open with a crisp situation/task summary so the interviewer understands the stakes immediately.",
-                "Focus on your specific actions, why you chose them, and how you handled tradeoffs or pushback.",
-                "Close with measurable impact plus one reflection that shows judgment and learning.",
+                "Open with a crisp situation/task summary (STAR structure) so the interviewer understands the stakes immediately.",
+                "Focus on your specific actions (own your contribution), why you chose them, and how you handled tradeoffs or pushback.",
+                "Close with a measurable result and one reflection (STAR result), then ask one insightful follow-up question about scale or failure modes.",
             ]
         return [
-            "Frame the goal and non-negotiable constraints before naming the design or decision.",
-            "Explain the main tradeoff, bottleneck, or failure mode instead of listing components without reasoning.",
-            "Close with how you would validate the decision using metrics, testing, rollout guards, or operational signals.",
+            "Frame the goal and non-negotiable constraints (clarify before coding) before naming the design or decision.",
+            "Explain the main tradeoff, bottleneck, or failure mode (discuss tradeoffs) instead of listing components without reasoning.",
+            "Close with how you would validate the decision using metrics, testing, rollout guards, or operational signals, plus one follow-up question you would ask.",
         ]
 
     @staticmethod
@@ -889,31 +948,31 @@ Candidate answer:
         if InterviewGenerator._is_coding_session(session):
             if mode == "concise":
                 return (
-                    "I would start by stating the invariant and the data structure that preserves it. "
-                    "Then I would compare it against the brute-force baseline, walk one edge case, and finish with the exact time and space complexity."
+                    "I would start by stating the invariant and the data structure that preserves it (clarify before coding). "
+                    "Then I would compare it against the brute-force baseline (brute force first), walk one edge case (enumerate edge cases), and finish with the exact time and space complexity (verbalise complexity)."
                 )
             return (
-                "I would begin by restating the constraint that drives the solution, then name the invariant I need to preserve on every step. "
-                "From there I would choose the data structure that keeps that invariant cheap to maintain, explain why the brute-force alternative does repeated work, "
-                "walk one representative edge case, and finish with the exact time and space complexity plus the tradeoff that would make me switch approaches."
+                "I would begin by restating the constraint that drives the solution (clarify before coding), then name the invariant I need to preserve on every step. "
+                "From there I would choose the data structure that keeps that invariant cheap to maintain, explain why the brute-force alternative does repeated work (brute force first), "
+                "walk one representative edge case (enumerate edge cases), and finish with the exact time and space complexity (verbalise complexity) plus the tradeoff that would make me switch approaches (discuss tradeoffs)."
             )
         if InterviewGenerator._is_behavioral_session(session):
             if mode == "concise":
                 return (
-                    "I would answer in STAR form: brief context, the concrete action I chose, the measurable result, and one reflection about what I learned or would improve."
+                    "I would answer in STAR form: brief context, the concrete action I chose (own your contribution), the measurable result, and one reflection about what I learned or would improve."
                 )
             return (
-                "I would open with the situation and task in one sentence, explain the constraint or conflict I had to manage, then focus on the specific actions I took and why I chose them. "
-                "I would quantify the outcome, describe how I aligned stakeholders or handled pushback, and close with one reflection that shows judgment and growth."
+                "I would open with the situation and task in one sentence (STAR structure), explain the constraint or conflict I had to manage, then focus on the specific actions I took and why I chose them (own your contribution). "
+                "I would quantify the outcome, describe how I aligned stakeholders or handled pushback, and close with one reflection that shows judgment and growth, plus one follow-up question about scale or failure modes (ask insightful follow-ups)."
             )
         if mode == "concise":
             return (
-                "I would start with the goal and constraints, explain the design choice in two or three steps, call out the main tradeoff, and end with the bottleneck or metric I would watch first."
+                "I would start with the goal and constraints (clarify before coding), explain the design choice in two or three steps, call out the main tradeoff (discuss tradeoffs), and end with the bottleneck or metric I would watch first."
             )
         return (
-            "I would begin by framing the problem, constraints, and success criteria so the interviewer knows what decision I am optimizing for. "
-            "Then I would explain the design or implementation in a clear sequence, compare the main alternative I rejected, name the bottleneck or failure mode I expect first, "
-            "and finish with how I would validate the decision through metrics, testing, or rollout safeguards."
+            "I would begin by framing the problem, constraints, and success criteria so the interviewer knows what decision I am optimizing for (clarify before coding). "
+            "Then I would explain the design or implementation in a clear sequence, compare the main alternative I rejected (discuss tradeoffs), name the bottleneck or failure mode I expect first, "
+            "and finish with how I would validate the decision through metrics, testing, or rollout safeguards, plus one follow-up question about scale (ask insightful follow-ups)."
         )
 
     def _build_default_follow_up_note(

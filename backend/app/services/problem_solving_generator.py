@@ -15,6 +15,11 @@ from app.services.llm_client import (
     supported_options,
 )
 from app.services.llm_policy import raise_if_policy_blocked_result
+from app.services.llm_skills import (
+    interview_skill_block,
+    skills_for_session,
+    technical_skill_block,
+)
 from app.services.mcp_gateway import MCPGateway
 from app.services.prompt_blocks import (
     UNTRUSTED_CLAUSE,
@@ -40,6 +45,7 @@ _MIN_CONTENT_CHARS = 90
 _STREAM_BATCH_SIZE = 12
 _MAX_STREAM_HEADINGS_CONTEXT = 120
 _MAX_TOKENS_CAP = 1500
+_MAX_SKILL_BLOCK_CHARS = 3000
 #: The problem-solving instructor system prompt contract, migrated
 #: verbatim into the prompt registry as ``problem_solving_instructor@1``.
 _INSTRUCTOR_SYSTEM_PROMPT = default_registry.get("problem_solving_instructor").system_prompt
@@ -191,7 +197,7 @@ def _build_stream_batch_prompt(
     existing_headings: list[str],
     mcp_context: str = "",
 ) -> str:
-    """Build the user turn. The instructor persona lives in ``system`` (Stage 2.1).
+    """Build the user turn. The instructor persona lives in ``system``.
 
     The rules here carry the whole intent of the deleted non-streaming
     ``_build_prompt``: exact batch size, level progression, interview-relevance
@@ -207,6 +213,32 @@ def _build_stream_batch_prompt(
     )
     existing_block = existing_blob if existing_blob else "- (none yet)"
     mcp_block = untrusted_block("external_context", mcp_context, 2500)
+    selected_skills = skills_for_session(
+        level=level_start, session_type="coding", include_educational=False
+    )
+    technical_block = technical_skill_block(selected_skills["technical"])[
+        :_MAX_SKILL_BLOCK_CHARS
+    ]
+    interview_block = interview_skill_block(selected_skills["interview"])[
+        :_MAX_SKILL_BLOCK_CHARS
+    ]
+    skill_context = "\n\n".join(
+        f"{label}\n{block}"
+        for label, block in (
+            (
+                "Coding patterns and tricks to teach in this batch "
+                "(name the pattern, its common mistakes, and its complexity):",
+                technical_block,
+            ),
+            (
+                "Interview communication skills the learner must practice "
+                "(clarify, brute-force first, verbalise complexity, edge cases, "
+                "tradeoffs):",
+                interview_block,
+            ),
+        )
+        if block
+    )
     contract = render_contract(
         schema_label="Return ONLY valid JSON object with this exact schema",
         schema_block="""{
@@ -228,11 +260,13 @@ def _build_stream_batch_prompt(
             "Keep content concise and practical.",
             f"Use {language}-specific framing for idioms and tradeoffs, not generic advice.",
             "Across the whole roadmap the batches together must cover fundamentals, data structures, algorithmic patterns, and interview communication.",
+            "Each section must teach at least one concrete coding pattern or trick from the skill context, including its common mistakes and time/space complexity.",
+            "Each section must include the interview communication skill that applies (e.g. clarify before coding, verbalise complexity, enumerate edge cases, discuss tradeoffs).",
             "No markdown and no prose outside JSON.",
             UNTRUSTED_CLAUSE,
         ],
     )
-    return f"""{contract}{mcp_block}
+    return f"""{contract}\n{skill_context}\n{mcp_block}
 """
 
 
