@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 
 from app.services.learning_planner import LearningPlannerStore
 from app.services.learning_store import LearningStore
@@ -92,6 +93,21 @@ class LearningPlannerStoreTests(unittest.TestCase):
                 response_time_ms=1000,
                 mode="quiz",
             )
+            # FSRS retention is ~1.0 right after a review and
+            # decays with time; backdate the card so the topic
+            # reads as weak (low retention) and due, which is
+            # what the study/review branches key off.
+            learning._conn.execute(
+                "UPDATE fsrs_cards SET last_review_at = ?, due_at = ? "
+                "WHERE user_id = ? AND card_id = ?",
+                (
+                    (datetime.now(UTC) - timedelta(days=90)).isoformat(),
+                    (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+                    "alice",
+                    "q1",
+                ),
+            )
+            learning._conn.commit()
 
             recommendations = planner.build_recommendations(user_id="alice", limit=10)
             recommendation_types = {

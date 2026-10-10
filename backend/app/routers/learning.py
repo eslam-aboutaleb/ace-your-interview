@@ -101,14 +101,9 @@ async def review_queue(
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
-    if _fsrs_enabled():
-        data = await _store.run_async(
-            _store.get_fsrs_review_queue, user_id=user["user"], limit=limit
-        )
-    else:
-        data = await _store.run_async(
-            _store.get_review_queue, user_id=user["user"], limit=limit
-        )
+    data = await _store.run_async(
+        _store.get_fsrs_review_queue, user_id=user["user"], limit=limit
+    )
     return ReviewQueueResponse(**data)
 
 
@@ -177,14 +172,9 @@ async def topic_mastery(
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
-    if _fsrs_enabled():
-        data = await _store.run_async(
-            _store.get_fsrs_topic_mastery, user_id=user["user"], limit=limit
-        )
-    else:
-        data = await _store.run_async(
-            _store.get_topic_mastery, user_id=user["user"], limit=limit
-        )
+    data = await _store.run_async(
+        _store.get_fsrs_topic_mastery, user_id=user["user"], limit=limit
+    )
     return TopicMasteryResponse(**data)
 
 

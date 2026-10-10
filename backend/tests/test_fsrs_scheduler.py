@@ -37,6 +37,50 @@ class FSRSchedulerCreateCardTests(unittest.TestCase):
         self.assertLessEqual(due, after)
 
 
+class FSRSchedulerDeriveRatingTests(unittest.TestCase):
+    """The (is_correct, confidence) → FSRS rating approximation.
+
+    When a learner self-reports confidence instead of an
+    explicit recall rating, the pair is mapped onto the four
+    FSRS ratings. This is the bridge that routes quiz
+    attempts and interview turns onto the FSRS scheduler.
+    """
+
+    def test_rating_derivation_table(self):
+        cases = (
+            # (is_correct, confidence) → expected rating
+            (False, 1, "again"),
+            (False, 3, "again"),
+            (False, 5, "again"),
+            (True, 1, "hard"),
+            (True, 2, "hard"),
+            (True, 3, "good"),
+            (True, 4, "easy"),
+            (True, 5, "easy"),
+        )
+        for is_correct, confidence, expected in cases:
+            with self.subTest(
+                is_correct=is_correct, confidence=confidence
+            ):
+                self.assertEqual(
+                    fsrs_scheduler.derive_rating(is_correct, confidence),
+                    expected,
+                )
+
+    def test_derive_rating_clamps_confidence_to_the_1_5_range(self):
+        self.assertEqual(fsrs_scheduler.derive_rating(True, 0), "hard")
+        self.assertEqual(fsrs_scheduler.derive_rating(True, 9), "easy")
+        self.assertEqual(fsrs_scheduler.derive_rating(True, -3), "hard")
+
+    def test_derive_rating_only_emits_valid_ratings(self):
+        for is_correct in (False, True):
+            for confidence in range(1, 6):
+                self.assertIn(
+                    fsrs_scheduler.derive_rating(is_correct, confidence),
+                    fsrs_scheduler.RATINGS,
+                )
+
+
 class FSRSchedulerReviewVectorTests(unittest.TestCase):
     """Known FSRS-4.5 vectors (default weights, fuzz disabled)."""
 

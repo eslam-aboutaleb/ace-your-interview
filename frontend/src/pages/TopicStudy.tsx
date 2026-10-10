@@ -200,7 +200,6 @@ export default function TopicStudy() {
     getTopicProgress,
     markTopicComplete,
     recordAttempt,
-    setMastery,
     addAnswered,
   } = useProgressStore();
 
@@ -1059,7 +1058,7 @@ export default function TopicStudy() {
     const learnerAnswer = answerDrafts[idx] || "";
 
     try {
-      const res = await recordLearningAttempt({
+      await recordLearningAttempt({
         question_id: q.question_id,
         topic_id: topicId,
         user_answer: learnerAnswer,
@@ -1071,8 +1070,10 @@ export default function TopicStudy() {
       setSubmittedAttempts((prev) => new Set(prev).add(idx));
       setOutcomeByIdx((prev) => ({ ...prev, [idx]: isCorrect }));
       addAnswered(topicId, 1);
+      // The server returns the FSRS card state; the
+      // display-only client-side EWMA mirror in the
+      // progress store keeps the local mastery estimate.
       recordAttempt(topicId, isCorrect, confidence);
-      setMastery(topicId, res.mastery_score);
     } catch (err) {
       console.error(err);
       setErrorMsg("Could not save your attempt. Please retry.");
