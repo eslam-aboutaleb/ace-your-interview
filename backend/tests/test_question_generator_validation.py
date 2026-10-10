@@ -100,6 +100,13 @@ class QuestionGeneratorValidationTests(unittest.TestCase):
             "source_quote": "Only one branch performs strict validation.",
             "reasoning_summary": "Read the decision path and eliminate incorrect branches.",
             "target_level": "senior",
+            "learning_objective": "Explain which branch performs strict validation.",
+            "expected_answer": "Three",
+            "distractor_rationales": [
+                {"label": "A", "rationale": "The first option skips the validation branch."},
+                {"label": "B", "rationale": "The second option validates too early to be strict."},
+                {"label": "D", "rationale": "The fourth option bypasses validation entirely."},
+            ],
         }
         valid, issue = _validate_quiz_item(
             item,

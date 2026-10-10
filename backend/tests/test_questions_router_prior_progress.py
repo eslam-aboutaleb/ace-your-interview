@@ -36,7 +36,7 @@ class FakeLLM:
                 "difficulty": "medium",
                 "learning_objective": "Explain keep-alive behavior in HTTP.",
                 "source_section": "HTTP Basics",
-                "source_quote": "Keep-alive reuses a single connection for multiple requests.",
+                "source_quote": "Keep-alive lets one TCP connection carry many requests.",
                 "reasoning_summary": "Identify the timeout that governs reuse.",
                 "target_level": "mid",
             }
@@ -71,9 +71,16 @@ class FakeQuizLLM:
                 "explanation": "ETag is the response validator header.",
                 "difficulty": "medium",
                 "topic_id": "01-http",
-                "source_quote": "Keep-alive reuses a connection across requests.",
+                "source_quote": "Keep-alive lets one TCP connection carry many requests.",
                 "reasoning_summary": "Validators let a client revalidate cheaply.",
                 "target_level": "mid",
+                "learning_objective": "Explain which header validates a cached response.",
+                "expected_answer": "ETag",
+                "distractor_rationales": [
+                    {"label": "B", "rationale": "Age reports freshness lifetime, not validity."},
+                    {"label": "C", "rationale": "Vary selects cache keys, it does not validate."},
+                    {"label": "D", "rationale": "Expires is an absolute date, not a validator."},
+                ],
             }
         ]
         return {

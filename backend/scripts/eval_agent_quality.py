@@ -201,6 +201,13 @@ _HARVEST_FILLERS: dict[str, Any] = {
     "source_quote": "A source quote taken from the course content.",
     "reasoning_summary": "A reasoning summary for the harvested item.",
     "target_level": "mid",
+    "learning_objective": "Explain why idempotency matters for retry safety.",
+    "expected_answer": "first",
+    "distractor_rationales": [
+        {"label": "B", "rationale": "The second option is a plausible distractor."},
+        {"label": "C", "rationale": "The third option is a plausible distractor."},
+        {"label": "D", "rationale": "The fourth option is a plausible distractor."},
+    ],
 }
 
 _MAX_HARVEST_STEPS = 32
