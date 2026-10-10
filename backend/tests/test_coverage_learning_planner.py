@@ -35,6 +35,26 @@ def _iso_in(days: int) -> str:
     return (datetime.now(UTC) + timedelta(days=days)).date().isoformat()
 
 
+def _decay_card(stores, *, user_id: str, card_id: str, days: int = 90) -> None:
+    """Backdate a card so its FSRS retention has decayed.
+
+    Retention is ~1.0 immediately after a review and decays with
+    time; tests that need a "weak" topic backdate the card's
+    ``last_review_at`` (and due date) to simulate elapsed time.
+    """
+    stores.learning._conn.execute(
+        "UPDATE fsrs_cards SET last_review_at = ?, due_at = ? "
+        "WHERE user_id = ? AND card_id = ?",
+        (
+            (datetime.now(UTC) - timedelta(days=days)).isoformat(),
+            (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+            user_id,
+            card_id,
+        ),
+    )
+    stores.learning._conn.commit()
+
+
 class JsonFallbackTests(unittest.TestCase):
     def test_loads_json_list_returns_empty_for_non_list_json(self):
         self.assertEqual(lp._loads_json_list("[1, 2]"), [1, 2])
@@ -431,29 +451,37 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_diagnostic_tolerates_null_aggregate_columns(self):
         with _Store() as stores:
-            # The NOT NULL columns are satisfied with 0/NULL-free sentinels so
-            # the aggregate expressions in the diagnostic are the only thing
-            # under test; a zero row still exercises every COALESCE path.
+            # A never-reviewed card (NULL stability/last_review,
+            # zero reps) with a past due date exercises every
+            # `or 0` / COALESCE path in the diagnostic's
+            # aggregate arithmetic over the FSRS tables.
+            now = datetime.now(UTC).isoformat()
             stores.learning._conn.execute(
                 """
-                INSERT INTO question_progress(
-                    user_id, question_id, topic_id, mastery_score, due_at,
-                    review_bucket, attempts, correct_attempts, avg_confidence,
-                    last_confidence, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fsrs_cards(
+                    user_id, card_id, topic_id, source_type, state,
+                    stability, difficulty, due_at, last_review_at,
+                    reps, lapses, scheduled_days, elapsed_days,
+                    suspended, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "alice",
                     "q-nulls",
                     "01-nulls",
-                    0.0,
-                    datetime.now(UTC).isoformat(),
+                    "question",
+                    "new",
+                    None,
+                    None,
+                    now,
+                    None,
                     0,
                     0,
                     0,
-                    0.0,
                     0,
-                    datetime.now(UTC).isoformat(),
+                    0,
+                    now,
+                    now,
                 ),
             )
             stores.learning._conn.commit()
@@ -462,8 +490,9 @@ class DiagnosticTests(unittest.TestCase):
                 i for i in diagnostic["competencies"] if i["competency_id"] == "topic:01-nulls"
             )
             self.assertEqual(entry["score"], 0.0)
-            # A zero-attempt row with a due date in the past still counts as due,
-            # which is what makes due_pressure reach its maximum.
+            # A zero-rep card with a due date in the past still
+            # counts as due, which is what makes due_pressure
+            # reach its maximum.
             self.assertEqual(entry["metadata"]["due_count"], 1)
             self.assertEqual(entry["metadata"]["accuracy"], 0.0)
             self.assertEqual(entry["evidence_count"], 0)
@@ -553,6 +582,7 @@ class RecommendationTests(unittest.TestCase):
                 response_time_ms=900,
                 mode="study",
             )
+            _decay_card(stores, user_id="alice", card_id="q1")
             recs = stores.planner.build_recommendations(user_id="alice", limit=20)
             self.assertEqual(recs["days_until_target"], 7)
             review = next(i for i in recs["items"] if i["recommendation_type"] == "review")
@@ -656,6 +686,7 @@ class RecommendationTests(unittest.TestCase):
                 response_time_ms=900,
                 mode="study",
             )
+            _decay_card(stores, user_id="alice", card_id="q1")
             recs = stores.planner.build_recommendations(user_id="alice", limit=20)
             self.assertNotIn("interview", {i["recommendation_type"] for i in recs["items"]})
 
@@ -705,7 +736,7 @@ class RecommendationTests(unittest.TestCase):
 
     def test_question_progress_rows_are_empty_without_the_table(self):
         with _Store() as stores:
-            stores.planner._conn.execute("DROP TABLE question_progress")
+            stores.planner._conn.execute("DROP TABLE fsrs_cards")
             stores.planner._conn.commit()
             self.assertEqual(stores.planner._question_progress_rows(user_id="alice"), [])
 

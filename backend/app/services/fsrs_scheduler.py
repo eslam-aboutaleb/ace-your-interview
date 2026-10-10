@@ -8,6 +8,21 @@ application never imports ``fsrs`` directly.
 Counters that the library does not track on ``fsrs.Card`` (``reps``,
 ``lapses``, ``scheduled_days``, ``elapsed_days``) are maintained here and
 persisted by :mod:`app.services.learning_store`.
+
+Attempt-to-rating heuristic: quiz attempts and interview turns report
+``(is_correct, confidence)`` rather than an FSRS rating. When a learner
+self-reports confidence, the standard approximation maps the pair onto the
+four FSRS ratings — see :func:`derive_rating`:
+
+* incorrect (any confidence) → ``again``
+* correct, confidence ≤ 2 → ``hard``
+* correct, confidence == 3 → ``good``
+* correct, confidence ≥ 4 → ``easy``
+
+This is a heuristic, not a measurement: a self-reported confidence of 4-5 on
+a correct answer approximates an ``easy`` recall, while a correct answer with
+low confidence approximates a shaky ``hard`` recall. It is the bridge that
+routes the legacy attempt stream onto the FSRS scheduler.
 """
 
 from __future__ import annotations
@@ -217,6 +232,27 @@ def is_leech(card: dict[str, Any]) -> bool:
     return int(card.get("lapses") or 0) >= LEECH_LAPSE_THRESHOLD
 
 
+def derive_rating(is_correct: bool, confidence: int) -> str:
+    """Map an attempt's ``(is_correct, confidence)`` onto an FSRS rating.
+
+    This is the standard approximation when a learner self-reports
+    confidence instead of an explicit recall rating:
+
+    * incorrect (any confidence) → ``again``
+    * correct, confidence ≤ 2 → ``hard``
+    * correct, confidence == 3 → ``good``
+    * correct, confidence ≥ 4 → ``easy``
+    """
+    if not is_correct:
+        return RATING_AGAIN
+    clamped = max(1, min(int(confidence), 5))
+    if clamped >= 4:
+        return RATING_EASY
+    if clamped == 3:
+        return RATING_GOOD
+    return RATING_HARD
+
+
 def retention_estimate(
     card: dict[str, Any], now: datetime | None = None
 ) -> float:
@@ -277,6 +313,7 @@ __all__ = [
     "card_from_dict",
     "card_to_dict",
     "create_card",
+    "derive_rating",
     "due_cards",
     "forecast",
     "is_leech",

@@ -129,7 +129,7 @@ export default function QuizMode() {
   >({});
 
   const settings = useSettingsStore();
-  const { recordAttempt, setMastery } = useProgressStore();
+  const { recordAttempt } = useProgressStore();
 
   const current = questions[currentIdx];
   const topicsById = useMemo(
@@ -438,7 +438,7 @@ export default function QuizMode() {
         Date.now() - (questionStartMs[currentIdx] || Date.now()),
       );
       const topicForAttempt = current.topic_id || Array.from(selectedTopics)[0] || "";
-      const res = await recordLearningAttempt({
+      await recordLearningAttempt({
         question_id: current.question_id,
         topic_id: topicForAttempt,
         user_answer: selectedAnswer,
@@ -448,8 +448,10 @@ export default function QuizMode() {
         mode: "quiz",
       });
       if (topicForAttempt) {
+        // The server now returns the FSRS card state; the
+        // display-only client-side EWMA mirror in the
+        // progress store keeps the local mastery estimate.
         recordAttempt(topicForAttempt, correct, answerConfidence);
-        setMastery(topicForAttempt, res.mastery_score);
       }
     } catch (err) {
       console.error(err);

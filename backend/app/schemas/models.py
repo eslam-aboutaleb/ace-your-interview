@@ -493,9 +493,10 @@ class LearningAttemptResponse(BaseModel):
     attempt_id: int
     topic_id: str
     question_id: str
-    mastery_score: float
+    state: str
     due_at: str
-    review_bucket: int
+    lapses: int
+    leech: bool
 
 
 class ReviewQueueItem(BaseModel):
@@ -534,6 +535,8 @@ class TopicMasteryItem(BaseModel):
     topic_id: str
     mastery_score: float
     attempts: int
+    accuracy: float = 0.0
+    due_count: int = 0
 
 
 class TopicMasteryResponse(BaseModel):
