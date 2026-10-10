@@ -290,6 +290,7 @@ async def create_session(
         user_id=user["user"],
         session_id=session["session_id"],
         question=first_q["question"],
+        contract=first_q,
     )
 
     return _to_session_response(user["user"], session["session_id"])
@@ -363,6 +364,7 @@ async def create_session_stream(
                 user_id=user["user"],
                 session_id=session["session_id"],
                 question=first_q["question"],
+                contract=first_q,
             )
 
             payload = _to_session_response(user["user"], session["session_id"]).model_dump(mode="json")
@@ -576,6 +578,9 @@ async def submit_answer(
     # submission, so reject it before spending an evaluation call.
     if _store.turn_exists(user_id=user["user"], session_id=session_id, turn_index=turn_index):
         raise HTTPException(status_code=409, detail=_turn_conflict_detail())
+    # The question's assessment contract was persisted when the question
+    # was asked; legacy sessions have none and evaluate against the text.
+    question_contract = session.get("current_question_contract") or None
     eval_payload = await _generator.evaluate_answer(
         session=session,
         question=question,
@@ -584,6 +589,7 @@ async def submit_answer(
         llm_config=body.llm_config,
         user_identity=user,
         hint_level=body.hint_level,
+        question_contract=question_contract,
     )
     # Internal drift signal for the eval harness; never part of an API payload.
     eval_payload.pop("follow_up_note_repaired", None)
@@ -602,6 +608,7 @@ async def submit_answer(
             follow_up_note=eval_payload["follow_up_note"],
             response_time_ms=body.response_time_ms,
             degraded=degraded,
+            contract=question_contract,
         )
     except TurnConflictError as exc:
         raise HTTPException(status_code=409, detail=_turn_conflict_detail()) from exc
@@ -665,6 +672,9 @@ async def submit_answer(
             response_time_ms=max(0, body.response_time_ms),
             created_at=turn_dict["created_at"],
             degraded=degraded,
+            competency_focus=turn_dict.get("competency_focus", ""),
+            expected_signals=turn_dict.get("expected_signals", []),
+            question_contract=turn_dict.get("question_contract", {}),
         ),
         report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
         degraded=degraded,
@@ -701,6 +711,9 @@ async def submit_answer_stream(
         turn_index=stream_turn_index,
     ):
         raise HTTPException(status_code=409, detail=_turn_conflict_detail())
+    # The question's assessment contract was persisted when the question
+    # was asked; legacy sessions have none and evaluate against the text.
+    question_contract = session.get("current_question_contract") or None
 
     async def _event_stream():
         yield json.dumps(
@@ -722,6 +735,7 @@ async def submit_answer_stream(
                     llm_config=body.llm_config,
                     user_identity=user,
                     hint_level=body.hint_level,
+                    question_contract=question_contract,
                 )
             )
             async for progress in _progress_events(
@@ -748,6 +762,7 @@ async def submit_answer_stream(
                     follow_up_note=eval_payload["follow_up_note"],
                     response_time_ms=body.response_time_ms,
                     degraded=degraded,
+                    contract=question_contract,
                 )
             except TurnConflictError as exc:
                 yield json.dumps(
@@ -818,6 +833,9 @@ async def submit_answer_stream(
                     response_time_ms=max(0, body.response_time_ms),
                     created_at=turn_dict["created_at"],
                     degraded=degraded,
+                    competency_focus=turn_dict.get("competency_focus", ""),
+                    expected_signals=turn_dict.get("expected_signals", []),
+                    question_contract=turn_dict.get("question_contract", {}),
                 ),
                 report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
                 degraded=degraded,
@@ -884,6 +902,7 @@ async def next_question(
         user_id=user["user"],
         session_id=session_id,
         question=generated["question"],
+        contract=generated,
     )
     if not updated:
         raise HTTPException(status_code=500, detail="Could not persist next question")
@@ -946,6 +965,7 @@ async def next_question_stream(
                 user_id=user["user"],
                 session_id=session_id,
                 question=generated["question"],
+                contract=generated,
             )
             if not updated:
                 raise RuntimeError("Could not persist next question")

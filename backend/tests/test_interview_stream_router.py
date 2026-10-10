@@ -227,6 +227,44 @@ class InterviewStreamRouterTests(unittest.TestCase):
         self.assertEqual(done["turn"]["rubric"]["overall"], 80)
         self.assertFalse(done["turn"]["degraded"])
 
+    def test_answer_stream_persists_the_question_contract(self):
+        self._init(FakeLLM())
+        create = self.client.post(
+            "/api/interview-sessions",
+            json={
+                "track": "backend",
+                "level": "mid",
+                "interview_type": "technical",
+                "turn_count": 1,
+                "target_role": "Backend Engineer",
+                "focus_areas": ["api design"],
+            },
+        )
+        self.assertEqual(create.status_code, 200)
+        session_id = create.json()["session"]["session_id"]
+        contract = create.json()["session"]["current_question_contract"]
+        self.assertEqual(contract["competency_focus"], "tradeoff analysis")
+        self.assertEqual(
+            contract["expected_signals"],
+            ["constraints", "consistency", "client impact"],
+        )
+
+        status, events = self._stream_events(
+            f"/api/interview-sessions/{session_id}/answer/stream",
+            {
+                "user_answer": "I would choose cursor pagination for consistency.",
+                "response_time_ms": 9000,
+            },
+        )
+        self.assertEqual(status, 200)
+        done = events[-1]
+        self.assertEqual(done["turn"]["competency_focus"], "tradeoff analysis")
+        self.assertEqual(
+            done["turn"]["expected_signals"],
+            ["constraints", "consistency", "client impact"],
+        )
+        self.assertEqual(done["turn"]["question_contract"], contract)
+
     def test_degraded_answer_stream_skips_record_attempt(self):
         learning_store = self._init(FakeLLM(eval_error_code=CALL_FAILED_CODE))
         session_id = self._create_session(turn_count=1)

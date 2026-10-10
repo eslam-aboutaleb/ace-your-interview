@@ -413,5 +413,161 @@ class InterviewStoreTests(unittest.TestCase):
             )
 
 
+class InterviewContractTests(unittest.TestCase):
+    """Plan A: the question's assessment contract is persisted per turn."""
+
+    _CONTRACT = {
+        "question": "How would you design cursor-based pagination to keep ordering stable across writes?",
+        "question_id": "iq-v3p8lb",
+        "difficulty": "medium",
+        "competency_focus": "tradeoff analysis",
+        "expected_signals": ["constraints", "consistency", "client impact"],
+    }
+
+    def _create_session(self, store: InterviewStore) -> str:
+        session = store.create_session(
+            user_id="alice",
+            track="backend",
+            level="mid",
+            interview_type="technical",
+            turn_count=2,
+            target_role="Backend Engineer",
+            job_description_text="",
+            resume_summary_text="",
+            focus_areas=[],
+        )
+        return session["session_id"]
+
+    def test_contract_round_trips_through_set_current_question_and_record_turn(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = InterviewStore(os.path.join(td, "interview.db"))
+            session_id = self._create_session(store)
+
+            updated = store.set_current_question(
+                user_id="alice",
+                session_id=session_id,
+                question=self._CONTRACT["question"],
+                contract=self._CONTRACT,
+            )
+            assert updated is not None
+            self.assertEqual(updated["current_question_contract"], self._CONTRACT)
+
+            turn, _ = store.record_turn(
+                user_id="alice",
+                session_id=session_id,
+                turn_index=1,
+                question=self._CONTRACT["question"],
+                user_answer="Use cursor pagination with stable sort keys.",
+                rubric=_RUBRIC,
+                strengths=["Good tradeoff awareness"],
+                improvements=["Mention consistency edge cases"],
+                follow_up_note="Add failure handling details.",
+                response_time_ms=12000,
+                contract=self._CONTRACT,
+            )
+            self.assertEqual(turn["competency_focus"], "tradeoff analysis")
+            self.assertEqual(
+                turn["expected_signals"],
+                ["constraints", "consistency", "client impact"],
+            )
+            self.assertEqual(turn["question_contract"], self._CONTRACT)
+
+            turns = store.get_turns(user_id="alice", session_id=session_id)
+            self.assertEqual(len(turns), 1)
+            self.assertEqual(turns[0]["competency_focus"], "tradeoff analysis")
+            self.assertEqual(
+                turns[0]["expected_signals"],
+                ["constraints", "consistency", "client impact"],
+            )
+            self.assertEqual(turns[0]["question_contract"], self._CONTRACT)
+
+    def test_contract_defaults_when_none_is_passed(self):
+        with tempfile.TemporaryDirectory() as td:
+            store = InterviewStore(os.path.join(td, "interview.db"))
+            session_id = self._create_session(store)
+
+            updated = store.set_current_question(
+                user_id="alice",
+                session_id=session_id,
+                question="How would you design retries?",
+            )
+            assert updated is not None
+            self.assertEqual(updated["current_question_contract"], {})
+
+            turn, _ = store.record_turn(
+                user_id="alice",
+                session_id=session_id,
+                turn_index=1,
+                question="How would you design retries?",
+                user_answer="Bounded retries with an idempotency key.",
+                rubric=_RUBRIC,
+                strengths=["Clear"],
+                improvements=["Measure"],
+                follow_up_note="note",
+                response_time_ms=1000,
+            )
+            self.assertEqual(turn["competency_focus"], "")
+            self.assertEqual(turn["expected_signals"], [])
+            self.assertEqual(turn["question_contract"], {})
+
+            turns = store.get_turns(user_id="alice", session_id=session_id)
+            self.assertEqual(turns[0]["competency_focus"], "")
+            self.assertEqual(turns[0]["expected_signals"], [])
+            self.assertEqual(turns[0]["question_contract"], {})
+
+    def test_new_turn_columns_migrate_and_are_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "legacy_contract.db")
+            _create_legacy_db(db_path)
+
+            for _ in range(3):
+                store = InterviewStore(db_path)
+                columns = {
+                    row["name"]
+                    for row in store._conn.execute(
+                        "PRAGMA table_info(interview_turns)"
+                    ).fetchall()
+                }
+                self.assertIn("competency_focus", columns)
+                self.assertIn("expected_signals_json", columns)
+                self.assertIn("question_contract_json", columns)
+                # Pre-existing rows keep the column defaults.
+                rows = store._conn.execute(
+                    "SELECT competency_focus, expected_signals_json, "
+                    "question_contract_json FROM interview_turns"
+                ).fetchall()
+                self.assertEqual(
+                    [
+                        (
+                            row["competency_focus"],
+                            row["expected_signals_json"],
+                            row["question_contract_json"],
+                        )
+                        for row in rows
+                    ],
+                    [("", "[]", "{}")],
+                )
+                store._conn.close()
+
+    def test_session_contract_column_migrates(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "legacy_session_contract.db")
+            _create_legacy_db(db_path)
+            store = InterviewStore(db_path)
+
+            columns = {
+                row["name"]
+                for row in store._conn.execute(
+                    "PRAGMA table_info(interview_sessions)"
+                ).fetchall()
+            }
+            self.assertIn("current_question_contract_json", columns)
+            context = store.get_session_context(
+                user_id="alice", session_id="legacy-1"
+            )
+            assert context is not None
+            self.assertEqual(context["current_question_contract"], {})
+
+
 if __name__ == "__main__":
     unittest.main()

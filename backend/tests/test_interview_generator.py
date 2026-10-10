@@ -679,5 +679,156 @@ class FollowUpNoteRepairTests(unittest.TestCase):
         )
 
 
+class AssessmentContractTests(unittest.TestCase):
+    """Plan A: the question's assessment contract reaches the evaluator.
+
+    The generator returns the contract with the question, the store
+    persists it, and the evaluator scores the answer against it.
+    Legacy sessions have no contract and must keep evaluating.
+    """
+
+    _CONTRACT = {
+        "question": (
+            "Given a stream of events that can arrive twice, how would you "
+            "guarantee the downstream projection is applied exactly once?"
+        ),
+        "question_id": "iq-ywg5ax",
+        "difficulty": "hard",
+        "competency_focus": "exactly-once semantics",
+        "expected_signals": [
+            "idempotency key",
+            "dedup store",
+            "transactional boundary",
+        ],
+    }
+
+    _SESSION = {
+        "track": "backend",
+        "level": "mid",
+        "interview_type": "technical",
+        "target_role": "Backend Engineer",
+        "feedback_mode": "concise",
+    }
+
+    def test_evaluate_prompt_renders_the_assessment_contract(self):
+        prompt = InterviewGenerator._evaluate_prompt(
+            session=self._SESSION,
+            question=self._CONTRACT["question"],
+            answer="I would write the event id into an inbox table.",
+            turn_index=1,
+            question_contract=self._CONTRACT,
+        )
+        self.assertIn("Assessment contract", prompt)
+        self.assertIn("competency_focus", prompt)
+        self.assertIn("exactly-once semantics", prompt)
+        self.assertIn("expected_signals", prompt)
+        self.assertIn("idempotency key", prompt)
+        self.assertIn("transactional boundary", prompt)
+        self.assertIn("question_id", prompt)
+        self.assertIn("iq-ywg5ax", prompt)
+        self.assertIn(
+            "Score the candidate's evidence against the expected signals",
+            prompt,
+        )
+        self.assertIn(
+            "do not reward content the question did not ask for",
+            prompt,
+        )
+
+    def test_evaluate_prompt_tolerates_a_missing_contract(self):
+        prompt = InterviewGenerator._evaluate_prompt(
+            session=self._SESSION,
+            question="Design a rate limiter.",
+            answer="Token bucket in Redis.",
+            turn_index=1,
+        )
+        self.assertNotIn("Assessment contract", prompt)
+        self.assertIn("Design a rate limiter.", prompt)
+        self.assertIn("Candidate answer", prompt)
+
+    def test_evaluate_prompt_tolerates_an_empty_contract(self):
+        prompt = InterviewGenerator._evaluate_prompt(
+            session=self._SESSION,
+            question="Design a rate limiter.",
+            answer="Token bucket in Redis.",
+            turn_index=1,
+            question_contract={},
+        )
+        self.assertNotIn("Assessment contract", prompt)
+
+    def test_evaluate_answer_sends_the_contract_to_the_evaluator(self):
+        captured: dict[str, str] = {}
+
+        class CapturingLLM:
+            async def completion(
+                self, prompt, llm_config=None, user_identity=None, **kwargs
+            ):
+                captured["prompt"] = prompt
+                return _success(_VALID_EVAL)
+
+        gen = InterviewGenerator(CapturingLLM(), FakeParser())
+        out = asyncio.run(
+            gen.evaluate_answer(
+                session=_SESSION,
+                question=self._CONTRACT["question"],
+                user_answer="Inbox table in the same transaction.",
+                turn_index=1,
+                question_contract=self._CONTRACT,
+            )
+        )
+        self.assertFalse(out["degraded"])
+        self.assertIn("competency_focus", captured["prompt"])
+        self.assertIn("exactly-once semantics", captured["prompt"])
+        self.assertIn("iq-ywg5ax", captured["prompt"])
+
+    def test_generate_question_returns_question_id_and_difficulty(self):
+        llm = FakeLLM(
+            [
+                '```json\n{"question":"How do you keep retries idempotent across regions?",'
+                '"competency_focus":"idempotency","expected_signals":["idempotency key","retry budget"]}\n```'
+            ]
+        )
+        gen = InterviewGenerator(llm, FakeParser())
+        out = asyncio.run(
+            gen.generate_question(
+                session={
+                    "session_id": "s-contract",
+                    "track": "backend",
+                    "level": "senior",
+                    "interview_type": "technical",
+                    "turn_count": 3,
+                    "turns_completed": 0,
+                    "target_role": "Backend Engineer",
+                    "focus_areas": [],
+                    "job_description_text": "",
+                    "resume_summary_text": "",
+                    "asked_questions": [],
+                },
+                turns=[],
+            )
+        )
+        self.assertEqual(out["competency_focus"], "idempotency")
+        self.assertEqual(out["expected_signals"], ["idempotency key", "retry budget"])
+        # The id is a deterministic hash of the question text and the
+        # difficulty follows the session level.
+        self.assertEqual(out["question_id"], "iq-v1tk2f")
+        self.assertEqual(out["difficulty"], "hard")
+
+    def test_question_id_matches_the_client_side_derivation(self):
+        # The browser derived this id from the question text before the
+        # server owned the derivation; the server must agree.
+        self.assertEqual(
+            interview_generator_module._question_id(
+                "How would you design cursor-based pagination "
+                "to keep ordering stable across writes?"
+            ),
+            "iq-v3p8lb",
+        )
+        self.assertEqual(
+            interview_generator_module._question_id(""),
+            "iq-0",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

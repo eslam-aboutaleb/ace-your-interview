@@ -94,7 +94,8 @@ class StubGenerator:
         }
 
     async def evaluate_answer(self, *, session, question, user_answer, turn_index,
-                              llm_config, user_identity, hint_level=0):
+                              llm_config, user_identity, hint_level=0,
+                              question_contract=None):
         self.calls.append({"kind": "evaluate", "turn_index": turn_index})
         if self.eval_error is not None:
             raise self.eval_error
@@ -251,6 +252,39 @@ class SessionCreationTests(InterviewRouterCoverageTestBase):
         response = self.client.get(f"/api/interview-sessions/{session_id}")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["session"]["current_question"])
+
+    def test_create_persists_the_question_contract(self):
+        session_id = self._create()
+        response = self.client.get(f"/api/interview-sessions/{session_id}")
+        self.assertEqual(response.status_code, 200)
+        contract = response.json()["session"]["current_question_contract"]
+        self.assertEqual(contract["competency_focus"], "tradeoff analysis")
+        self.assertEqual(
+            contract["expected_signals"],
+            ["constraints", "consistency", "client impact"],
+        )
+        self.assertTrue(contract["question_id"].startswith("iq-"))
+
+    def test_answer_turn_carries_the_question_contract(self):
+        session_id = self._create(turn_count=1)
+        response = self.client.post(
+            f"/api/interview-sessions/{session_id}/answer",
+            json={"user_answer": "Cursor pagination keeps ordering stable."},
+        )
+        self.assertEqual(response.status_code, 200)
+        turn = response.json()["turn"]
+        self.assertEqual(turn["competency_focus"], "tradeoff analysis")
+        self.assertEqual(
+            turn["expected_signals"],
+            ["constraints", "consistency", "client impact"],
+        )
+        turns = self.store.get_turns(user_id=USER["user"], session_id=session_id)
+        self.assertEqual(len(turns), 1)
+        self.assertEqual(turns[0]["question_contract"]["competency_focus"], "tradeoff analysis")
+        self.assertEqual(
+            turns[0]["question_contract"]["expected_signals"],
+            ["constraints", "consistency", "client impact"],
+        )
 
     def test_create_without_a_session_context_is_a_500(self):
         with patch.object(self.store, "get_session_context", return_value=None):

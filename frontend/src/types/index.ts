@@ -832,6 +832,8 @@ export interface InterviewTurn {
   response_time_ms: number;
   created_at: string;
   degraded?: boolean;
+  competency_focus?: string;
+  expected_signals?: string[];
 }
 
 export interface InterviewReport {
