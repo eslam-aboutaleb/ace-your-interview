@@ -626,6 +626,13 @@ export interface LearningAttemptRequest {
   response_time_ms: number;
   mode: LearningMode;
   learning_objective?: string;
+  // Optional context the backend uses to classify a wrong answer into a
+  // tagged error pattern. Omitted by older clients; the backend then
+  // classifies on the answer alone.
+  question_text?: string;
+  correct_answer?: string;
+  objective?: string;
+  level?: "junior" | "mid" | "senior";
 }
 
 export interface LearningAttemptResponse {

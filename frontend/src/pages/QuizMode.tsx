@@ -482,6 +482,9 @@ export default function QuizMode() {
         response_time_ms: responseTime,
         mode: quizMode === "exam" ? "exam" : "quiz",
         learning_objective: current.learning_objective,
+        question_text: current.question,
+        correct_answer: current.correct_answer,
+        level,
       });
       if (topicForAttempt) {
         // The server now returns the FSRS card state; the

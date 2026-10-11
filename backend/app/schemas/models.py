@@ -509,6 +509,13 @@ class LearningAttemptRequest(BaseModel):
     response_time_ms: int = Field(default=0, ge=0)
     mode: LearningMode
     learning_objective: str = Field(default="", max_length=2000)
+    # Optional context for error-pattern classification. Omitted by older
+    # clients; classification then runs on the answer alone and is skipped
+    # when the answer is too short to diagnose.
+    question_text: str = Field(default="", max_length=8000)
+    correct_answer: str = Field(default="", max_length=8000)
+    objective: str = Field(default="", max_length=240)
+    level: Optional[str] = Field(default=None, pattern="^(junior|mid|senior)$")
 
 
 class LearningAttemptResponse(BaseModel):
@@ -1602,3 +1609,27 @@ class LeechesResponse(BaseModel):
 class LeechResumeResponse(BaseModel):
     card: FSRSCardResponse
     resumed: bool = True
+# ── Error-pattern / misconception memory ──────────────────────────────────
+class ErrorPatternRead(BaseModel):
+    """One ranked misconception tag for a learner on one topic.
+
+    ``count`` is how many distinct wrong answers collapsed into this pattern,
+    ``evidence`` is an excerpt from the most recent one, and ``objective`` is
+    the stable question objective the mistakes share.
+    """
+
+    topic_id: str
+    objective: str
+    error_type: str
+    explanation: str
+    evidence: str
+    count: int = Field(default=1, ge=1)
+    first_seen: str
+    last_seen: str
+
+
+class ErrorPatternListResponse(BaseModel):
+    """Error patterns ranked by occurrence count, most frequent first."""
+
+    items: list[ErrorPatternRead] = Field(default_factory=list)
+    total: int = 0
