@@ -36,7 +36,11 @@ from app.schemas.models import (
 )
 from app.services.doc_parser import DocParser
 from app.services.company_packs import CompanyPackStore
-from app.services.interview_generator import InterviewGenerator
+from app.services.interview_generator import (
+    RUBRIC_DIMENSIONS,
+    InterviewGenerator,
+    select_follow_up_focus,
+)
 from app.services.interview_store import InterviewStore, TurnConflictError
 from app.services.jd_analyzer import JDAnalyzer
 from app.services.learning_store import LearningStore
@@ -162,11 +166,77 @@ def _to_session_response(user_id: str, session_id: str) -> InterviewSessionRespo
     return InterviewSessionResponseExtended(session=session, turns=parsed_turns)
 
 
-def _track_topic_id(track: str) -> str:
-    if _parser is None:
-        return ""
-    topics = _parser.list_topics(track=track)
-    return topics[0].id if topics else ""
+#: Question-id prefix for interview competency cards. Every scored interview
+#: turn schedules one card per rubric dimension under this prefix, so
+#: behavioral, communication and system-design skills are rehearsed on their
+#: own schedule instead of being written onto the track's first topic.
+INTERVIEW_COMPETENCY_PREFIX = "interview-competency:"
+
+#: Pseudo-topic that owns the interview competency cards. It never appears in
+#: topic mastery, weak areas or the analytics mastery curve: those aggregations
+#: exclude ``mode="interview"`` attempts (see ``LearningStore.get_weak_areas``,
+#: ``get_fsrs_topic_mastery`` and ``AnalyticsService.mastery_curve``), while the
+#: rows stay available for competency analysis.
+INTERVIEW_COMPETENCY_TOPIC = "interview-competency"
+
+#: Dimension score at or above which a competency counts as a successful recall
+#: for the spaced-repetition rating.
+COMPETENCY_PASS_THRESHOLD = 3
+
+
+def _competency_pass_threshold(session: dict[str, Any]) -> int:
+    """The dimension score that counts as a successful competency recall.
+
+    A session that raises its follow-up threshold raises the bar for the
+    competency cards too, so "the candidate has cleared this competency" means
+    the same thing in the prompt and on the card.
+    """
+    try:
+        threshold = int(session.get("focus_threshold", COMPETENCY_PASS_THRESHOLD))
+    except (TypeError, ValueError):
+        threshold = COMPETENCY_PASS_THRESHOLD
+    return max(0, min(5, threshold))
+
+
+def _competency_attempts(
+    *,
+    session: dict[str, Any],
+    rubric: dict[str, Any],
+    user_answer: str,
+    response_time_ms: int,
+    hint_level: int,
+) -> list[dict[str, Any]]:
+    """One spaced-repetition attempt per scored rubric dimension.
+
+    An interview turn is evidence about a *competency* (technical accuracy,
+    reasoning depth, communication clarity, completeness, confidence), not about
+    the track's first topic. Recording it there used to pollute topic mastery,
+    weak areas and the analytics curve, so the attempt is filed under
+    ``interview-competency:<dimension>`` with ``mode="interview"`` instead.
+    """
+    hints = 1 if (hint_level or 0) else 0
+    threshold = _competency_pass_threshold(session)
+    attempts: list[dict[str, Any]] = []
+    for dimension in RUBRIC_DIMENSIONS:
+        score = (rubric or {}).get(dimension)
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            continue
+        attempts.append(
+            {
+                "question_id": f"{INTERVIEW_COMPETENCY_PREFIX}{dimension}",
+                "topic_id": INTERVIEW_COMPETENCY_TOPIC,
+                "user_answer": user_answer,
+                # The dimension score doubles as the self-reported confidence
+                # the FSRS rating heuristic reads, so a 5/5 dimension is an easy
+                # recall and a 1/5 is an immediate lapse.
+                "is_correct": float(score) >= threshold,
+                "confidence": max(1, min(5, int(score))),
+                "response_time_ms": response_time_ms,
+                "mode": "interview",
+                "hints_used": hints,
+            }
+        )
+    return attempts
 
 
 def _turn_conflict_detail() -> dict[str, str]:
@@ -278,6 +348,7 @@ async def create_session(
         resume_summary_text=resume_summary_text,
         focus_areas=focus_areas,
         company=body.company,
+        persona=body.persona.value,
     )
 
     context = _store.get_session_context(user_id=user["user"], session_id=session["session_id"])
@@ -363,6 +434,7 @@ async def create_session_stream(
                 resume_summary_text=resume_summary_text,
                 focus_areas=focus_areas,
                 company=body.company,
+                persona=body.persona.value,
             )
             context = _store.get_session_context(
                 user_id=user["user"],
@@ -650,6 +722,7 @@ async def submit_answer(
             degraded=degraded,
             contract=question_contract,
             generation_version=eval_payload.get("generation_version", ""),
+            design_scores=eval_payload.get("system_design") or {},
         )
     except TurnConflictError as exc:
         raise HTTPException(status_code=409, detail=_turn_conflict_detail()) from exc
@@ -673,22 +746,20 @@ async def submit_answer(
         and _learning_store is not None
         and not degraded
     ):
-        topic_id = _track_topic_id(session["track"])
-        if topic_id:
-            rubric = eval_payload["rubric"]
-            overall = int(rubric.get("overall", 60))
-            confidence_signal = max(1, min(5, int(rubric.get("confidence_signal", 3))))
+        # One competency card per scored rubric dimension, never the track's
+        # first topic: an interview turn is evidence about a competency, so it
+        # must schedule its own FSRS card instead of polluting topic mastery.
+        for attempt in _competency_attempts(
+            session=session,
+            rubric=eval_payload["rubric"],
+            user_answer=body.user_answer,
+            response_time_ms=body.response_time_ms,
+            hint_level=body.hint_level,
+        ):
             await _learning_store.run_async(
                 _learning_store.record_attempt,
                 user_id=user["user"],
-                question_id=f"interview:{session_id}:{turn_index}",
-                topic_id=topic_id,
-                user_answer=body.user_answer,
-                is_correct=overall >= 70,
-                confidence=confidence_signal,
-                response_time_ms=body.response_time_ms,
-                mode="study",
-                hints_used=1 if (body.hint_level or 0) else 0,
+                **attempt,
             )
 
     if updated_session and updated_session["status"] == "completed":
@@ -717,6 +788,7 @@ async def submit_answer(
             competency_focus=turn_dict.get("competency_focus", ""),
             expected_signals=turn_dict.get("expected_signals", []),
             question_contract=turn_dict.get("question_contract", {}),
+            system_design_scores=turn_dict.get("system_design_scores", {}),
         ),
         report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
         degraded=degraded,
@@ -806,6 +878,7 @@ async def submit_answer_stream(
                     degraded=degraded,
                     contract=question_contract,
                     generation_version=eval_payload.get("generation_version", ""),
+                    design_scores=eval_payload.get("system_design") or {},
                 )
             except TurnConflictError as exc:
                 yield json.dumps(
@@ -836,22 +909,17 @@ async def submit_answer_stream(
                 and _learning_store is not None
                 and not degraded
             ):
-                topic_id = _track_topic_id(session["track"])
-                if topic_id:
-                    rubric = eval_payload["rubric"]
-                    overall = int(rubric.get("overall", 60))
-                    confidence_signal = max(1, min(5, int(rubric.get("confidence_signal", 3))))
+                for attempt in _competency_attempts(
+                    session=session,
+                    rubric=eval_payload["rubric"],
+                    user_answer=body.user_answer,
+                    response_time_ms=body.response_time_ms,
+                    hint_level=body.hint_level,
+                ):
                     await _learning_store.run_async(
                         _learning_store.record_attempt,
                         user_id=user["user"],
-                        question_id=f"interview:{session_id}:{turn_index}",
-                        topic_id=topic_id,
-                        user_answer=body.user_answer,
-                        is_correct=overall >= 70,
-                        confidence=confidence_signal,
-                        response_time_ms=body.response_time_ms,
-                        mode="study",
-                        hints_used=1 if (body.hint_level or 0) else 0,
+                        **attempt,
                     )
 
             if updated_session and updated_session["status"] == "completed":
@@ -880,6 +948,7 @@ async def submit_answer_stream(
                     competency_focus=turn_dict.get("competency_focus", ""),
                     expected_signals=turn_dict.get("expected_signals", []),
                     question_contract=turn_dict.get("question_contract", {}),
+                    system_design_scores=turn_dict.get("system_design_scores", {}),
                 ),
                 report_ready=bool(session_out.get("report_ready") or session_out["status"] == "completed"),
                 degraded=degraded,
@@ -942,6 +1011,9 @@ async def next_question(
             turns=turns,
             llm_config=llm_config,
             user_identity=user,
+            # The branch is chosen from the scored turns and passed explicitly,
+            # so one decision point drives both the prompt and the contract.
+            follow_up_focus=select_follow_up_focus(session, turns),
         )
     except (
         LLMServiceApprovalRequiredError,
@@ -1014,6 +1086,7 @@ async def next_question_stream(
                     turns=turns,
                     llm_config=llm_config,
                     user_identity=user,
+                    follow_up_focus=select_follow_up_focus(session, turns),
                 )
             )
             async for progress in _progress_events(

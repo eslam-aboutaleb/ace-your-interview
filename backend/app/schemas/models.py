@@ -47,6 +47,14 @@ class InterviewerStyleEnum(str, Enum):
     CHALLENGING = "challenging"
 
 
+class InterviewPersonaEnum(str, Enum):
+    """How much the interviewer accepts, independent of tone (``interviewer_style``)."""
+
+    SUPPORTIVE = "supportive"
+    NEUTRAL = "neutral"
+    BAR_RAISER = "bar-raiser"
+
+
 class FeedbackModeEnum(str, Enum):
     CONCISE = "concise"
     DEEP = "deep"
@@ -835,6 +843,9 @@ class InterviewSession(BaseModel):
     #: with the session so the answer can be scored against what was asked.
     current_question_contract: dict[str, Any] = Field(default_factory=dict)
     report_ready: bool = False
+    #: How much the interviewer accepts (``supportive``/``neutral``/``bar-raiser``).
+    #: Defaults to ``neutral`` for sessions created before the field existed.
+    persona: InterviewPersonaEnum = InterviewPersonaEnum.NEUTRAL
 
 
 class InterviewTurn(BaseModel):
@@ -861,6 +872,9 @@ class InterviewTurn(BaseModel):
     #: Wire identifier of the prompt contract that produced the
     #: question and the evaluation: ``"<prompt_name>@<version>"``.
     generation_version: str = ""
+    #: System-design rubric dimensions (architecture/tradeoffs/scalability/
+    #: failure_modes/communication); empty for every other session type.
+    system_design_scores: dict[str, Any] = Field(default_factory=dict)
 
 
 class InterviewReport(BaseModel):
@@ -890,6 +904,9 @@ class CreateInterviewSessionRequest(BaseModel):
     resume_summary_text: str = Field(default="", max_length=20000)
     focus_areas: list[str] = Field(default_factory=list, max_length=30)
     llm_config: Optional[LLMConfigRequest] = None
+    #: How much the interviewer accepts (supplementary to ``interviewer_style``,
+    #: which is tone only). Absent means the existing ``neutral`` behaviour.
+    persona: InterviewPersonaEnum = InterviewPersonaEnum.NEUTRAL
 
 
 class SubmitInterviewAnswerRequest(BaseModel):
@@ -1795,7 +1812,10 @@ class PlanCommitmentSummary(BaseModel):
     requested_daily_items: int = 0
     effective_daily_items: int = 0
     completed_tasks: int = 0
-    pending_tasks: int = 0# ── Highlight Deep Actions ────────────────────────────────────
+    pending_tasks: int = 0
+
+
+# ── Highlight Deep Actions ────────────────────────────────────
 class HighlightActionEnum(str, Enum):
     EXPLAIN = "explain"
     FLASHCARD = "flashcard"
@@ -1850,3 +1870,45 @@ class ChatHighlightActionResponse(BaseModel):
     #: Grounding carried back on ``explain``: the cited section and quote.
     source_section: str = ""
     source_quote: str = ""
+
+
+# ── Interview hardening ─────────────────────────────────────────────────────
+class InterviewCodeTestCase(BaseModel):
+    """One deterministic test case a coding interview question may carry.
+
+    Part of the *optional* ``code_contract`` a coding question can return. The
+    deterministic grader checks the candidate's code for the exact
+    ``expected_output`` of every case; the contract never causes candidate code
+    to be executed.
+    """
+
+    input: str = Field(default="", max_length=4000)
+    expected_output: str = Field(default="", max_length=4000)
+    description: str = Field(default="", max_length=400)
+
+
+class InterviewCodeContract(BaseModel):
+    """Optional deterministic grading contract for a coding interview question.
+
+    Additive: a question without it is graded by the rubric exactly as before.
+    """
+
+    function_name: str = Field(default="", max_length=120)
+    language: str = Field(default="", max_length=40)
+    test_cases: list[InterviewCodeTestCase] = Field(default_factory=list, max_length=20)
+
+
+class InterviewSystemDesignRubric(BaseModel):
+    """Rubric dimensions scored for a system-design interview turn.
+
+    Returned by the evaluator as the optional ``system_design`` object. The
+    bounds are enforced by the interviewer's normaliser (``_clamp``), not by the
+    schema, so an out-of-range score is clamped into band instead of being
+    discarded the way a malformed payload would be.
+    """
+
+    architecture: Optional[int] = None
+    tradeoffs: Optional[int] = None
+    scalability: Optional[int] = None
+    failure_modes: Optional[int] = None
+    communication: Optional[int] = None

@@ -960,5 +960,118 @@ class AttemptHintRatingTests(unittest.TestCase):
         self.assertEqual(self._log_rating("q-scaffolded"), "again")
 
 
+class InterviewCompetencyCardTests(unittest.TestCase):
+    """Interview turns schedule competency cards, and no topic mastery.
+
+    The interview loop records ``interview-competency:<dimension>`` with
+    ``mode="interview"`` so a behavioral/communication/system-design skill is
+    rehearsed on its own schedule. Those rows must not reach topic mastery,
+    weak areas or the analytics curve, but must stay readable for competency
+    analysis.
+    """
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.store = LearningStore(
+            os.path.join(self._td.name, "learning.db")
+        )
+
+    def _interview_turn(self, dimension, *, is_correct, confidence):
+        self.store.record_attempt(
+            user_id="alice",
+            question_id=f"interview-competency:{dimension}",
+            topic_id="interview-competency",
+            user_answer="answer",
+            is_correct=is_correct,
+            confidence=confidence,
+            response_time_ms=900,
+            mode="interview",
+        )
+
+    def _quiz_review(self, card_id, topic_id, rating="easy"):
+        self.store.record_review(
+            user_id="alice",
+            card_id=card_id,
+            topic_id=topic_id,
+            rating=rating,
+            response_time_ms=100,
+        )
+
+    def test_a_competency_attempt_lands_as_an_interview_card(self):
+        self._interview_turn(
+            "communication_clarity", is_correct=True, confidence=5
+        )
+        card = self.store._conn.execute(
+            "SELECT card_id, topic_id, source_type FROM fsrs_cards "
+            "WHERE user_id = ? AND card_id = ?",
+            ("alice", "interview-competency:communication_clarity"),
+        ).fetchone()
+        self.assertIsNotNone(card)
+        self.assertEqual(card["topic_id"], "interview-competency")
+        self.assertEqual(card["source_type"], "interview")
+
+    def test_competency_cards_are_excluded_from_topic_mastery(self):
+        self._quiz_review("q1", "01-http")
+        self._interview_turn(
+            "technical_accuracy", is_correct=False, confidence=2
+        )
+        mastery = self.store.get_fsrs_topic_mastery(user_id="alice")
+        topics = {t["topic_id"] for t in mastery["topics"]}
+        self.assertIn("01-http", topics)
+        self.assertNotIn("interview-competency", topics)
+        by_topic = {t["topic_id"]: t for t in mastery["topics"]}
+        self.assertEqual(by_topic["01-http"]["accuracy"], 1.0)
+
+    def test_competency_cards_are_excluded_from_weak_areas(self):
+        self._quiz_review("q1", "01-http", rating="easy")
+        # A failing competency does not invent a weak topic.
+        for dimension in ("communication_clarity", "confidence_signal"):
+            self._interview_turn(
+                dimension, is_correct=False, confidence=1
+            )
+        weak = self.store.get_weak_areas(user_id="alice")
+        topic_ids = {a["topic_id"] for a in weak["weak_areas"]}
+        self.assertNotIn("interview-competency", topic_ids)
+        self.assertIn("01-http", topic_ids)
+
+    def test_competency_cards_stay_readable_for_competency_analysis(self):
+        self._interview_turn(
+            "communication_clarity", is_correct=True, confidence=5
+        )
+        self._interview_turn(
+            "technical_accuracy", is_correct=False, confidence=1
+        )
+        result = self.store.get_interview_competencies(user_id="alice")
+        self.assertEqual(result["total"], 2)
+        competencies = {
+            item["competency"]: item for item in result["competencies"]
+        }
+        self.assertEqual(
+            sorted(competencies),
+            ["communication_clarity", "technical_accuracy"],
+        )
+        self.assertEqual(competencies["technical_accuracy"]["reps"], 1)
+        self.assertEqual(competencies["technical_accuracy"]["lapses"], 1)
+        # Weakest-first ordering, so the next round can focus on the gap.
+        self.assertEqual(result["weakest"][0], "technical_accuracy")
+
+    def test_another_users_competency_cards_do_not_leak(self):
+        self._interview_turn("reasoning_depth", is_correct=True, confidence=4)
+        self.store.record_attempt(
+            user_id="bob",
+            question_id="interview-competency:reasoning_depth",
+            topic_id="interview-competency",
+            user_answer="answer",
+            is_correct=True,
+            confidence=4,
+            response_time_ms=900,
+            mode="interview",
+        )
+        self.assertEqual(
+            self.store.get_interview_competencies(user_id="bob")["total"], 1
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

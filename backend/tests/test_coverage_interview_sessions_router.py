@@ -83,8 +83,22 @@ class StubGenerator:
         self.report = report or {"overall_score": 77.0}
         self.calls: list[dict] = []
 
-    async def generate_question(self, *, session, turns, llm_config, user_identity):
-        self.calls.append({"kind": "question", "turns": len(turns)})
+    async def generate_question(
+        self,
+        *,
+        session,
+        turns,
+        llm_config,
+        user_identity,
+        follow_up_focus=None,
+    ):
+        self.calls.append(
+            {
+                "kind": "question",
+                "turns": len(turns),
+                "follow_up_focus": follow_up_focus,
+            }
+        )
         if self.question_error is not None:
             raise self.question_error
         return {
@@ -226,24 +240,71 @@ class FeatureFlagAndWiringTests(InterviewRouterCoverageTestBase):
         self.assertEqual(response.status_code, 503)
 
 
-class TopicTrackingTests(InterviewRouterCoverageTestBase):
-    def test_no_parser_yields_an_empty_topic_id(self):
-        interview_sessions._parser = None
-        self.assertEqual(interview_sessions._track_topic_id("backend"), "")
+class CompetencyAttemptTests(unittest.TestCase):
+    """The competency attempt builder: one card per scored dimension."""
 
-    def test_an_empty_track_resolves_to_an_empty_topic_id(self):
-        with patch.object(self.parser, "list_topics", return_value=[]):
-            self.assertEqual(interview_sessions._track_topic_id("unknown-track"), "")
+    def test_a_dimension_score_becomes_a_competency_card(self):
+        attempts = interview_sessions._competency_attempts(
+            session={"track": "backend"},
+            rubric={
+                "technical_accuracy": 5,
+                "reasoning_depth": 2,
+                "communication_clarity": 4,
+                "completeness": 3,
+                "confidence_signal": 1,
+                "overall": 70,
+            },
+            user_answer="An answer.",
+            response_time_ms=1200,
+            hint_level=0,
+        )
 
-    def test_the_first_topic_of_the_track_is_used(self):
-        with patch.object(
-            self.parser,
-            "list_topics",
-            return_value=[type("T", (), {"id": "01-http"})()],
-        ):
-            self.assertEqual(
-                interview_sessions._track_topic_id("backend"), "01-http"
-            )
+        by_dimension = {
+            attempt["question_id"].removeprefix("interview-competency:"): attempt
+            for attempt in attempts
+        }
+        self.assertEqual(len(attempts), 5)
+        # A dimension at or above the pass threshold is a successful recall,
+        # and the score doubles as the confidence the FSRS rating reads.
+        self.assertTrue(by_dimension["technical_accuracy"]["is_correct"])
+        self.assertEqual(by_dimension["technical_accuracy"]["confidence"], 5)
+        self.assertFalse(by_dimension["reasoning_depth"]["is_correct"])
+        self.assertEqual(by_dimension["reasoning_depth"]["confidence"], 2)
+        self.assertTrue(by_dimension["reasoning_depth"]["confidence"] >= 1)
+
+    def test_unscored_dimensions_do_not_create_cards(self):
+        attempts = interview_sessions._competency_attempts(
+            session={"track": "backend"},
+            rubric={"overall": 70},
+            user_answer="An answer.",
+            response_time_ms=0,
+            hint_level=0,
+        )
+        self.assertEqual(attempts, [])
+
+    def test_the_session_threshold_decides_a_successful_recall(self):
+        # A session that raises its follow-up threshold raises the bar for the
+        # competency cards too, so "cleared" means the same thing in both.
+        attempts = interview_sessions._competency_attempts(
+            session={"track": "backend", "focus_threshold": 4},
+            rubric={"technical_accuracy": 3},
+            user_answer="An answer.",
+            response_time_ms=0,
+            hint_level=0,
+        )
+        self.assertEqual(len(attempts), 1)
+        self.assertFalse(attempts[0]["is_correct"])
+
+    def test_a_present_hint_level_is_recorded_on_the_competency_cards(self):
+        attempts = interview_sessions._competency_attempts(
+            session={"track": "backend"},
+            rubric={"technical_accuracy": 4},
+            user_answer="An answer.",
+            response_time_ms=0,
+            hint_level=2,
+        )
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0]["hints_used"], 1)
 
 
 class SessionCreationTests(InterviewRouterCoverageTestBase):
@@ -498,8 +559,15 @@ class SubmitAnswerGuardTests(InterviewRouterCoverageTestBase):
         self.assertIn("Turn 1 question", context["memory_summary"])
 
 
-class UnmappedTrackTests(InterviewRouterCoverageTestBase):
-    """A track with no curriculum topic must not reach the SRS store."""
+class CompetencyRecordingTests(InterviewRouterCoverageTestBase):
+    """Interview turns schedule competency cards, not curriculum topic cards.
+
+    The turn used to be written onto the track's first topic with
+    ``mode="study"``, which polluted topic mastery and weak areas. It is now
+    filed per rubric dimension as ``interview-competency:<dimension>`` with
+    ``mode="interview"``, and that recording must not depend on the track
+    having curriculum topics.
+    """
 
     def setUp(self):
         super().setUp()
@@ -513,7 +581,48 @@ class UnmappedTrackTests(InterviewRouterCoverageTestBase):
         self.learning_store.record_attempt = _spy  # type: ignore[method-assign]
         self.parser.list_topics = lambda **kwargs: []  # type: ignore[method-assign]
 
-    def test_sync_answer_skips_record_attempt_when_the_track_has_no_topic(self):
+    def test_a_scored_turn_records_one_competency_card_per_rubric_dimension(self):
+        session_id = self._create(turn_count=3)
+        response = self.client.post(
+            f"/api/interview-sessions/{session_id}/answer",
+            json={"user_answer": "Cursor pagination keeps ordering stable."},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["turn"]["turn_index"], 1)
+        dimensions = {"technical_accuracy", "reasoning_depth",
+                      "communication_clarity", "completeness",
+                      "confidence_signal"}
+        self.assertEqual(len(self.attempted), len(dimensions))
+        for attempt in self.attempted:
+            self.assertTrue(
+                attempt["question_id"].startswith("interview-competency:"),
+                attempt,
+            )
+            self.assertEqual(attempt["mode"], "interview")
+            self.assertEqual(attempt["topic_id"], "interview-competency")
+        self.assertEqual(
+            {
+                attempt["question_id"].removeprefix("interview-competency:")
+                for attempt in self.attempted
+            },
+            dimensions,
+        )
+        # A competency card is a spaced-repetition card, not an attempt row
+        # that the topic-mastery curve can read.
+        competencies = self.learning_store.get_interview_competencies(
+            user_id=USER["user"]
+        )
+        self.assertEqual(set(competencies["weakest"]), dimensions)
+        cards = self.learning_store._conn.execute(
+            "SELECT source_type FROM fsrs_cards WHERE user_id = ?",
+            (USER["user"],),
+        ).fetchall()
+        self.assertTrue(cards)
+        for card in cards:
+            self.assertEqual(card["source_type"], "interview")
+
+    def test_sync_answer_records_competencies_when_the_track_has_no_topic(self):
         session_id = self._create(turn_count=3)
         response = self.client.post(
             f"/api/interview-sessions/{session_id}/answer",
@@ -522,9 +631,9 @@ class UnmappedTrackTests(InterviewRouterCoverageTestBase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["turn"]["turn_index"], 1)
-        self.assertEqual(self.attempted, [])
+        self.assertEqual(len(self.attempted), 5)
 
-    def test_stream_answer_skips_record_attempt_when_the_track_has_no_topic(self):
+    def test_stream_answer_records_competencies_when_the_track_has_no_topic(self):
         session_id = self._create(turn_count=3)
         status, events = self._stream_events(
             f"/api/interview-sessions/{session_id}/answer/stream",
@@ -534,7 +643,7 @@ class UnmappedTrackTests(InterviewRouterCoverageTestBase):
         self.assertEqual(status, 200)
         self.assertEqual(events[-1]["type"], "done")
         self.assertEqual(events[-1]["turn"]["turn_index"], 1)
-        self.assertEqual(self.attempted, [])
+        self.assertEqual(len(self.attempted), 5)
 
 
 class SubmitAnswerStreamFailureTests(InterviewRouterCoverageTestBase):

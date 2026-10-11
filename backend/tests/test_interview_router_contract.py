@@ -208,8 +208,14 @@ class InterviewRouterContractTests(_InterviewRouterTestBase):
         answer_payload = answer_res.json()
         self.assertEqual(answer_payload["turn"]["rubric"]["overall"], 80)
         self.assertEqual(answer_payload["session"]["status"], "completed")
-        # A scored turn must still feed spaced repetition.
-        self.assertEqual(len(learning_store.record_attempt_calls), 1)
+        # A scored turn must still feed spaced repetition: one competency card
+        # per rubric dimension, never the track's first topic.
+        self.assertEqual(len(learning_store.record_attempt_calls), 5)
+        for call in learning_store.record_attempt_calls:
+            self.assertTrue(
+                call["question_id"].startswith("interview-competency:"), call
+            )
+            self.assertEqual(call["mode"], "interview")
 
         report_res = client.get(f"/api/interview-sessions/{session_id}/report")
         self.assertEqual(report_res.status_code, 200)
@@ -324,7 +330,8 @@ class InterviewRouterContractTests(_InterviewRouterTestBase):
         )
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.json()["turn"]["turn_index"], 2)
-        self.assertEqual(len(learning_store.record_attempt_calls), 2)
+        # Two scored turns schedule ten competency cards (five dimensions each).
+        self.assertEqual(len(learning_store.record_attempt_calls), 10)
 
         session_res = client.get(f"/api/interview-sessions/{session_id}")
         self.assertEqual(len(session_res.json()["turns"]), 2)
@@ -381,6 +388,185 @@ class InterviewRouterContractTests(_InterviewRouterTestBase):
             ["constraints", "consistency", "client impact"],
         )
         self.assertEqual(turns[0]["question_contract"], contract)
+
+
+class _CapturingFakeLLM(FakeLLM):
+    """Records the prompts production actually sent, and drives the design flow."""
+
+    def __init__(self, *, eval_payload: str):
+        super().__init__()
+        self._eval_payload = eval_payload
+        self.question_prompts: list[str] = []
+        self.eval_prompts: list[str] = []
+
+    async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
+        # Matches both the general and the system-design question contracts,
+        # which is the point of this test double.
+        if "interview evaluator" in prompt:
+            self.eval_prompts.append(prompt)
+            if self._eval_payload:
+                return {
+                    "success": True,
+                    "analysis": self._eval_payload,
+                    "metadata": {},
+                    "error_code": "",
+                    "finish_reason": "stop",
+                }
+        elif "Generate the NEXT" in prompt:
+            self.question_prompts.append(prompt)
+            question = self._question_bank[self.question_n % len(self._question_bank)]
+            self.question_n += 1
+            return {
+                "success": True,
+                "analysis": (
+                    '{"question":"'
+                    + question
+                    + '","competency_focus":"tradeoff analysis",'
+                    '"expected_signals":["constraints","consistency","client impact"]}'
+                ),
+                "metadata": {},
+                "error_code": "",
+                "finish_reason": "stop",
+            }
+        return await super().completion(prompt, llm_config, user_identity, task=task, **kwargs)
+
+
+_DESIGN_EVAL_PAYLOAD = (
+    '{"rubric":{"technical_accuracy":5,"reasoning_depth":5,'
+    '"communication_clarity":3,"completeness":3,"confidence_signal":3,"overall":70},'
+    '"system_design":{"architecture":5,"tradeoffs":5,"scalability":5,'
+    '"failure_modes":5,"communication":5},'
+    '"strengths":["Clear tradeoff"],"improvements":["Add failure mode"],'
+    '"follow_up_note":"Cover failure modes next."}'
+)
+
+_DIAGRAM_ANSWER = """I would put a gateway in front and a queue behind it.
+
+```mermaid
+graph TD
+  C[Client] --> G[Gateway]
+  G --> Q[Queue]
+  Q --> W[Worker]
+  W --> DB[(Postgres)]
+```
+
+I chose the queue instead of a direct write so the write path can shed load."""
+
+
+class InterviewPersonaContractTests(_InterviewRouterTestBase):
+    def test_the_persona_round_trips_into_the_interview_prompt(self):
+        llm = _CapturingFakeLLM(eval_payload="")
+        client, _ = self.build_client(llm)
+        create_res = client.post(
+            "/api/interview-sessions",
+            json={
+                "track": "backend",
+                "level": "mid",
+                "interview_type": "mixed",
+                "turn_count": 1,
+                "persona": "bar-raiser",
+                "target_role": "Backend Engineer",
+            },
+        )
+        self.assertEqual(create_res.status_code, 200)
+        self.assertEqual(
+            create_res.json()["session"]["persona"], "bar-raiser"
+        )
+
+        next_res = client.post(
+            f"/api/interview-sessions/{create_res.json()['session']['session_id']}/next-question",
+            json={},
+        )
+        self.assertEqual(next_res.status_code, 200, next_res.text)
+        self.assertTrue(llm.question_prompts)
+        prompt = llm.question_prompts[-1]
+        self.assertIn("- persona: bar-raiser", prompt)
+        self.assertIn("bar-raiser: hold the top-of-band bar", prompt)
+
+    def test_the_persona_defaults_to_neutral_when_absent(self):
+        llm = _CapturingFakeLLM(eval_payload="")
+        client, _ = self.build_client(llm)
+        create_res = client.post(
+            "/api/interview-sessions",
+            json={
+                "track": "backend",
+                "level": "mid",
+                "interview_type": "mixed",
+                "turn_count": 1,
+                "target_role": "Backend Engineer",
+            },
+        )
+        self.assertEqual(create_res.status_code, 200)
+        self.assertEqual(create_res.json()["session"]["persona"], "neutral")
+
+
+class SystemDesignSessionContractTests(_InterviewRouterTestBase):
+    def test_a_system_design_session_uses_its_own_prompt_and_rubric(self):
+        llm = _CapturingFakeLLM(eval_payload=_DESIGN_EVAL_PAYLOAD)
+        client, _ = self.build_client(llm)
+        create_res = client.post(
+            "/api/interview-sessions",
+            json={
+                "track": "system_design",
+                "level": "senior",
+                "interview_type": "system_design",
+                "turn_count": 1,
+                "persona": "bar-raiser",
+                "target_role": "Staff Engineer",
+            },
+        )
+        self.assertEqual(create_res.status_code, 200)
+        session_id = create_res.json()["session"]["session_id"]
+
+        next_res = client.post(
+            f"/api/interview-sessions/{session_id}/next-question",
+            json={},
+        )
+        self.assertEqual(next_res.status_code, 200)
+        prompt = llm.question_prompts[-1]
+        # A dedicated contract, not the general or coding one.
+        self.assertIn("system-design interviewer", prompt)
+        self.assertIn("mermaid diagram", prompt)
+        self.assertNotIn("senior interviewer running a personalized mock", prompt)
+
+        answer_res = client.post(
+            f"/api/interview-sessions/{session_id}/answer",
+            json={"user_answer": _DIAGRAM_ANSWER, "response_time_ms": 4000},
+        )
+        self.assertEqual(answer_res.status_code, 200)
+        turn = answer_res.json()["turn"]
+        # The model's string of 5s on architecture/communication is what the
+        # evaluator returned; the deterministic diagram evidence is what the
+        # evaluator was shown.
+        self.assertEqual(
+            sorted(turn["system_design_scores"]),
+            sorted(
+                [
+                    "architecture",
+                    "tradeoffs",
+                    "scalability",
+                    "failure_modes",
+                    "communication",
+                ]
+            ),
+        )
+        self.assertIn(
+            "Deterministic diagram evidence",
+            llm.eval_prompts[-1],
+        )
+        self.assertIn("structure_score", llm.eval_prompts[-1])
+
+    def test_a_non_design_session_carries_no_design_rubric(self):
+        llm = _CapturingFakeLLM(eval_payload=_DESIGN_EVAL_PAYLOAD)
+        client, _ = self.build_client(llm)
+        session_id = self.create_session(client, turn_count=1)
+        answer_res = client.post(
+            f"/api/interview-sessions/{session_id}/answer",
+            json={"user_answer": _DIAGRAM_ANSWER, "response_time_ms": 2000},
+        )
+        self.assertEqual(answer_res.status_code, 200)
+        self.assertNotIn("Deterministic diagram evidence", llm.eval_prompts[-1])
+        self.assertEqual(answer_res.json()["turn"]["system_design_scores"], {})
 
 
 if __name__ == "__main__":

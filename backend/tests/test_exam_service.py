@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from app.services.card_store import CardStore
 from app.services.exam_service import (
@@ -481,6 +482,56 @@ class ExamServiceTests(unittest.IsolatedAsyncioTestCase):
         exams = await self.service.list_exams(user_id="u1")
         self.assertEqual(len(exams), 1)
         self.assertEqual(exams[0]["title"], "A")
+
+    async def test_generated_topic_questions_carry_the_learner_state(self):
+        """Exams must not be learner-blind.
+
+        ``_generate_topic_questions`` used to call ``generate_quiz_v2`` with no
+        learner state, so an exam asked the same questions of a learner with
+        history as it did of a brand-new one. The seam now mirrors the one
+        ``questions.py`` uses.
+        """
+        captured: dict[str, str] = {}
+
+        class _Response:
+            questions: list = []
+
+        class _Generator:
+            async def generate_quiz_v2(self, **kwargs):
+                captured.update(kwargs)
+                return _Response()
+
+        service = ExamService(
+            store=self.exam_store,
+            learning_store=self.learning,
+            card_store=self.cards,
+            question_generator=_Generator(),
+        )
+        service._doc_parser = self._StubParser()
+        with patch(
+            "app.services.exam_service.build_learner_state_block",
+            return_value="learner_state\nWeak areas: 01-http",
+        ) as build:
+            questions = await service._generate_topic_questions(
+                user_id="u1", topic_ids=["01-http", "02-rest"], count=3
+            )
+        self.assertEqual(questions, [])
+        # The fence is gathered through the production seam, scoped to the
+        # exam's topics, and handed to the question generator.
+        build.assert_called_once()
+        self.assertEqual(build.call_args.args[0], "u1")
+        self.assertEqual(build.call_args.kwargs["topic_id"], "01-http")
+        self.assertIsNone(build.call_args.kwargs["track"])
+        self.assertEqual(
+            captured["learner_state"], "learner_state\nWeak areas: 01-http"
+        )
+
+    class _StubParser:
+        def get_topic(self, topic_id):
+            return type("Topic", (), {"title": "HTTP"})()
+
+        def get_topic_content(self, topic_id):
+            return "HTTP content."
 
     def test_pass_threshold_constant(self):
         self.assertEqual(PASS_THRESHOLD, 0.7)

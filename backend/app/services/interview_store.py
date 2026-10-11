@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_INTERVIEWER_STYLE = "neutral"
 _DEFAULT_FEEDBACK_MODE = "concise"
+_DEFAULT_PERSONA = "neutral"
 
 
 class TurnConflictError(Exception):
@@ -125,6 +126,7 @@ class InterviewStore:
                 "memory_summary": "TEXT NOT NULL DEFAULT ''",
                 "company": "TEXT NOT NULL DEFAULT ''",
                 "current_question_contract_json": "TEXT NOT NULL DEFAULT ''",
+                "persona": "TEXT NOT NULL DEFAULT 'neutral'",
             }
             for column, ddl in required_columns.items():
                 if column not in existing_columns:
@@ -158,6 +160,7 @@ class InterviewStore:
             ("expected_signals_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("question_contract_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("generation_version", "TEXT NOT NULL DEFAULT ''"),
+            ("design_scores_json", "TEXT NOT NULL DEFAULT '{}'"),
         ):
             if column not in turn_columns:
                 self._conn.execute(
@@ -242,6 +245,7 @@ class InterviewStore:
             "memory_summary": row["memory_summary"] if "memory_summary" in row.keys() else "",
             "report_ready": bool(int(row["report_ready"])) if "report_ready" in row.keys() else False,
             "company": row["company"] if "company" in row.keys() else "",
+            "persona": row["persona"] if "persona" in row.keys() else _DEFAULT_PERSONA,
         }
 
     def create_session(
@@ -259,10 +263,12 @@ class InterviewStore:
         interviewer_style: str = _DEFAULT_INTERVIEWER_STYLE,
         feedback_mode: str = _DEFAULT_FEEDBACK_MODE,
         company: str = "",
+        persona: str = _DEFAULT_PERSONA,
     ) -> dict[str, Any]:
         now = _utc_now_iso()
         session_id = f"is_{uuid.uuid4().hex[:16]}"
         focus = [x.strip() for x in focus_areas if x.strip()]
+        persona = (persona or "").strip().lower() or _DEFAULT_PERSONA
 
         with self._lock:
             with self._conn:
@@ -274,9 +280,9 @@ class InterviewStore:
                         target_role, interviewer_style, feedback_mode,
                         job_description_text, resume_summary_text,
                         focus_areas_json, asked_questions_json,
-                        current_question, memory_summary, company,
+                        current_question, memory_summary, company, persona,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -296,6 +302,7 @@ class InterviewStore:
                         "",
                         "",
                         company.strip(),
+                        persona,
                         now,
                         now,
                     ),
@@ -319,6 +326,7 @@ class InterviewStore:
             "memory_summary": "",
             "report_ready": False,
             "company": company.strip(),
+            "persona": persona,
         }
 
     def list_sessions(self, *, user_id: str, limit: int = 20, offset: int = 0) -> dict[str, Any]:
@@ -485,6 +493,7 @@ class InterviewStore:
         degraded: bool = False,
         contract: dict[str, Any] | None = None,
         generation_version: str = "",
+        design_scores: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         now = _utc_now_iso()
         try:
@@ -497,8 +506,8 @@ class InterviewStore:
                             rubric_json, strengths_json, improvements_json,
                             follow_up_note, response_time_ms, degraded, created_at,
                             competency_focus, expected_signals_json, question_contract_json,
-                            generation_version
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            generation_version, design_scores_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             session_id,
@@ -517,6 +526,7 @@ class InterviewStore:
                             self._dumps((contract or {}).get("expected_signals") or []),
                             self._dumps(contract or {}),
                             str(generation_version or ""),
+                            self._dumps(design_scores or {}),
                         ),
                     )
 
@@ -572,6 +582,7 @@ class InterviewStore:
             ),
             "question_contract": dict(contract or {}),
             "generation_version": str(generation_version or ""),
+            "system_design_scores": dict(design_scores or {}),
             "created_at": now,
         }
         session = self.get_session(user_id=user_id, session_id=session_id)
@@ -585,7 +596,7 @@ class InterviewStore:
                        strengths_json, improvements_json, follow_up_note,
                        response_time_ms, degraded, created_at,
                        competency_focus, expected_signals_json, question_contract_json,
-                       generation_version
+                       generation_version, design_scores_json
                 FROM interview_turns
                 WHERE user_id = ? AND session_id = ?
                 ORDER BY turn_index ASC
@@ -616,6 +627,9 @@ class InterviewStore:
                     ),
                     "generation_version": (
                         row["generation_version"] if "generation_version" in row.keys() else ""
+                    ),
+                    "system_design_scores": self._loads_dict(
+                        row["design_scores_json"] if "design_scores_json" in row.keys() else ""
                     ),
                     "created_at": row["created_at"],
                 }
