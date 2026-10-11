@@ -159,6 +159,14 @@ class Settings(BaseSettings):
     grpc_cli_agent_host: str = "localhost"
     grpc_cli_agent_port: int = 50052
 
+    # MCP stdio server (app/mcp_server) — single-user local bridge for
+    # external agents (Claude Desktop, Kilo, ...). Off by default, and it
+    # refuses to expose any tool unless BOTH are set: the feature flag and
+    # the one learner id every tool result is scoped to. There is no
+    # multi-tenant path and no anonymous fallback.
+    enable_mcp_server: bool = False
+    mcp_server_user_id: str = ""
+
     model_config = {
         "env_prefix": "STUDY_",
         "env_file": ".env",
