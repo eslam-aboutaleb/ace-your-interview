@@ -1978,3 +1978,104 @@ export interface ChatHighlightActionResponse {
   source_section: string;
   source_quote: string;
 }
+
+/* ── Readiness per role/company ─────────────────────────────── */
+
+/** One weighted slice of a readiness score (a track or competency). */
+export interface ReadinessWeightRow {
+  kind: string;
+  id: string;
+  label: string;
+  weight: number;
+  score: number;
+  evidence_count: number;
+  contribution: number;
+  gap_points: number;
+}
+
+/** Evidence kinds a readiness gap can cite. */
+export type ReadinessEvidenceKind =
+  | "topic"
+  | "interview_competency"
+  | "error_pattern";
+
+/** One stored-evidence reference behind a readiness gap. */
+export interface ReadinessGapEvidence {
+  kind: ReadinessEvidenceKind | string;
+  ref: string;
+  label: string;
+  /** Present for scored evidence; `null` for count-only references. */
+  score?: number | null;
+  count: number;
+  detail: string;
+}
+
+/** A weighted gap that still holds readiness points back. */
+export interface ReadinessGapDimension {
+  kind: string;
+  id: string;
+  label: string;
+  weight: number;
+  score: number;
+  evidence_count: number;
+  gap_points: number;
+  evidence: ReadinessGapEvidence[];
+}
+
+/** Count of the stored evidence the readiness blend consumed. */
+export interface RoleReadinessEvidence {
+  topic_reviews: number;
+  interview_reports: number;
+  interview_competency_reviews: number;
+  error_patterns: number;
+}
+
+/** Weighted readiness for the learner's target role. */
+export interface RoleReadiness {
+  target_role: string;
+  role_id: string;
+  role_label: string;
+  match_source: string;
+  readiness: number;
+  readiness_label: string;
+  track_weights: Record<string, number>;
+  competency_weights: Record<string, number>;
+  track_breakdown: ReadinessWeightRow[];
+  competency_breakdown: ReadinessWeightRow[];
+  gap_dimensions: ReadinessGapDimension[];
+  evidence: RoleReadinessEvidence;
+}
+
+/** One row of the ranked best-fit role list. */
+export interface BestFitRole {
+  role_id: string;
+  role_label: string;
+  readiness: number;
+  readiness_label: string;
+  is_target: boolean;
+}
+
+/** Fit verdict for one company in the learner's target list. */
+export interface CompanyReadinessEntry {
+  company: string;
+  company_key: string;
+  company_label: string;
+  match_source: string;
+  fit: number;
+  fit_label: string;
+  bar: number;
+  clears_bar: boolean;
+  track_weights: Record<string, number>;
+  competency_weights: Record<string, number>;
+  gap_dimensions: ReadinessGapDimension[];
+}
+
+/** Response of `GET /api/learning/readiness`. */
+export interface RoleReadinessResponse {
+  generated_at: string;
+  profile: LearnerProfile;
+  role: RoleReadiness;
+  best_fit_roles: BestFitRole[];
+  /** Target companies ranked by fit, best first. */
+  companies: CompanyReadinessEntry[];
+}

@@ -11,6 +11,7 @@ import TopicStudy from "@/pages/TopicStudy";
 import QuizMode from "@/pages/QuizMode";
 import ReviewQueue from "@/pages/ReviewQueue";
 import StudyPlan from "@/pages/StudyPlan";
+import ReadinessPage from "@/pages/ReadinessPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import DocumentsPage from "@/pages/DocumentsPage";
 import DecksPage from "@/pages/DecksPage";
@@ -271,6 +272,14 @@ export default function App() {
               element={
                 <ErrorBoundary>
                   <StudyPlan />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="readiness"
+              element={
+                <ErrorBoundary>
+                  <ReadinessPage />
                 </ErrorBoundary>
               }
             />

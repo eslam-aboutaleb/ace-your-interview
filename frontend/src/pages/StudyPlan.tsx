@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CalendarDays,
   Flame,
+  Gauge,
   Loader2,
   RefreshCw,
   Save,
@@ -16,6 +17,7 @@ import {
   completePlanTask,
   fetchGamificationSummary,
   fetchLearnerProfile,
+  fetchReadiness,
   fetchRecommendations,
   fetchStudyPlan,
   fetchTopics,
@@ -25,6 +27,12 @@ import {
   updateLearnerProfile,
 } from "@/services/api";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
+import {
+  formatGapPoints,
+  formatScore,
+  rankedCompanyFits,
+  topGapDimensions,
+} from "@/utils/readiness";
 import type {
   GamificationSummaryResponse,
   LearnerProfileUpdateRequest,
@@ -33,6 +41,7 @@ import type {
   ProfileDiagnosticResponse,
   RecommendationItem,
   RecommendationsResponse,
+  RoleReadinessResponse,
   StudyPlanResponse,
   StudyPlanTask,
   TopicSummary,
@@ -117,6 +126,7 @@ export default function StudyPlanPage() {
   const [diagnostic, setDiagnostic] = useState<ProfileDiagnosticResponse | null>(null);
   const [draft, setDraft] = useState<ProfileDraft>(emptyDraft());
   const [gamification, setGamification] = useState<GamificationSummaryResponse | null>(null);
+  const [readiness, setReadiness] = useState<RoleReadinessResponse | null>(null);
   const [goalDraft, setGoalDraft] = useState(3);
   const [savingGoal, setSavingGoal] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -129,19 +139,21 @@ export default function StudyPlanPage() {
     setLoading(true);
     setErrorMsg("");
     try {
-      const [studyPlan, topicList, profile, nextRecommendations, gamificationSummary] =
+      const [studyPlan, topicList, profile, nextRecommendations, gamificationSummary, readinessResult] =
         await Promise.all([
           fetchStudyPlan(7, 3),
           fetchTopics(),
           fetchLearnerProfile(),
           fetchRecommendations(6),
           fetchGamificationSummary().catch(() => null),
+          fetchReadiness().catch(() => null),
         ]);
       setPlan(studyPlan);
       setTopics(topicList);
       setDraft(profileToDraft(profile));
       setRecommendations(nextRecommendations.items || []);
       setGamification(gamificationSummary);
+      setReadiness(readinessResult);
       setGoalDraft(gamificationSummary?.daily_goal ?? 3);
 
       if (profile.diagnostic_updated_at) {
@@ -190,13 +202,16 @@ export default function StudyPlanPage() {
       });
       setDraft(profileToDraft(saved));
       setMessage("Learner profile saved.");
-      const [studyPlan, nextRecommendations, gamificationSummary] = await Promise.all([
-        fetchStudyPlan(7, 3),
-        fetchRecommendations(6),
-        fetchGamificationSummary().catch(() => null),
-      ]);
+      const [studyPlan, nextRecommendations, gamificationSummary, readinessResult] =
+        await Promise.all([
+          fetchStudyPlan(7, 3),
+          fetchRecommendations(6),
+          fetchGamificationSummary().catch(() => null),
+          fetchReadiness().catch(() => null),
+        ]);
       setPlan(studyPlan);
       setRecommendations(nextRecommendations.items || []);
+      setReadiness(readinessResult);
       if (gamificationSummary) {
         setGamification(gamificationSummary);
         setGoalDraft(gamificationSummary.daily_goal);
@@ -214,16 +229,18 @@ export default function StudyPlanPage() {
     setMessage("");
     setErrorMsg("");
     try {
-      const [diagnosticResult, studyPlan, nextRecommendations, gamificationSummary] =
+      const [diagnosticResult, studyPlan, nextRecommendations, gamificationSummary, readinessResult] =
         await Promise.all([
           runProfileDiagnostic(),
           fetchStudyPlan(7, 3),
           fetchRecommendations(6),
           fetchGamificationSummary().catch(() => null),
+          fetchReadiness().catch(() => null),
         ]);
       setDiagnostic(diagnosticResult);
       setPlan(studyPlan);
       setRecommendations(nextRecommendations.items || []);
+      setReadiness(readinessResult);
       if (gamificationSummary) {
         setGamification(gamificationSummary);
         setGoalDraft(gamificationSummary.daily_goal);
@@ -340,6 +357,16 @@ export default function StudyPlanPage() {
         `${plan.total_tasks} total task(s)`,
       ].join(" · ")
     : "";
+
+  // Role/company-aware prioritisation: the same weighting that
+  // scores the readiness endpoint also ranks these tasks, so the
+  // plan card surfaces what the weighting is optimising for.
+  const topReadinessCompany = readiness
+    ? rankedCompanyFits(readiness.companies)[0] ?? null
+    : null;
+  const topReadinessGaps = readiness
+    ? topGapDimensions(readiness.role.gap_dimensions, 2)
+    : [];
 
   const todayProgress =
     plan && plan.days_plan.length > 0
@@ -669,6 +696,50 @@ export default function StudyPlanPage() {
               </p>
             )}
 
+            {readiness && (
+              <div
+                data-testid="readiness-strip"
+                className="mt-4 rounded-lg border border-udemy-border bg-udemy-bg p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+              >
+                <div className="text-xs text-udemy-text-muted">
+                  <p>
+                    Ranked for{" "}
+                    <span className="font-semibold text-udemy-text">
+                      {readiness.role.role_label ||
+                        readiness.role.target_role ||
+                        "your primary track"}
+                    </span>{" "}
+                    ({formatScore(readiness.role.readiness)}% ready)
+                    {topReadinessCompany && (
+                      <>
+                        {" · closest fit "}
+                        <span className="font-semibold text-udemy-text">
+                          {topReadinessCompany.company_label}{" "}
+                          {formatScore(topReadinessCompany.fit)}%
+                        </span>{" "}
+                        ({topReadinessCompany.fit_label})
+                      </>
+                    )}
+                  </p>
+                  {topReadinessGaps.length > 0 && (
+                    <p className="mt-1">
+                      Biggest readiness levers:{" "}
+                      {topReadinessGaps
+                        .map((gap) => `${gap.label} (${formatGapPoints(gap.gap_points)})`)
+                        .join(" · ")}
+                    </p>
+                  )}
+                </div>
+                <Link
+                  to="/readiness"
+                  className="text-xs font-semibold text-udemy-purple inline-flex items-center gap-1 flex-shrink-0"
+                >
+                  <Gauge className="w-3.5 h-3.5" />
+                  Role readiness
+                </Link>
+              </div>
+            )}
+
             <div className="mt-5">
               {loading ? (
                 <div className="flex items-center justify-center gap-2 text-sm text-udemy-text-muted py-10">
@@ -877,10 +948,21 @@ export default function StudyPlanPage() {
           )}
 
           <div className="udemy-card p-6">
-            <h2 className="text-lg font-bold">Diagnostic</h2>
-            <p className="text-sm text-udemy-text-muted mt-1">
-              Confidence, mastery, and interview evidence combined.
-            </p>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">Diagnostic</h2>
+                <p className="text-sm text-udemy-text-muted mt-1">
+                  Confidence, mastery, and interview evidence combined.
+                </p>
+              </div>
+              <Link
+                to="/readiness"
+                className="btn-secondary text-sm inline-flex items-center gap-2"
+              >
+                <Target className="w-4 h-4" />
+                Role readiness
+              </Link>
+            </div>
 
             {!diagnostic ? (
               <p className="text-sm text-udemy-text-muted mt-5">

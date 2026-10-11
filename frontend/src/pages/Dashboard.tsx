@@ -5,6 +5,7 @@ import {
   BookOpen,
   Clock,
   Compass,
+  Gauge,
   TrendingUp,
   Sparkles,
   ChevronRight,
@@ -23,6 +24,7 @@ import {
 import {
   fetchLearnerProfile,
   fetchPlacementStatus,
+  fetchReadiness,
   fetchRecommendations,
   fetchInterviewStats,
   fetchTopicMastery,
@@ -35,11 +37,23 @@ import { useAuthStore } from "@/store/authStore";
 import ProgressBar from "@/components/common/ProgressBar";
 import SkeletonCards from "@/components/common/SkeletonCards";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
+import {
+  formatGapPoints,
+  formatScore,
+  hasTargetCompanies,
+  matchSourceLabel,
+  rankedCompanyFits,
+  readinessBandBadgeClass,
+  topGapDimensions,
+} from "@/utils/readiness";
 import type {
+  CompanyReadinessEntry,
   ForecastResponse,
   GamificationSummaryResponse,
   LearnerProfile,
+  ReadinessGapDimension,
   RecommendationItem,
+  RoleReadinessResponse,
   TopicSummary,
 } from "@/types";
 
@@ -87,6 +101,11 @@ export default function Dashboard() {
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [gamification, setGamification] =
     useState<GamificationSummaryResponse | null>(null);
+  const [readiness, setReadiness] = useState<RoleReadinessResponse | null>(
+    null,
+  );
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const [readinessError, setReadinessError] = useState("");
   const [interviewStats, setInterviewStats] = useState({
     total_sessions: 0,
     completed_sessions: 0,
@@ -141,6 +160,8 @@ export default function Dashboard() {
       setProfile(null);
       setPlacementCompleted(false);
       setRecommendations([]);
+      setReadiness(null);
+      setReadinessError("");
       return;
     }
     fetchPlacementStatus()
@@ -149,6 +170,18 @@ export default function Dashboard() {
         // Placement may be disabled; treat it as "not diagnosed yet".
         setPlacementCompleted(false);
       });
+    setReadinessLoading(true);
+    fetchReadiness()
+      .then((res) => {
+        setReadiness(res);
+        setReadinessError("");
+      })
+      .catch(() => {
+        // Readiness may be disabled or unavailable; keep the page usable.
+        setReadiness(null);
+        setReadinessError("Role readiness is unavailable right now.");
+      })
+      .finally(() => setReadinessLoading(false));
     fetchLearnerProfile()
       .then(setProfile)
       .catch(() => {
@@ -182,6 +215,8 @@ export default function Dashboard() {
 
   const progress = totalProgress();
   const completedCount = completedTopics.length;
+  const hasReadinessTargets = hasTargetCompanies(readiness?.profile) ||
+    Boolean(readiness?.role.target_role);
 
   return (
     <motion.div
@@ -439,6 +474,12 @@ export default function Dashboard() {
               <Link to="/study-plan" className="btn-secondary text-sm inline-flex">
                 Open plan
               </Link>
+              <Link
+                to="/readiness"
+                className="btn-secondary text-sm inline-flex"
+              >
+                Role readiness
+              </Link>
             </div>
 
             {!isAuthenticated ? (
@@ -538,6 +579,121 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Interview readiness */}
+      {isAuthenticated && (
+        <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-4">
+          <div className="udemy-card p-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold mb-1 flex items-center gap-2">
+                  <Gauge className="w-4 h-4 text-udemy-purple" />
+                  Interview readiness
+                </h2>
+                <p className="text-xs text-udemy-text-muted">
+                  Weighted readiness for your target role and every target
+                  company, with the gaps that still cost you points.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/study-plan"
+                  className="btn-secondary text-sm inline-flex"
+                >
+                  Study plan
+                </Link>
+                <Link
+                  to="/readiness"
+                  className="text-sm text-udemy-purple font-medium"
+                >
+                  Full breakdown
+                </Link>
+              </div>
+            </div>
+
+            {readinessLoading && !readiness ? (
+              <p className="text-sm text-udemy-text-muted mt-4">
+                Weighing your evidence against each target...
+              </p>
+            ) : readinessError ? (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1 mt-4">
+                {readinessError}
+              </p>
+            ) : !readiness ? null : !hasReadinessTargets ? (
+              <div className="mt-4 rounded-lg border border-udemy-purple/30 bg-udemy-purple/5 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">
+                    Set your interview targets
+                  </p>
+                  <p className="text-xs text-udemy-text-muted mt-1">
+                    Add a target role and target companies so readiness can be
+                    scored against what each employer screens for.
+                  </p>
+                </div>
+                <Link
+                  to={placementCompleted ? "/study-plan" : "/onboarding"}
+                  className="btn-primary text-sm inline-flex items-center gap-2"
+                >
+                  {placementCompleted ? "Update targets" : "Set targets"}
+                  <ChevronRight className="w-4 h-4" />
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-[0.85fr,1.15fr] gap-4 mt-4">
+                <div
+                  data-testid="readiness-role"
+                  className="rounded-lg border border-udemy-border p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs text-udemy-text-muted">
+                        Target role
+                      </p>
+                      <p className="text-sm font-bold line-clamp-2">
+                        {readiness.role.role_label ||
+                          readiness.role.target_role ||
+                          "Not set"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-lg font-bold text-udemy-purple">
+                        {formatScore(readiness.role.readiness)}%
+                      </span>
+                      <ReadinessBandBadge
+                        label={readiness.role.readiness_label}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <ProgressBar percent={readiness.role.readiness} />
+                  </div>
+                  <p className="text-xs text-udemy-text-muted mt-2">
+                    {matchSourceLabel(readiness.role.match_source, "role")}
+                  </p>
+                  <ReadinessGapList
+                    gaps={topGapDimensions(readiness.role.gap_dimensions, 3)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  {readiness.companies.length === 0 ? (
+                    <p className="text-sm text-udemy-text-muted">
+                      No target companies saved yet.
+                    </p>
+                  ) : (
+                    rankedCompanyFits(readiness.companies).map((company) => (
+                      <ReadinessCompanyRow
+                        key={company.company_key || company.company}
+                        company={company}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="max-w-[1340px] mx-auto px-4 sm:px-6 pt-6">
         <div className="udemy-card p-4">
@@ -681,6 +837,95 @@ function MiniStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-udemy-border px-3 py-2 bg-white">
       <p className="text-xs text-udemy-text-muted">{label}</p>
       <p className="text-sm font-bold line-clamp-2">{value}</p>
+    </div>
+  );
+}
+
+function ReadinessBandBadge({ label }: { label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${readinessBandBadgeClass(
+        label,
+      )}`}
+    >
+      {label || "Not Started"}
+    </span>
+  );
+}
+
+function ReadinessCompanyRow({ company }: { company: CompanyReadinessEntry }) {
+  return (
+    <div
+      data-testid="readiness-company"
+      className="rounded-lg border border-udemy-border p-3"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold truncate">
+          {company.company_label || company.company}
+        </p>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-sm font-bold text-udemy-purple">
+            {formatScore(company.fit)}%
+          </span>
+          <ReadinessBandBadge label={company.fit_label} />
+          <span
+            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+              company.clears_bar
+                ? "border-udemy-success bg-udemy-success-bg text-udemy-success"
+                : "border-udemy-danger text-udemy-danger"
+            }`}
+          >
+            {company.clears_bar ? "Clears the bar" : "Below the bar"}
+          </span>
+        </div>
+      </div>
+      <p className="text-xs text-udemy-text-muted mt-1">
+        {matchSourceLabel(company.match_source, "company")} · bar{" "}
+        {formatScore(company.bar)}%
+      </p>
+      <ReadinessGapList
+        gaps={topGapDimensions(company.gap_dimensions, 2)}
+        evidenceLimit={1}
+      />
+    </div>
+  );
+}
+
+function ReadinessGapList({
+  gaps,
+  evidenceLimit = 2,
+}: {
+  gaps: ReadinessGapDimension[];
+  evidenceLimit?: number;
+}) {
+  if (gaps.length === 0) return null;
+  return (
+    <div className="mt-2">
+      <p className="text-xs text-udemy-text-muted">Top gaps</p>
+      <ul className="mt-1 space-y-1">
+        {gaps.map((gap) => (
+          <li key={`${gap.kind}:${gap.id}`} className="text-xs">
+            <span className="font-semibold">{gap.label}</span>
+            <span className="text-udemy-text-muted">
+              {" · "}
+              {formatGapPoints(gap.gap_points)} headroom
+            </span>
+            {gap.evidence.length > 0 && (
+              <span className="text-udemy-text-muted">
+                {" · "}
+                {gap.evidence
+                  .slice(0, evidenceLimit)
+                  .map((item) =>
+                    typeof item.score === "number"
+                      ? `${item.label} (${formatScore(item.score)}%)`
+                      : item.label,
+                  )
+                  .join(", ")}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

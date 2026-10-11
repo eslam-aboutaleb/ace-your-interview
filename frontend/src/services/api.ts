@@ -504,7 +504,8 @@ api.interceptors.response.use(
       reqUrl.includes("/learning/mastery") ||
       reqUrl.includes("/learning/weak-areas") ||
       reqUrl.includes("/learning/review-queue") ||
-      reqUrl.includes("/learning/study-plan");
+      reqUrl.includes("/learning/study-plan") ||
+      reqUrl.includes("/learning/readiness");
     if (
       error.response?.status === 401 &&
       !window.location.pathname.startsWith("/login") &&
@@ -2102,3 +2103,15 @@ import type {
   ChatHighlightActionRequest,
   ChatHighlightActionResponse,
 } from "@/types";
+
+// ── Readiness per role/company ───────────────────────────────
+
+export async function fetchReadiness(): Promise<RoleReadinessResponse> {
+  const { data } = await api.get<RoleReadinessResponse>("/learning/readiness");
+  return data;
+}
+
+// Readiness types. Imported here because this file is append-only:
+// ES module imports are hoisted, so the trailing block keeps every
+// existing line untouched.
+import type { RoleReadinessResponse } from "@/types";

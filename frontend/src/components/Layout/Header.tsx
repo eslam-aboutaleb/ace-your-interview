@@ -9,6 +9,7 @@ import {
   MessageSquare,
   CalendarDays,
   Clock3,
+  Gauge,
   FileText,
   Layers,
   LogOut,
@@ -102,6 +103,12 @@ export default function Header() {
             label: "Study Plan",
             icon: <CalendarDays className="w-4 h-4" />,
             active: location.pathname.startsWith("/study-plan"),
+          },
+          {
+            to: "/readiness",
+            label: "Role Readiness",
+            icon: <Gauge className="w-4 h-4" />,
+            active: location.pathname.startsWith("/readiness"),
           },
           {
             to: "/documents",

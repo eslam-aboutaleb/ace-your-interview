@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import StudyPlanPage from "./StudyPlan";
@@ -6,6 +6,7 @@ import {
   completePlanTask,
   fetchGamificationSummary,
   fetchLearnerProfile,
+  fetchReadiness,
   fetchRecommendations,
   fetchStudyPlan,
   fetchTopics,
@@ -16,6 +17,7 @@ import type {
   GamificationSummaryResponse,
   LearnerProfile,
   PlanCommitmentSummary,
+  RoleReadinessResponse,
   StudyPlanResponse,
 } from "@/types";
 
@@ -25,6 +27,7 @@ vi.mock("@/services/api", () => ({
   fetchLearnerProfile: vi.fn(),
   fetchRecommendations: vi.fn(),
   fetchGamificationSummary: vi.fn(),
+  fetchReadiness: vi.fn(),
   runProfileDiagnostic: vi.fn(),
   completePlanTask: vi.fn(),
   uncompletePlanTask: vi.fn(),
@@ -121,6 +124,104 @@ const gamification: GamificationSummaryResponse = {
   badges: ["first_review"],
 };
 
+function readiness(
+  overrides: Partial<RoleReadinessResponse> = {},
+): RoleReadinessResponse {
+  return {
+    generated_at: "2026-10-11T09:00:00Z",
+    profile,
+    role: {
+      target_role: "Backend Engineer",
+      role_id: "backend_engineer",
+      role_label: "Backend Engineer",
+      match_source: "catalog",
+      readiness: 72.4,
+      readiness_label: "On Track",
+      track_weights: { backend: 0.6, system_design: 0.4 },
+      competency_weights: { technical_accuracy: 0.6 },
+      track_breakdown: [],
+      competency_breakdown: [],
+      gap_dimensions: [
+        {
+          kind: "track",
+          id: "backend",
+          label: "Backend",
+          weight: 0.6,
+          score: 62,
+          evidence_count: 12,
+          gap_points: 22.8,
+          evidence: [
+            {
+              kind: "topic",
+              ref: "03-indexing-and-query-plans",
+              label: "Indexing And Query Plans",
+              score: 41,
+              count: 0,
+              detail: "4 review(s), 2 due",
+            },
+          ],
+        },
+        {
+          kind: "interview_competency",
+          id: "technical_accuracy",
+          label: "Technical Accuracy",
+          weight: 0.6,
+          score: 55,
+          evidence_count: 6,
+          gap_points: 9.6,
+          evidence: [],
+        },
+        {
+          kind: "track",
+          id: "system_design",
+          label: "System Design",
+          weight: 0.4,
+          score: 88,
+          evidence_count: 4,
+          gap_points: 4.8,
+          evidence: [],
+        },
+      ],
+      evidence: {
+        topic_reviews: 12,
+        interview_reports: 2,
+        interview_competency_reviews: 18,
+        error_patterns: 5,
+      },
+    },
+    best_fit_roles: [],
+    companies: [
+      {
+        company: "Datadog",
+        company_key: "datadog",
+        company_label: "Datadog",
+        match_source: "default",
+        fit: 83.1,
+        fit_label: "Strong",
+        bar: 74,
+        clears_bar: true,
+        track_weights: {},
+        competency_weights: {},
+        gap_dimensions: [],
+      },
+      {
+        company: "Stripe",
+        company_key: "stripe",
+        company_label: "Stripe",
+        match_source: "catalog",
+        fit: 61.3,
+        fit_label: "Developing",
+        bar: 70,
+        clears_bar: false,
+        track_weights: {},
+        competency_weights: {},
+        gap_dimensions: [],
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -148,6 +249,7 @@ describe("StudyPlanPage", () => {
       items: [],
     });
     vi.mocked(fetchGamificationSummary).mockResolvedValue(gamification);
+    vi.mocked(fetchReadiness).mockResolvedValue(readiness());
   });
 
   it("renders the persisted completion state for today's tasks", async () => {
@@ -279,5 +381,40 @@ describe("StudyPlanPage", () => {
       await screen.findByText(/today's load was halved/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/2 item\(s\)\/day/)).toBeInTheDocument();
+  });
+
+  it("shows the role and company readiness strip on the 7-day plan card", async () => {
+    renderPage();
+
+    const strip = await screen.findByTestId("readiness-strip");
+    expect(strip).toHaveTextContent(/Ranked for/i);
+    expect(strip).toHaveTextContent("Backend Engineer");
+    expect(strip).toHaveTextContent("72% ready");
+    expect(strip).toHaveTextContent("Datadog");
+    expect(strip).toHaveTextContent("83%");
+    expect(strip).toHaveTextContent("Strong");
+    expect(strip).not.toHaveTextContent("Stripe");
+    expect(
+      within(strip).getByRole("link", { name: /Role readiness/i }),
+    ).toHaveAttribute("href", "/readiness");
+  });
+
+  it("lists the weighted gaps the plan prioritises", async () => {
+    renderPage();
+
+    const strip = await screen.findByTestId("readiness-strip");
+    expect(strip).toHaveTextContent(/Biggest readiness levers/i);
+    expect(strip).toHaveTextContent("Backend (+22.8 pts)");
+    expect(strip).toHaveTextContent("Technical Accuracy (+9.6 pts)");
+    expect(strip).not.toHaveTextContent("System Design (+4.8 pts)");
+  });
+
+  it("hides the readiness strip when readiness cannot load", async () => {
+    vi.mocked(fetchReadiness).mockRejectedValue(new Error("offline"));
+    renderPage();
+
+    expect(await screen.findByText("7-Day Plan")).toBeInTheDocument();
+    await waitFor(() => expect(fetchReadiness).toHaveBeenCalled());
+    expect(screen.queryByTestId("readiness-strip")).not.toBeInTheDocument();
   });
 });
