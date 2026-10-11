@@ -1987,3 +1987,55 @@ export async function fetchDueForecast(
   );
   return data;
 }
+
+// ── Placement Onboarding ────────────────────────
+
+export async function startPlacement(
+  req: PlacementStartRequest,
+): Promise<PlacementStartResponse> {
+  const { data } = await api.post<PlacementStartResponse>(
+    "/learning/placement/start",
+    req,
+  );
+  return data;
+}
+
+export async function answerPlacement(
+  req: PlacementAnswerRequest,
+): Promise<PlacementAnswerResponse> {
+  const { data } = await api.post<PlacementAnswerResponse>(
+    "/learning/placement/answer",
+    req,
+  );
+  return data;
+}
+
+export async function finishPlacement(
+  req: PlacementFinishRequest,
+): Promise<PlacementFinishResponse> {
+  const { data } = await api.post<PlacementFinishResponse>(
+    "/learning/placement/finish",
+    req,
+  );
+  return data;
+}
+
+export async function fetchPlacementStatus(): Promise<PlacementStatusResponse> {
+  const { data } = await api.get<PlacementStatusResponse>(
+    "/learning/placement/status",
+  );
+  return data;
+}
+
+// Placement onboarding types. Imported here because this file is
+// append-only: ES module imports are hoisted, so the trailing block
+// keeps every existing line untouched.
+import type {
+  PlacementAnswerRequest,
+  PlacementAnswerResponse,
+  PlacementFinishRequest,
+  PlacementFinishResponse,
+  PlacementStartRequest,
+  PlacementStartResponse,
+  PlacementStatusResponse,
+} from "@/types";
