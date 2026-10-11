@@ -6,6 +6,9 @@ export type LearningTrack =
   | "system_design"
   | "ai_stack";
 export type InterviewLevel = "junior" | "mid" | "senior";
+/** Generation level: a pinned level, or `"auto"` to take the server's
+ *  history-derived recommendation (see `resolved_level` on the responses). */
+export type GenerationLevel = InterviewLevel | "auto";
 export type ResponseDetail = "concise" | "very_detailed";
 export type InterviewType =
   | "behavioral"
@@ -256,7 +259,7 @@ export interface GenerateQuestionsRequest {
   requested_total_count?: number;
   existing_questions?: string[];
   difficulty?: string;
-  level?: InterviewLevel | null;
+  level?: GenerationLevel | null;
   response_detail?: ResponseDetail;
   preferred_language?: string;
   llm_config?: LLMConfig;
@@ -270,6 +273,8 @@ export interface GenerateQuestionsResponse {
   questions: QuestionAnswer[];
   provider_used: string;
   model_used: string;
+  /** Level auto-resolved from the learner's history; empty when pinned. */
+  resolved_level?: string;
 }
 
 export interface GenerateQuestionsV2Response {
@@ -285,6 +290,8 @@ export interface GenerateQuestionsV2Response {
   returned_count: number;
   /** Wire identifier of the prompt contract: "<prompt_name>@<version>". */
   generation_version: string;
+  /** Level auto-resolved from the learner's history; empty when pinned. */
+  resolved_level?: string;
 }
 
 export interface GenerateQuestionsStreamStartEvent {
@@ -311,6 +318,8 @@ export interface GenerateQuestionsStreamDoneEvent {
   degraded: boolean;
   requested_count: number;
   returned_count: number;
+  /** Level auto-resolved from the learner's history; empty when pinned. */
+  resolved_level?: string;
 }
 
 export interface GenerateQuestionsStreamWarningEvent {
@@ -378,6 +387,8 @@ export interface GenerateQuizStreamDoneEvent {
   degraded: boolean;
   requested_count: number;
   returned_count: number;
+  /** Level auto-resolved from the learner's history; empty when pinned. */
+  resolved_level?: string;
 }
 
 export interface GenerateQuizStreamWarningEvent {
@@ -570,7 +581,7 @@ export interface GenerateQuizRequest {
   count: number;
   question_types: QuizQuestionType[];
   difficulty?: string;
-  level?: InterviewLevel | null;
+  level?: GenerationLevel | null;
   response_detail?: ResponseDetail;
   preferred_language?: string;
   llm_config?: LLMConfig;
@@ -597,6 +608,8 @@ export interface GenerateQuizResponse {
   topics_used: string[];
   provider_used: string;
   model_used: string;
+  /** Level auto-resolved from the learner's history; empty when pinned. */
+  resolved_level?: string;
 }
 
 export interface GenerateQuizV2Response {
@@ -611,6 +624,8 @@ export interface GenerateQuizV2Response {
   returned_count: number;
   /** Wire identifier of the prompt contract: "<prompt_name>@<version>". */
   generation_version: string;
+  /** Level auto-resolved from the learner's history; empty when pinned. */
+  resolved_level?: string;
 }
 
 export type QuizMode = "practice" | "exam";
