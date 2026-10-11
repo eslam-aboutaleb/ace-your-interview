@@ -243,7 +243,7 @@ async def lifespan(application: FastAPI):
     user_settings.init(_user_settings_store)
     auth.init_llm_service_access(_llm_service_access)
     auth.init_llm_assignments_store(_llm_assignments_store)
-    chat.init(_llm_client, parser, _learning_store, _mcp_gateway)
+    chat.init(_llm_client, parser, _learning_store, _mcp_gateway, card_store=card_store)
     chat.init_rag_service(rag_service)
     documents.init(
         document_store=document_store,

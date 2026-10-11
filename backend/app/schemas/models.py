@@ -1795,4 +1795,58 @@ class PlanCommitmentSummary(BaseModel):
     requested_daily_items: int = 0
     effective_daily_items: int = 0
     completed_tasks: int = 0
-    pending_tasks: int = 0
+    pending_tasks: int = 0# ── Highlight Deep Actions ────────────────────────────────────
+class HighlightActionEnum(str, Enum):
+    EXPLAIN = "explain"
+    FLASHCARD = "flashcard"
+    REVIEW = "review"
+    INTERVIEW_ANGLE = "interview_angle"
+
+
+class ChatHighlightActionRequest(BaseModel):
+    """One deep action on a highlighted term inside a Q&A card.
+
+    ``action`` dispatches the call: ``explain`` answers in grounded
+    markdown, ``flashcard``/``review`` write a card through the existing
+    card and FSRS APIs, and ``interview_angle`` coaches the term as an
+    interview answer. Every externally sourced field carries the same
+    ``max_length`` bounds the follow-up flow fences against.
+    """
+
+    action: HighlightActionEnum
+    word: str = Field(..., max_length=200)
+    context_question: str = Field(default="", max_length=2000)
+    context_answer: str = Field(default="", max_length=6000)
+    source_section: str = Field(default="", max_length=200)
+    source_quote: str = Field(default="", max_length=600)
+    topic_id: str = ""
+    topic_title: str = ""
+    topic_track: str = ""
+    section_title: str = ""
+    mode: str = ""
+    response_detail: Optional[ResponseDetailEnum] = None
+    preferred_language: Optional[str] = Field(default=None, max_length=60)
+    requires_programming: Optional[bool] = None
+    user_message: str = Field(default="", max_length=4000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=50)
+    conversation_id: str = ""
+    use_memory: bool = True
+    #: Target deck for the flashcard action; empty resolves the topic deck.
+    deck_id: str = ""
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class ChatHighlightActionResponse(BaseModel):
+    action: str
+    #: Markdown body for the LLM-backed actions (empty for card writes).
+    reply: str = ""
+    provider_used: str = ""
+    model_used: str = ""
+    #: Created-card / scheduled-review reference, so the UI can confirm it.
+    card_id: str = ""
+    deck_id: str = ""
+    deck_name: str = ""
+    due_at: str = ""
+    #: Grounding carried back on ``explain``: the cited section and quote.
+    source_section: str = ""
+    source_quote: str = ""

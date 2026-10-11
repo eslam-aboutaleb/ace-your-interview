@@ -2063,6 +2063,18 @@ export async function completePlanTask(
   return data;
 }
 
+// ── Highlight Deep Actions ───────────────────────────────────
+
+export async function chatHighlightAction(
+  req: ChatHighlightActionRequest,
+): Promise<ChatHighlightActionResponse> {
+  const { data } = await api.post<ChatHighlightActionResponse>(
+    "/chat/highlight-action",
+    req,
+  );
+  return data;
+}
+
 export async function uncompletePlanTask(
   taskKey: string,
   taskDate: string,
@@ -2081,4 +2093,12 @@ export async function uncompletePlanTask(
 import type {
   PlanTaskItem,
   PlanTaskListResponse,
+} from "@/types";
+
+// Highlight deep-action types. Imported here because this file is
+// append-only: ES module imports are hoisted, so the trailing block
+// keeps every existing line untouched.
+import type {
+  ChatHighlightActionRequest,
+  ChatHighlightActionResponse,
 } from "@/types";

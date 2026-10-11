@@ -16,6 +16,7 @@ Adaptive, LLM-powered interview preparation platform. Level-aware question and q
 - Question and quiz generation in legacy and **strict v2** modes: v2 emits `source_quote` / `source_section`, validates against the curriculum, retries on failure, and streams (`/stream` variants).
 - Generation prompts are grounded by an **LLM skills taxonomy** (`backend/app/services/llm_skills.py`): 15 DSA technical/coding skills, 30 stack-specific technical skills, 10 interview skills, and 10 educational skills, injected as structured prompt blocks. Technical skills are **track-aware**: the backend, frontend, system-design, and AI-stack packs are selected by the session's track and level, and an empty or unknown track keeps the DSA pack so problem-solving generation is unchanged.
 - Citation-grounded **RAG chat** over user-ingested documents (sqlite-vec vector search), with follow-up turns and custom-topic generation.
+- **Highlight deep actions** on any term selected inside a Q&A card (`POST /api/chat/highlight-action`): a citation-grounded explanation that cites the handbook section and quote it came from, a flashcard written through the card store, a review item scheduled on the FSRS scheduler, or an interview-coached STAR-ish answer using the topic track's skill pack.
 - On-demand hints for any generated question.
 
 ### Adaptive learning
@@ -182,6 +183,7 @@ STUDY_DEV_AUTH_BYPASS_LOCALHOST=true
 | GET/POST | `/api/documents` | List / ingest documents |
 | GET/DELETE | `/api/documents/{document_id}` | Document management |
 | POST | `/api/chat/ask`, `/follow-up` | Citation-grounded RAG chat |
+| POST | `/api/chat/highlight-action` | Highlighted-term deep actions (explain / flashcard / review / interview angle) |
 | POST | `/api/topics/custom`, `/custom/stream` | Custom topic generation |
 | **Mock interviews** | | |
 | POST | `/api/interview-sessions`, `/stream` | Create session (sync / streaming) |
