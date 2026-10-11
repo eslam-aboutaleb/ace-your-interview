@@ -316,6 +316,16 @@ def _target_objectives_block(target_objectives: list[str] | None) -> str:
     )
 
 
+def _learner_state_block(learner_state: str) -> str:
+    # ``learner_state`` arrives already gathered, bounded, and fenced by
+    # learner_memory.build_learner_state_block; the only job here is the
+    # separating newline, so an empty learner keeps the prompt unchanged.
+    text = str(learner_state or "").strip()
+    if not text:
+        return ""
+    return f"\n{text}\n"
+
+
 def _skill_context_section(level: str, session_type: str, track: str = "") -> str:
     """Render the bounded skill-taxonomy context for a generation prompt.
 
@@ -2285,6 +2295,7 @@ def _build_prompt(
     prior_progress: str = "",
     mcp_context: str = "",
     track: str = "",
+    learner_state: str = "",
 ) -> str:
     problem_solving_mode = is_problem_solving_topic(topic_id)
     target_level = _normalise_level(level)
@@ -2373,6 +2384,7 @@ def _build_prompt(
             f"{existing_blob}\n"
         )
     progress_block = _progress_block(prior_progress)
+    learner_state_block = _learner_state_block(learner_state)
     untrusted_blocks = "\n\n".join(
         block
         for block in (
@@ -2450,7 +2462,7 @@ Target candidate level: "{target_level}".
 Target scope: {scope}.
 User requested total questions for this checkpoint: {requested_total}.
 This call is generating {count} new questions to fill remaining slots.
-{progress_block}{uniqueness_block}
+{progress_block}{learner_state_block}{uniqueness_block}
 {grounding_block}
 
 {skill_section}
@@ -2522,6 +2534,7 @@ def _build_quiz_prompt(
     prior_progress: str = "",
     mcp_context: str = "",
     target_objectives: list[str] | None = None,
+    learner_state: str = "",
 ) -> str:
     """Build the quiz user turn. The creator persona lives in ``system``."""
     target_level = _normalise_level(level)
@@ -2568,6 +2581,7 @@ def _build_quiz_prompt(
     mcp_block = untrusted_block("external_context", mcp_context, 2500)
     progress_block = _progress_block(prior_progress)
     targeting_block = _target_objectives_block(target_objectives)
+    learner_state_block = _learner_state_block(learner_state)
     uniqueness_block = ""
     if existing_seed:
         existing_blob = "\n".join([f"- {q}" for q in existing_seed[:60]])
@@ -2642,7 +2656,7 @@ def _build_quiz_prompt(
     return f"""Create exactly {count} quiz questions from the documentation below.{diff_clause}
 Target candidate level: "{target_level}".
 {type_instructions}
-{progress_block}{targeting_block}{uniqueness_block}
+{progress_block}{learner_state_block}{targeting_block}{uniqueness_block}
 {skill_section}
 
 {prompt_contract}
@@ -3640,6 +3654,7 @@ class QuestionGenerator:
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
         topic_track: str = "",
+        learner_state: str = "",
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(0, int(count))
         requested_total = max(1, int(requested_total_count or count or 1))
@@ -3701,6 +3716,7 @@ class QuestionGenerator:
                 prior_progress=prior_progress,
                 mcp_context=mcp_context,
                 track=topic_track,
+                learner_state=learner_state,
             )
             prompt = base_prompt
             system_prompt = _question_system_prompt(problem_solving_mode)
@@ -4092,6 +4108,7 @@ class QuestionGenerator:
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
         topic_track: str = "",
+        learner_state: str = "",
     ) -> GenerateQuestionsResponse:
         problem_solving_mode = is_problem_solving_topic(topic_id)
         selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
@@ -4116,6 +4133,7 @@ class QuestionGenerator:
             prior_progress=prior_progress,
             additional_existing_questions=additional_existing_questions,
             topic_track=topic_track,
+            learner_state=learner_state,
         )
         merged_seed = _merge_existing_questions(
             existing_questions, additional_existing_questions
@@ -4206,6 +4224,7 @@ class QuestionGenerator:
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
         topic_track: str = "",
+        learner_state: str = "",
     ) -> GenerateQuestionsV2Response:
         target_count = max(1, int(count or 1))
         problem_solving_mode = is_problem_solving_topic(topic_id)
@@ -4314,6 +4333,7 @@ class QuestionGenerator:
                 requires_programming=mode["requires_programming"],
                 mcp_context=mcp_context,
                 track=topic_track,
+                learner_state=learner_state,
             )
             pass_items, pass_stats = await _collect_with_retries(
                 llm=self.llm,
@@ -4456,6 +4476,7 @@ class QuestionGenerator:
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
         target_objectives: list[str] | None = None,
+        learner_state: str = "",
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(1, int(count or 1))
         effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
@@ -4502,6 +4523,7 @@ class QuestionGenerator:
                 prior_progress=prior_progress,
                 mcp_context=mcp_context,
                 target_objectives=target_objectives,
+                learner_state=learner_state,
             )
             base_prompt = prompt
             max_tokens_cap = _questions_max_tokens_cap(1)
@@ -4753,6 +4775,7 @@ class QuestionGenerator:
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
         target_objectives: list[str] | None = None,
+        learner_state: str = "",
     ) -> GenerateQuizResponse:
         v2 = await self.generate_quiz_v2(
             topics_content=topics_content,
@@ -4767,6 +4790,7 @@ class QuestionGenerator:
             prior_progress=prior_progress,
             additional_existing_questions=additional_existing_questions,
             target_objectives=target_objectives,
+            learner_state=learner_state,
         )
         legacy_questions = [
             QuizQuestion(
@@ -4801,6 +4825,7 @@ class QuestionGenerator:
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
         target_objectives: list[str] | None = None,
+        learner_state: str = "",
     ) -> GenerateQuizV2Response:
         effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
         mcp_context = await self._mcp_context_for_flow(
@@ -4824,6 +4849,7 @@ class QuestionGenerator:
             prior_progress=prior_progress,
             mcp_context=mcp_context,
             target_objectives=target_objectives,
+            learner_state=learner_state,
         )
         allowed_topics = {str(tc["id"]) for tc in topics_content}
         allowed_types = set(question_types or ["mcq", "true_false"])

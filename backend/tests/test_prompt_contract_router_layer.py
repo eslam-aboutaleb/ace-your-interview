@@ -129,8 +129,10 @@ class RouterPromptContractTests(unittest.TestCase):
         self.assertGreater(chat.MAX_CONTEXT_ANSWER_CHARS, 0)
         self.assertGreater(chat.MAX_HISTORY_CHARS, 0)
         self.assertGreater(chat.MAX_MCP_CONTEXT_CHARS, 0)
+        self.assertGreater(chat.MAX_LEARNER_STATE_CHARS, 0)
         self.assertGreater(questions.MAX_SECTION_CONTENT_CHARS, 0)
         self.assertGreater(questions.MAX_SECTION_TITLE_CHARS, 0)
+        self.assertGreater(questions.MAX_LEARNER_STATE_CHARS, 0)
         # The fence delimiter guard must exist, otherwise a payload can close
         # its own block. The guard lives in the shared prompt_blocks module.
         self.assertTrue(prompt_blocks._FENCE_TOKENS)

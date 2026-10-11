@@ -48,6 +48,7 @@ from app.services.llm_service_access import LLMServiceAccess
 from app.services.hint_service import HintService
 from app.services.learning_planner import LearningPlannerStore
 from app.services.learning_store import LearningStore
+from app.services.learner_memory import init as init_learner_memory
 from app.services.llm_client import LLMClient
 from app.services.mcp_gateway import MCPGateway
 from app.services.progress_summarizer import ProgressSummarizer
@@ -264,6 +265,14 @@ async def lifespan(application: FastAPI):
         _learning_store,
         settings.learning_db_path,
         _mcp_gateway,
+    )
+    # The learner-state block reads the interview store as well, so this comes
+    # after interview_sessions.init has installed its shared instance.
+    _interview_services = interview_sessions.get_interview_services()
+    init_learner_memory(
+        learning_store=_learning_store,
+        learning_planner=_learning_planner,
+        interview_store=(_interview_services[0] if _interview_services else None),
     )
     hints.init(HintService(_llm_client, settings.learning_db_path))
     voice.init(_llm_client, _user_settings_store)
