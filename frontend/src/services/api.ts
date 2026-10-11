@@ -2039,3 +2039,46 @@ import type {
   PlacementStartResponse,
   PlacementStatusResponse,
 } from "@/types";
+
+// ── Plan commitment: completable plan tasks ───────────────
+
+export async function fetchPlanTasks(
+  taskDate: string,
+): Promise<PlanTaskListResponse> {
+  const { data } = await api.get<PlanTaskListResponse>("/learning/plan-tasks", {
+    params: { task_date: taskDate },
+  });
+  return data;
+}
+
+export async function completePlanTask(
+  taskKey: string,
+  taskDate: string,
+): Promise<PlanTaskItem> {
+  const { data } = await api.post<PlanTaskItem>(
+    `/learning/plan-tasks/${encodeURIComponent(taskKey)}/complete`,
+    undefined,
+    { params: { task_date: taskDate } },
+  );
+  return data;
+}
+
+export async function uncompletePlanTask(
+  taskKey: string,
+  taskDate: string,
+): Promise<PlanTaskItem> {
+  const { data } = await api.post<PlanTaskItem>(
+    `/learning/plan-tasks/${encodeURIComponent(taskKey)}/uncomplete`,
+    undefined,
+    { params: { task_date: taskDate } },
+  );
+  return data;
+}
+
+// Plan commitment types. Imported here because this file is
+// append-only: ES module imports are hoisted, so the trailing block
+// keeps every existing line untouched.
+import type {
+  PlanTaskItem,
+  PlanTaskListResponse,
+} from "@/types";
