@@ -855,6 +855,10 @@ export interface StudyPlanTask {
   reason: string;
   estimated_minutes: number;
   cta_route: string;
+  // Appended for the commitment device: stable identity across plan
+  // regeneration plus the persisted completion state.
+  task_key?: string;
+  completed?: boolean;
 }
 
 export interface StudyPlanDay {
@@ -870,6 +874,9 @@ export interface StudyPlanResponse {
   daily_items: number;
   total_tasks: number;
   days_plan: StudyPlanDay[];
+  // Appended for the commitment device: streak/daily-goal context and
+  // the completed/pending split for the scheduled tasks.
+  commitment?: PlanCommitmentSummary;
 }
 
 export interface StudyPlanFromJDResponse extends StudyPlanResponse {
@@ -1886,4 +1893,44 @@ export interface PlacementStatusResponse {
   track: string;
   derived_level: string;
   steps_taken: number;
+}
+
+/* ── Plan commitment (study plan as a commitment device) ─────── */
+
+export interface PlanTaskItem {
+  task_key: string;
+  task_date: string;
+  task_type: StudyPlanTaskType;
+  topic_id: string;
+  title: string;
+  reason: string;
+  estimated_minutes: number;
+  cta_route: string;
+  completed: boolean;
+  completed_at: string | null;
+}
+
+export interface PlanTaskListResponse {
+  items: PlanTaskItem[];
+  total: number;
+}
+
+export interface PlanCommitmentSummary {
+  /** Daily learning-event goal from the gamification store. */
+  daily_goal: number;
+  today_progress: number;
+  current_streak: number;
+  longest_streak: number;
+  /** Active yesterday with nothing logged today — the streak survives only if the learner acts today. */
+  streak_at_risk: boolean;
+  /** A full day or more was missed while the learner had earlier history. */
+  streak_lapsed: boolean;
+  /** Missed days: the daily item count was halved to a restart-sized commitment. */
+  behind: boolean;
+  /** Behind schedule or short of today's goal — surfaced as a catch-up prompt. */
+  catch_up: boolean;
+  requested_daily_items: number;
+  effective_daily_items: number;
+  completed_tasks: number;
+  pending_tasks: number;
 }
