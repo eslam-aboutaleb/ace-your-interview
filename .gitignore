@@ -42,3 +42,4 @@ htmlcov/
 sw.js
 workbox-*.js
 node_modules
+coverage.xml
