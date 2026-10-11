@@ -83,6 +83,11 @@ class StubGenerator:
         self.report = report or {"overall_score": 77.0}
         self.calls: list[dict] = []
 
+    def resolve_session_level(self, *, track, user_identity):
+        """Stands in for the generator's history-derived level resolution."""
+        self.calls.append({"kind": "level", "track": track})
+        return "mid"
+
     async def generate_question(
         self,
         *,

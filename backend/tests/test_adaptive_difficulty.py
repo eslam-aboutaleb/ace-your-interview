@@ -28,6 +28,7 @@ from app.schemas.models import (
 from app.services import question_generator as qg
 from app.services.doc_parser import DocParser
 from app.services.hint_service import HintService
+from app.services.interview_generator import InterviewGenerator
 from app.services.learning_store import LearningStore
 
 TOPIC_ID = "01-http"
@@ -704,3 +705,404 @@ class RequestSchemaLevelTests(unittest.TestCase):
             self.assertEqual(
                 GenerateQuestionsRequest(topic_id="x", level=level).level, level
             )
+
+
+# ── Interview generation (deferred by the question/quiz wiring) ────────────
+# ``InterviewGenerator`` carries the same ``run_store`` seam
+# ``QuestionGenerator`` reads its recommendation from, so the interview flows
+# now resolve their level the same way instead of silently grading and
+# generating at whatever the create request defaulted to.
+
+_EVAL_ANALYSIS = json.dumps(
+    {
+        "rubric": {
+            "technical_accuracy": 4,
+            "reasoning_depth": 4,
+            "communication_clarity": 4,
+            "completeness": 4,
+            "confidence_signal": 4,
+            "overall": 80,
+        },
+        "strengths": ["Clear tradeoff reasoning"],
+        "improvements": ["Add a concrete metric"],
+        "follow_up_note": (
+            "### What strong interviewers wanted to hear\n"
+            "The idempotency key and the retry budget.\n\n"
+            "### What to improve next\n- Quantify the duplicate rate.\n\n"
+            "### Stronger sample answer\nI would key the write on a request id."
+        ),
+    }
+)
+
+
+class _EchoLevelInterviewLLM:
+    """Returns one valid interview question echoing the prompt's level."""
+
+    def __init__(self):
+        self.prompts = []
+
+    async def completion(self, prompt, llm_config=None, user_identity=None, **kwargs):
+        self.prompts.append(prompt)
+        level = re.search(r"^- level: (\w+)$", prompt, re.MULTILINE)
+        return {
+            "success": True,
+            "analysis": json.dumps(
+                {
+                    "question": (
+                        "How would you keep retryable writes idempotent across "
+                        f"regions as a {level.group(1) if level else 'mid'} engineer?"
+                    ),
+                    "competency_focus": "idempotency",
+                    "expected_signals": ["idempotency key", "retry budget"],
+                }
+            ),
+            "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
+        }
+
+
+class _CapturingInterviewLLM(_EchoLevelInterviewLLM):
+    """Answers every turn with a valid evaluation payload."""
+
+    async def completion(self, prompt, llm_config=None, user_identity=None, **kwargs):
+        self.prompts.append(prompt)
+        return {
+            "success": True,
+            "analysis": _EVAL_ANALYSIS,
+            "metadata": {"provider": "openai", "model": "gpt-4o-mini"},
+        }
+
+
+class InterviewSessionLevelResolutionTests(unittest.TestCase):
+    """The precedence rule itself: explicit > history > default."""
+
+    def _generator(self, run_store):
+        return InterviewGenerator(None, None, run_store=run_store)
+
+    def _resolve(self, run_store, *, level=None, user=None, track="backend"):
+        return self._generator(run_store)._resolve_generation_level(
+            level=level,
+            user_identity=user,
+            track=track,
+        )
+
+    def test_unset_level_uses_the_track_history_and_reports_it(self):
+        store = _FakeRunStore("senior")
+        self.assertEqual(
+            self._resolve(store, user={"user": "alice"}),
+            ("senior", "senior"),
+        )
+        # A session's track is the only history key it carries.
+        self.assertEqual(store.calls, [("alice", "backend")])
+
+    def test_explicit_level_wins_and_never_queries_the_store(self):
+        for level in ("junior", "mid", "senior"):
+            with self.subTest(level=level):
+                store = _FakeRunStore("senior")
+                self.assertEqual(
+                    self._resolve(store, level=level, user={"user": "alice"}),
+                    (level, ""),
+                )
+                self.assertEqual(store.calls, [])
+
+    def test_auto_alias_defers_to_the_history_like_an_omitted_level(self):
+        store = _FakeRunStore("junior")
+        self.assertEqual(
+            self._resolve(store, level="auto", user={"user": "alice"}),
+            ("junior", "junior"),
+        )
+
+    def test_no_user_context_means_no_recommendation(self):
+        for user in (None, {}, {"user": ""}):
+            with self.subTest(user=user):
+                store = _FakeRunStore("senior")
+                self.assertEqual(
+                    self._resolve(store, user=user),
+                    ("mid", "mid"),
+                )
+                self.assertEqual(store.calls, [])
+
+    def test_no_track_means_no_recommendation(self):
+        store = _FakeRunStore("senior")
+        self.assertEqual(
+            self._resolve(store, user={"user": "alice"}, track=""),
+            ("mid", "mid"),
+        )
+        self.assertEqual(store.calls, [])
+
+    def test_store_without_the_helper_is_ignored(self):
+        self.assertEqual(
+            self._resolve(_UnhelpfulRunStore(), user={"user": "alice"}),
+            ("mid", "mid"),
+        )
+
+    def test_recommendation_failure_degrades_to_mid(self):
+        store = _FakeRunStore(error=RuntimeError("learning db unavailable"))
+        with self.assertLogs("app.services.interview_generator", level="WARNING"):
+            self.assertEqual(
+                self._resolve(store, user={"user": "alice"}),
+                ("mid", "mid"),
+            )
+
+    def test_off_contract_recommendation_is_ignored(self):
+        self.assertEqual(
+            self._resolve(_FakeRunStore("expert"), user={"user": "alice"}),
+            ("mid", "mid"),
+        )
+
+    def test_resolve_session_level_defaults_to_mid_without_history(self):
+        self.assertEqual(
+            self._generator(_FakeRunStore()).resolve_session_level(
+                track="backend", user_identity={"user": "alice"}
+            ),
+            "mid",
+        )
+
+
+def _session(*, level=None, track="backend"):
+    session = {
+        "session_id": "s-level",
+        "track": track,
+        "interview_type": "technical",
+        "turn_count": 5,
+        "turns_completed": 0,
+        "target_role": "Backend Engineer",
+        "focus_areas": [],
+        "job_description_text": "",
+        "resume_summary_text": "",
+        "asked_questions": [],
+    }
+    if level is not None:
+        session["level"] = level
+    return session
+
+
+class InterviewResolvedLevelFlowTests(unittest.TestCase):
+    """The resolved level reaches the prompt, the difficulty and the rubric."""
+
+    def test_generate_question_resolves_the_level_and_reports_it(self):
+        with _Store() as stores:
+            _fluent_history(stores.learning, topic_id="backend")
+            llm = _EchoLevelInterviewLLM()
+            generator = InterviewGenerator(llm, None, run_store=stores.learning)
+            generated = asyncio.run(
+                generator.generate_question(
+                    session=_session(),
+                    turns=[],
+                    user_identity={"user": "alice"},
+                )
+            )
+            self.assertEqual(generated["resolved_level"], "senior")
+            self.assertEqual(generated["difficulty"], "hard")
+            self.assertIn("- level: senior", llm.prompts[0])
+
+    def test_generate_question_keeps_a_pinned_level(self):
+        with _Store() as stores:
+            _fluent_history(stores.learning, topic_id="backend")
+            llm = _EchoLevelInterviewLLM()
+            generator = InterviewGenerator(llm, None, run_store=stores.learning)
+            generated = asyncio.run(
+                generator.generate_question(
+                    session=_session(level="junior"),
+                    turns=[],
+                    user_identity={"user": "alice"},
+                )
+            )
+            self.assertNotIn("resolved_level", generated)
+            self.assertEqual(generated["difficulty"], "easy")
+            self.assertIn("- level: junior", llm.prompts[0])
+
+    def test_generate_question_defaults_to_mid_without_history(self):
+        with _Store() as stores:
+            llm = _EchoLevelInterviewLLM()
+            generator = InterviewGenerator(llm, None, run_store=stores.learning)
+            generated = asyncio.run(
+                generator.generate_question(
+                    session=_session(),
+                    turns=[],
+                    user_identity={"user": "alice"},
+                )
+            )
+            self.assertEqual(generated["resolved_level"], "mid")
+            self.assertIn("- level: mid", llm.prompts[0])
+
+    def test_evaluate_answer_grades_at_the_resolved_level(self):
+        with _Store() as stores:
+            _fluent_history(stores.learning, topic_id="backend")
+            llm = _CapturingInterviewLLM()
+            generator = InterviewGenerator(llm, None, run_store=stores.learning)
+            asyncio.run(
+                generator.evaluate_answer(
+                    session=_session(),
+                    question="How would you keep retryable writes idempotent?",
+                    user_answer="Key every write on a request id.",
+                    turn_index=1,
+                    user_identity={"user": "alice"},
+                )
+            )
+            self.assertIn("- level: senior", llm.prompts[0])
+
+    def test_evaluate_answer_keeps_a_pinned_level(self):
+        with _Store() as stores:
+            _fluent_history(stores.learning, topic_id="backend")
+            llm = _CapturingInterviewLLM()
+            generator = InterviewGenerator(llm, None, run_store=stores.learning)
+            asyncio.run(
+                generator.evaluate_answer(
+                    session=_session(level="junior"),
+                    question="How would you keep retryable writes idempotent?",
+                    user_answer="Key every write on a request id.",
+                    turn_index=1,
+                    user_identity={"user": "alice"},
+                )
+            )
+            self.assertIn("- level: junior", llm.prompts[0])
+
+    def test_a_failed_recommendation_never_fails_the_interview(self):
+        llm = _EchoLevelInterviewLLM()
+        generator = InterviewGenerator(
+            llm, None, run_store=_FakeRunStore(error=OSError("db locked"))
+        )
+        generated = asyncio.run(
+            generator.generate_question(
+                session=_session(),
+                turns=[],
+                user_identity={"user": "alice"},
+            )
+        )
+        self.assertEqual(generated["resolved_level"], "mid")
+        self.assertIn("- level: mid", llm.prompts[0])
+
+    def test_a_failed_recommendation_never_fails_an_evaluation(self):
+        llm = _CapturingInterviewLLM()
+        generator = InterviewGenerator(
+            llm, None, run_store=_FakeRunStore(error=OSError("db locked"))
+        )
+        out = asyncio.run(
+            generator.evaluate_answer(
+                session=_session(),
+                question="How would you keep retryable writes idempotent?",
+                user_answer="Key every write on a request id.",
+                turn_index=1,
+                user_identity={"user": "alice"},
+            )
+        )
+        self.assertFalse(out.get("degraded"))
+        self.assertIn("- level: mid", llm.prompts[0])
+
+
+class _FakeCardLLM:
+    """Returns one grounded card per call and records every prompt."""
+
+    def __init__(self, front: str):
+        self._front = front
+        self.prompts: list[str] = []
+
+    async def completion(self, prompt, llm_config=None, **kwargs):
+        self.prompts.append(prompt)
+        item = {
+            "front": self._front,
+            "back": (
+                "Keep-alive reuses one TCP connection across requests, trading "
+                "a held socket for lower latency."
+            ),
+            "source_section": "Persistent connections",
+            "source_quote": TOPIC_CONTENT,
+        }
+        return {
+            "success": True,
+            "analysis": json.dumps([item]),
+            "metadata": {"model": "fake"},
+        }
+
+
+class CardGenerationLevelResolutionTests(unittest.TestCase):
+    """Flashcards used to pin their level; they now resolve it like questions."""
+
+    def _run(self, *, level, user, run_store, front):
+        llm = _FakeCardLLM(front)
+        generator = qg.QuestionGenerator(llm, run_store=run_store)
+        cards, stats = asyncio.run(
+            generator.generate_cards(
+                topic_id=TOPIC_ID,
+                topic_title=TOPIC_TITLE,
+                doc_content=TOPIC_CONTENT,
+                count=1,
+                level=level,
+                user_identity=user,
+            )
+        )
+        self.assertEqual(len(cards), 1)
+        return cards, stats, llm
+
+    def _front(self, tag: str) -> str:
+        return f"How does HTTP keep-alive reuse one connection for {tag}?"
+
+    def test_omitted_level_resolves_from_the_topics_history(self):
+        with _Store() as stores:
+            _fluent_history(stores.learning)
+            _cards, stats, _llm = self._run(
+                level=None,
+                user={"user": "alice"},
+                run_store=stores.learning,
+                front=self._front("later requests"),
+            )
+            self.assertEqual(stats["resolved_level"], "senior")
+
+    def test_omitted_level_defaults_to_mid_without_history(self):
+        with _Store() as stores:
+            _cards, stats, _llm = self._run(
+                level=None,
+                user={"user": "alice"},
+                run_store=stores.learning,
+                front=self._front("a cold learner"),
+            )
+            self.assertEqual(stats["resolved_level"], "mid")
+
+    def test_explicit_level_is_kept_and_the_store_is_never_queried(self):
+        store = _FakeRunStore("senior")
+        _cards, stats, _llm = self._run(
+            level="junior",
+            user={"user": "alice"},
+            run_store=store,
+            front=self._front("a pinned level"),
+        )
+        self.assertEqual(stats["resolved_level"], "")
+        # An explicit level never consults the learner's history.
+        self.assertEqual(store.calls, [])
+
+    def test_resolved_level_reaches_the_card_prompt(self):
+        with _Store() as stores:
+            _fluent_history(stores.learning)
+            _cards, stats, llm = self._run(
+                level=None,
+                user={"user": "alice"},
+                run_store=stores.learning,
+                front=self._front("a fluent learner"),
+            )
+            self.assertEqual(stats["resolved_level"], "senior")
+            # The skill pack the resolved level selects, not the mid default's.
+            self.assertIn("Bit Manipulation", llm.prompts[0])
+            self.assertNotIn("Arrays & Two-Pointer Technique", llm.prompts[0])
+
+    def test_no_user_context_falls_back_to_the_mid_default(self):
+        with _Store() as stores:
+            _fluent_history(stores.learning)
+            _cards, stats, _llm = self._run(
+                level=None,
+                user=None,
+                run_store=stores.learning,
+                front=self._front("an anonymous caller"),
+            )
+            self.assertEqual(stats["resolved_level"], "mid")
+
+    def test_a_failed_recommendation_degrades_to_mid(self):
+        with _Store() as stores:
+            _fluent_history(stores.learning)
+            _cards, stats, _llm = self._run(
+                level=None,
+                user={"user": "alice"},
+                run_store=_FakeRunStore(error=OSError("db locked")),
+                front=self._front("a broken store"),
+            )
+            self.assertEqual(stats["resolved_level"], "mid")
+
