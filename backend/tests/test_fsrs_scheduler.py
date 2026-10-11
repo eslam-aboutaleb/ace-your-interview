@@ -270,5 +270,68 @@ class FSRSchedulerPropertyTests(unittest.TestCase):
         self.assertEqual(scheduler.desired_retention, 0.9)
 
 
+class FSRSchedulerDeriveRatingWithHintsTests(unittest.TestCase):
+    """Hint usage downgrades the derived rating by one grade per hint."""
+
+    def test_zero_hints_matches_derive_rating(self):
+        for is_correct in (False, True):
+            for confidence in range(1, 6):
+                with self.subTest(is_correct=is_correct, confidence=confidence):
+                    self.assertEqual(
+                        fsrs_scheduler.derive_rating_with_hints(
+                            is_correct, confidence, 0
+                        ),
+                        fsrs_scheduler.derive_rating(is_correct, confidence),
+                    )
+
+    def test_each_hint_downgrades_one_grade(self):
+        cases = (
+            # (is_correct, confidence, hints) → expected rating
+            (True, 5, 1, "good"),
+            (True, 5, 2, "hard"),
+            (True, 5, 3, "again"),
+            (True, 4, 1, "good"),
+            (True, 3, 1, "hard"),
+            (True, 1, 1, "again"),
+            (False, 5, 1, "again"),
+            (False, 5, 4, "again"),
+        )
+        for is_correct, confidence, hints, expected in cases:
+            with self.subTest(
+                is_correct=is_correct, confidence=confidence, hints=hints
+            ):
+                self.assertEqual(
+                    fsrs_scheduler.derive_rating_with_hints(
+                        is_correct, confidence, hints
+                    ),
+                    expected,
+                )
+
+    def test_hints_floor_at_again(self):
+        self.assertEqual(
+            fsrs_scheduler.derive_rating_with_hints(True, 1, 99), "again"
+        )
+        self.assertEqual(
+            fsrs_scheduler.derive_rating_with_hints(False, 3, 99), "again"
+        )
+
+    def test_omitted_hints_default_to_no_downgrade(self):
+        self.assertEqual(
+            fsrs_scheduler.derive_rating_with_hints(True, 5),
+            fsrs_scheduler.derive_rating(True, 5),
+        )
+
+    def test_only_emits_valid_ratings(self):
+        for is_correct in (False, True):
+            for confidence in range(1, 6):
+                for hints in range(0, 7):
+                    self.assertIn(
+                        fsrs_scheduler.derive_rating_with_hints(
+                            is_correct, confidence, hints
+                        ),
+                        fsrs_scheduler.RATINGS,
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,10 +10,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import get_settings
 from app.dependencies import require_auth
+from app.routers import hints as hints_router
 from app.routers import interview_sessions as interview_sessions_router
 from app.schemas.models import (
     CalibrationResponse,
     ForecastResponse,
+    FSRSCardResponse,
+    LeechItem,
+    LeechResumeResponse,
+    LeechesResponse,
     LearnerProfile,
     LearnerProfileUpdateRequest,
     LearningAttemptRequest,
@@ -68,6 +73,27 @@ def _ensure_enabled() -> None:
 def _ensure_fsrs_enabled() -> None:
     if not _fsrs_enabled():
         raise HTTPException(status_code=404, detail="FSRS scheduling disabled")
+
+
+def _count_hints_used(user_id: str, question_id: str) -> int:
+    """Hints already generated for this user+question.
+
+    Hint usage is read from the hint service's event log so an
+    attempt that leaned on hints is scheduled as weaker recall
+    (see ``fsrs_scheduler.derive_rating_with_hints``). Returns 0
+    when the hint service is not initialised or the count fails:
+    scheduling must never break on hint bookkeeping.
+    """
+    service = hints_router.get_service()
+    if service is None:
+        return 0
+    try:
+        return service.count_hints_used(user_id, question_id)
+    except Exception:
+        logger.exception(
+            "Failed to count hints for question %s", question_id
+        )
+        return 0
 
 
 def _normalise_topic_token(value: str) -> str:
@@ -157,6 +183,7 @@ async def record_attempt(
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
+    hints_used = _count_hints_used(user["user"], body.question_id)
     saved = await _store.run_async(
         _store.record_attempt,
         user_id=user["user"],
@@ -168,6 +195,7 @@ async def record_attempt(
         response_time_ms=body.response_time_ms,
         mode=body.mode.value,
         learning_objective=body.learning_objective,
+        hints_used=hints_used,
     )
     return LearningAttemptResponse(**saved)
 
@@ -175,13 +203,21 @@ async def record_attempt(
 @router.get("/review-queue", response_model=ReviewQueueResponse)
 async def review_queue(
     limit: int = Query(default=50, ge=1, le=200),
+    retrievability_threshold: float | None = Query(
+        default=None, ge=0.0, le=1.0
+    ),
+    weak_area_boost: bool = Query(default=False),
     user: dict = Depends(require_auth),
 ):
     _ensure_enabled()
     if _store is None:
         raise HTTPException(status_code=503, detail="Learning store not initialised")
     data = await _store.run_async(
-        _store.get_fsrs_review_queue, user_id=user["user"], limit=limit
+        _store.get_fsrs_review_queue,
+        user_id=user["user"],
+        limit=limit,
+        retrievability_threshold=retrievability_threshold,
+        weak_area_boost=weak_area_boost,
     )
     return ReviewQueueResponse(**data)
 
@@ -432,3 +468,39 @@ async def study_plan_from_jd(
         unmapped_focus_areas=unmapped,
         focus_topic_ids=merged_ids,
     )
+
+
+@router.get("/leeches", response_model=LeechesResponse)
+async def list_leeches(
+    limit: int = Query(default=100, ge=1, le=500),
+    user: dict = Depends(require_auth),
+):
+    """List auto-suspended leeches awaiting an explicit resume."""
+    _ensure_enabled()
+    _ensure_fsrs_enabled()
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Learning store not initialised")
+    cards = await _store.run_async(
+        _store.get_leeches, user_id=user["user"], limit=limit
+    )
+    items = [LeechItem(**card) for card in cards]
+    return LeechesResponse(items=items, total=len(items))
+
+
+@router.post("/leeches/{card_id}/resume", response_model=LeechResumeResponse)
+async def resume_leech(
+    card_id: str, user: dict = Depends(require_auth)
+):
+    """Resume a suspended leech, returning it to the review queue."""
+    _ensure_enabled()
+    _ensure_fsrs_enabled()
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Learning store not initialised")
+    card = await _store.run_async(
+        _store.resume_leeched_card,
+        user_id=user["user"],
+        card_id=card_id,
+    )
+    if card is None:
+        raise HTTPException(status_code=404, detail="Leech not found")
+    return LeechResumeResponse(card=FSRSCardResponse(**card))

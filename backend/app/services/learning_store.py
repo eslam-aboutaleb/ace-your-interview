@@ -597,18 +597,20 @@ class LearningStore:
         response_time_ms: int,
         mode: str,
         learning_objective: str = "",
+        hints_used: int = 0,
     ) -> dict:
         """Record a quiz attempt or interview turn.
 
         The attempt is logged to ``learning_attempts`` and
         routed onto the FSRS scheduler: the self-reported
         ``(is_correct, confidence)`` pair is mapped onto an
-        FSRS rating (see :func:`fsrs_scheduler.derive_rating`)
-        and the question's card is upserted, so quiz mistakes
-        and interview results drive the same scheduler as
-        flashcards and the manual review queue. The legacy
-        ``question_progress`` bucket engine is retired; the
-        table is kept read-only for a soak period.
+        FSRS rating (see :func:`fsrs_scheduler.derive_rating`,
+        downgraded by :func:`fsrs_scheduler.derive_rating_with_hints`
+        when the attempt leaned on hints) and the question's card
+        is upserted, so quiz mistakes and interview results drive
+        the same scheduler as flashcards and the manual review
+        queue. The legacy ``question_progress`` bucket engine is
+        retired; the table is kept read-only for a soak period.
         """
         now = _utc_now()
         now_iso = _to_iso(now)
@@ -640,8 +642,8 @@ class LearningStore:
                         "SELECT last_insert_rowid()"
                     ).fetchone()[0]
                 )
-                rating = fsrs_scheduler.derive_rating(
-                    is_correct, confidence
+                rating = fsrs_scheduler.derive_rating_with_hints(
+                    is_correct, confidence, hints_used
                 )
                 new_card, _log_entry, _log_id = self._apply_fsrs_review(
                     user_id=user_id,
@@ -747,6 +749,11 @@ class LearningStore:
         "scheduled_days, elapsed_days, suspended, created_at, updated_at"
     )
 
+    # Candidate window for the filtered review queue: the pool is
+    # this multiple of the requested limit so at-risk and weak-area
+    # items have room to surface without an unbounded scan.
+    _FSRS_QUEUE_CANDIDATE_MULTIPLIER = 4
+
     @staticmethod
     def _fsrs_row_to_dict(row: sqlite3.Row) -> dict:
         return {
@@ -841,6 +848,11 @@ class LearningStore:
         new_card["topic_id"] = topic_id
         new_card["source_type"] = source_type
         new_card["suspended"] = suspended
+        if suspended == 0 and fsrs_scheduler.is_leech(new_card):
+            # Auto-suspend leeches: once a card reaches the leech lapse
+            # threshold it drops out of the review queue until the
+            # learner explicitly resumes it (resume_leeched_card).
+            new_card["suspended"] = 1
         new_card["created_at"] = created_at
         new_card["updated_at"] = now_iso
 
@@ -974,29 +986,113 @@ class LearningStore:
         return [self._fsrs_row_to_dict(row) for row in rows]
 
     def get_fsrs_review_queue(
-        self, *, user_id: str, limit: int = 50
+        self,
+        *,
+        user_id: str,
+        limit: int = 50,
+        retrievability_threshold: float | None = None,
+        weak_area_boost: bool = False,
     ) -> dict:
-        cards = self.get_due_cards(user_id=user_id, limit=limit)
-        items = []
-        for card in cards:
-            items.append(
-                {
-                    "topic_id": card["topic_id"],
-                    "question_id": card["card_id"],
-                    "due_at": card["due_at"],
-                    "mastery_score": round(
-                        fsrs_scheduler.retention_estimate(card), 4
-                    ),
-                    "last_confidence": 0,
-                    "review_bucket": 0,
-                    "attempts": card["reps"],
-                    "state": card["state"],
-                    "lapses": card["lapses"],
-                    "suspended": card["suspended"],
-                    "leech": fsrs_scheduler.is_leech(card),
-                }
+        """Cards to review next, ranked for retention and weak areas.
+
+        The default (``retrievability_threshold=None``,
+        ``weak_area_boost=False``) is the plain due-date queue:
+        due, non-suspended cards oldest-first.
+
+        ``retrievability_threshold`` additionally pulls cards whose
+        estimated retrievability has decayed below the threshold
+        ahead of merely-due items — including cards whose due date
+        has not arrived yet — so fading memories are reviewed
+        before they are forgotten.
+
+        ``weak_area_boost`` additionally orders by per-topic
+        weakness (1 - topic mastery), so a session spends its
+        budget on the topics the learner is least secure in.
+        """
+        if retrievability_threshold is None and not weak_area_boost:
+            cards = self.get_due_cards(user_id=user_id, limit=limit)
+            items = [self._review_queue_item(card) for card in cards]
+            return {"items": items, "total_due": len(items)}
+
+        limit = max(1, int(limit))
+        now = _utc_now()
+        now_iso = _to_iso(now)
+        pool_limit = limit * self._FSRS_QUEUE_CANDIDATE_MULTIPLIER
+        rows = self._conn.execute(
+            f"""
+            SELECT {self._FSRS_CARD_COLUMNS}
+            FROM fsrs_cards
+            WHERE user_id = ? AND suspended = 0
+            ORDER BY due_at ASC, card_id ASC
+            LIMIT ?
+            """,
+            (user_id, pool_limit),
+        ).fetchall()
+        candidates = []
+        for row in rows:
+            card = self._fsrs_row_to_dict(row)
+            candidates.append(
+                (card, fsrs_scheduler.retention_estimate(card, now))
             )
+        weakness = (
+            self._topic_weakness(user_id) if weak_area_boost else {}
+        )
+
+        def sort_key(entry: tuple[dict, float]) -> tuple:
+            card, retention = entry
+            at_risk = (
+                retrievability_threshold is not None
+                and retention < retrievability_threshold
+            )
+            return (
+                0 if at_risk else 1,
+                -weakness.get(card["topic_id"], 0.0),
+                card["due_at"],
+                card["card_id"],
+            )
+
+        items = []
+        for card, retention in sorted(candidates, key=sort_key):
+            due = str(card["due_at"]) <= now_iso
+            at_risk = (
+                retrievability_threshold is not None
+                and retention < retrievability_threshold
+            )
+            if not due and not at_risk:
+                continue
+            items.append(self._review_queue_item(card))
+            if len(items) >= limit:
+                break
         return {"items": items, "total_due": len(items)}
+
+    @staticmethod
+    def _review_queue_item(card: dict) -> dict:
+        """Serialise a card into the review-queue item shape."""
+        return {
+            "topic_id": card["topic_id"],
+            "question_id": card["card_id"],
+            "due_at": card["due_at"],
+            "mastery_score": round(
+                fsrs_scheduler.retention_estimate(card), 4
+            ),
+            "last_confidence": 0,
+            "review_bucket": 0,
+            "attempts": card["reps"],
+            "state": card["state"],
+            "lapses": card["lapses"],
+            "suspended": card["suspended"],
+            "leech": fsrs_scheduler.is_leech(card),
+        }
+
+    def _topic_weakness(self, user_id: str) -> dict[str, float]:
+        """Per-topic weakness as ``1 - topic mastery`` (retention-based)."""
+        mastery = self.get_fsrs_topic_mastery(user_id=user_id)
+        return {
+            str(topic["topic_id"]): max(
+                0.0, 1.0 - float(topic["mastery_score"])
+            )
+            for topic in mastery["topics"]
+        }
 
     def get_forecast(self, *, user_id: str, days: int = 7) -> dict:
         horizon_days = max(1, min(int(days), 31))
@@ -2608,3 +2704,55 @@ class LearningStore:
                 else 0.0
             ),
         }
+
+    # ── Leech management (auto-suspended at the lapse threshold) ──
+
+    def get_leeches(self, *, user_id: str, limit: int = 100) -> list[dict]:
+        """Suspended leeches for a user, worst-first.
+
+        A leech is a card at or beyond
+        :data:`fsrs_scheduler.LEECH_LAPSE_THRESHOLD` lapses that has
+        been auto-suspended out of the review queue; returning it to
+        the queue is an explicit learner action
+        (:meth:`resume_leeched_card`).
+        """
+        limit = max(1, int(limit))
+        rows = self._conn.execute(
+            f"""
+            SELECT {self._FSRS_CARD_COLUMNS}
+            FROM fsrs_cards
+            WHERE user_id = ? AND suspended = 1 AND lapses >= ?
+            ORDER BY lapses DESC, due_at ASC, card_id ASC
+            LIMIT ?
+            """,
+            (user_id, fsrs_scheduler.LEECH_LAPSE_THRESHOLD, limit),
+        ).fetchall()
+        return [self._fsrs_row_to_dict(row) for row in rows]
+
+    def resume_leeched_card(
+        self, *, user_id: str, card_id: str
+    ) -> dict | None:
+        """Resume a suspended leech so it re-enters the review queue.
+
+        Returns the updated card, or ``None`` when the user has no
+        suspended card with that id.
+        """
+        now_iso = _to_iso(_utc_now())
+        with self._lock:
+            with self._conn:
+                cur = self._conn.execute(
+                    "UPDATE fsrs_cards SET suspended = 0, updated_at = ? "
+                    "WHERE user_id = ? AND card_id = ? AND suspended = 1",
+                    (now_iso, user_id, card_id),
+                )
+                if cur.rowcount == 0:
+                    return None
+                row = self._conn.execute(
+                    f"""
+                    SELECT {self._FSRS_CARD_COLUMNS}
+                    FROM fsrs_cards
+                    WHERE user_id = ? AND card_id = ?
+                    """,
+                    (user_id, card_id),
+                ).fetchone()
+        return self._fsrs_row_to_dict(row) if row is not None else None

@@ -43,6 +43,16 @@ def _ensure_ready() -> HintService:
     return _service
 
 
+def get_service() -> HintService | None:
+    """The initialised hint service, or ``None`` when not wired.
+
+    Lets read-only consumers (e.g. the learning router counting a
+    question's used hints) degrade gracefully when the hint feature
+    is not initialised.
+    """
+    return _service
+
+
 @router.post("/{question_id}/hint", response_model=HintResponse)
 async def get_hint(
     question_id: str,

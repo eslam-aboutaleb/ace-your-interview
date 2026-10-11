@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.dependencies import require_auth
+from app.routers import hints as hints_router
 from app.routers import learning
 from app.services.learning_planner import LearningPlannerStore
 from app.services.learning_store import LearningStore
@@ -250,6 +252,171 @@ class LearningRouterFSRSContractTests(unittest.TestCase):
         self.assertEqual(body["state"], "review")
         self.assertEqual(body["lapses"], 0)
         self.assertFalse(body["leech"])
+
+
+class LearningRouterLeechContractTests(unittest.TestCase):
+    """Leech listing and resume endpoints."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.db_path = os.path.join(self._td.name, "learning.db")
+        self.learning_store = LearningStore(self.db_path)
+        self.planner_store = LearningPlannerStore(self.db_path)
+        learning.init(self.learning_store, self.planner_store)
+
+        app = FastAPI()
+        app.include_router(learning.router)
+        app.dependency_overrides[require_auth] = lambda: {
+            "user": "test-user",
+            "provider": "local",
+        }
+        self.client = TestClient(app)
+
+    def _leech_card(self, card_id: str = "q-leech") -> None:
+        for _ in range(5):
+            res = self.client.post(
+                "/api/learning/review",
+                json={
+                    "card_id": card_id,
+                    "topic_id": "topic-a",
+                    "rating": "again",
+                },
+            )
+            self.assertEqual(res.status_code, 201)
+        self.learning_store._conn.execute(
+            "UPDATE fsrs_cards SET due_at = ? "
+            "WHERE user_id = ? AND card_id = ?",
+            ("2000-01-01T00:00:00+00:00", "test-user", card_id),
+        )
+        self.learning_store._conn.commit()
+
+    def test_leeches_endpoint_lists_suspended_leech(self):
+        self._leech_card()
+        res = self.client.get("/api/learning/leeches")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["items"][0]["card_id"], "q-leech")
+        self.assertEqual(body["items"][0]["suspended"], 1)
+        self.assertGreaterEqual(body["items"][0]["lapses"], 5)
+
+    def test_suspended_leech_stays_out_of_the_review_queue(self):
+        self._leech_card()
+        res = self.client.get("/api/learning/review-queue")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["items"], [])
+        self.assertEqual(res.json()["total_due"], 0)
+
+    def test_resume_endpoint_restores_leeched_card(self):
+        self._leech_card()
+        res = self.client.post("/api/learning/leeches/q-leech/resume")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertTrue(body["resumed"])
+        self.assertEqual(body["card"]["card_id"], "q-leech")
+        self.assertEqual(body["card"]["suspended"], 0)
+
+        after = self.client.get("/api/learning/leeches")
+        self.assertEqual(after.status_code, 200)
+        self.assertEqual(after.json()["items"], [])
+
+        queue = self.client.get("/api/learning/review-queue")
+        self.assertEqual(
+            [item["question_id"] for item in queue.json()["items"]],
+            ["q-leech"],
+        )
+
+    def test_resume_unknown_leech_returns_404(self):
+        res = self.client.post("/api/learning/leeches/nope/resume")
+        self.assertEqual(res.status_code, 404)
+
+    def test_leeches_endpoints_404_when_flag_disabled(self):
+        class _DisabledSettings:
+            enable_adaptive_learning = True
+            enable_fsrs_v1 = False
+
+        original = learning.get_settings
+        learning.get_settings = lambda: _DisabledSettings()
+        try:
+            res = self.client.get("/api/learning/leeches")
+            self.assertEqual(res.status_code, 404)
+            res = self.client.post("/api/learning/leeches/q1/resume")
+            self.assertEqual(res.status_code, 404)
+        finally:
+            learning.get_settings = original
+
+
+class LearningRouterHintRatingContractTests(unittest.TestCase):
+    """The attempts endpoint counts hint usage when scheduling."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.db_path = os.path.join(self._td.name, "learning.db")
+        self.learning_store = LearningStore(self.db_path)
+        self.planner_store = LearningPlannerStore(self.db_path)
+        learning.init(self.learning_store, self.planner_store)
+
+        app = FastAPI()
+        app.include_router(learning.router)
+        app.dependency_overrides[require_auth] = lambda: {
+            "user": "test-user",
+            "provider": "local",
+        }
+        self.client = TestClient(app)
+
+    def _log_rating(self, question_id: str) -> str:
+        log = self.learning_store._conn.execute(
+            "SELECT rating FROM fsrs_review_log "
+            "WHERE user_id = ? AND card_id = ?",
+            ("test-user", question_id),
+        ).fetchone()
+        assert log is not None
+        return str(log["rating"])
+
+    def _post_attempt(self, question_id: str) -> None:
+        res = self.client.post(
+            "/api/learning/attempts",
+            json={
+                "question_id": question_id,
+                "topic_id": "topic-a",
+                "user_answer": "answer",
+                "is_correct": True,
+                "confidence": 5,
+                "response_time_ms": 900,
+                "mode": "quiz",
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+
+    def test_hinted_attempt_is_scheduled_as_weaker_recall(self):
+        class _FakeHintService:
+            def count_hints_used(self, user_id: str, question_id: str) -> int:
+                return 2
+
+        with patch.object(
+            hints_router, "get_service", lambda: _FakeHintService()
+        ):
+            self._post_attempt("q-hinted")
+        # (correct, confident) is "easy"; two hints downgrade to "hard".
+        self.assertEqual(self._log_rating("q-hinted"), "hard")
+
+    def test_unhinted_attempt_keeps_the_plain_rating(self):
+        class _FakeHintService:
+            def count_hints_used(self, user_id: str, question_id: str) -> int:
+                return 0
+
+        with patch.object(
+            hints_router, "get_service", lambda: _FakeHintService()
+        ):
+            self._post_attempt("q-plain")
+        self.assertEqual(self._log_rating("q-plain"), "easy")
+
+    def test_missing_hint_service_does_not_break_scheduling(self):
+        with patch.object(hints_router, "get_service", lambda: None):
+            self._post_attempt("q-no-service")
+        self.assertEqual(self._log_rating("q-no-service"), "easy")
 
 
 if __name__ == "__main__":
