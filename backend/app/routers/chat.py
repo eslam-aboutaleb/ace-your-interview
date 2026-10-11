@@ -14,6 +14,7 @@ from app.schemas.models import (
 )
 from app.services.doc_parser import DocParser
 from app.services.learning_store import LearningStore
+from app.services.learner_memory import build_learner_state_block
 from app.services.llm_client import BUDGET_EXCEEDED_CODE, LLMClient
 from app.services.llm_policy import raise_if_policy_blocked_result
 from app.services.markdown_formatter import format_markdown_readable
@@ -46,6 +47,11 @@ MAX_HISTORY_CHARS = 12000
 MAX_TOPIC_METADATA_CHARS = 1200
 MAX_MEMORY_PROMPT_CHARS = 900
 MAX_MCP_CONTEXT_CHARS = 2500
+#: Bound on the fenced learner-state block. The learner's weak areas,
+#: objectives, error patterns, and interview weaknesses are gathered by
+#: learner_memory, which never raises: an empty block leaves this prompt
+#: byte-identical to one built without it.
+MAX_LEARNER_STATE_CHARS = 1200
 #: Absolute pre-fence ceiling, well above every per-field cap, so one pathological
 #: payload cannot cost unbounded string work before truncation.
 HARD_INPUT_GUARD_CHARS = 200_000
@@ -93,6 +99,24 @@ def _memory_prompt_block(memory: dict | None) -> str:
         str(summary.get("summary", "")),
         MAX_MEMORY_PROMPT_CHARS,
     )
+
+
+def _learner_state_prompt_block(user_id: str, topic_id: str, track: str) -> str:
+    """Render the learner-state block, or "" when there is nothing to show.
+
+    ``build_learner_state_block`` gathers and fences the block itself, so
+    the only job here is the separating newline: an empty learner keeps
+    this prompt byte-identical to one built without it.
+    """
+    learner_state = build_learner_state_block(
+        user_id,
+        topic_id=topic_id,
+        track=track,
+        max_chars=MAX_LEARNER_STATE_CHARS,
+    )
+    if not learner_state:
+        return ""
+    return f"\n{learner_state}"
 
 
 def _history_block(history: list | None) -> str:
@@ -176,6 +200,15 @@ async def chat_follow_up(
         )
         memory_block = _memory_prompt_block(memory)
 
+    learner_state_block = ""
+    if bool(body.use_memory):
+        # Independent of the conversation memory: this is the learner's
+        # cross-session weak areas, objectives, error patterns, and
+        # interview weaknesses.
+        learner_state_block = _learner_state_prompt_block(
+            user["user"], body.topic_id, body.topic_track
+        )
+
     # Build conversation history for context
     history_block = _history_block(body.history)
 
@@ -255,7 +288,7 @@ Topic context:
 The user highlighted this word/phrase:
 {_fence("Highlighted word", body.word, MAX_WORD_CHARS)}
 {history_block}
-{memory_block}
+{memory_block}{learner_state_block}
 
 User's question:
 {_fence("User question", body.user_message, MAX_USER_MESSAGE_CHARS)}

@@ -23,6 +23,7 @@ from app.schemas.models import (
 )
 from app.services.doc_parser import DocParser
 from app.services.learning_store import LearningStore
+from app.services.learner_memory import build_learner_state_block
 from app.services.llm_client import LLMClient
 from app.services.mcp_gateway import MCPGateway
 from app.services.progress_store import ProgressStore
@@ -45,6 +46,10 @@ router = APIRouter(prefix="/api/questions", tags=["questions"])
 MAX_SECTION_CONTENT_CHARS = 12000
 MAX_SECTION_TITLE_CHARS = 200
 MAX_EXISTING_QUESTION_CHARS = 400
+#: Bound on the fenced learner-state block gathered by
+#: ``learner_memory.build_learner_state_block`` and interpolated into the
+#: question/quiz generation prompts.
+MAX_LEARNER_STATE_CHARS = 1200
 
 #: Bound on how many topics are resolved at once. The per-topic
 #: resolution steps are independent, so they run concurrently; the semaphore
@@ -333,6 +338,41 @@ def _group_questions_by_topic(question_dicts: list[dict]) -> dict[str, list[str]
     return grouped
 
 
+def _learner_state_block(
+    user_id: str,
+    *,
+    topic_id: str = "",
+    track: str = "",
+) -> str:
+    """Gather the fenced learner-state block for a generation prompt.
+
+    ``build_learner_state_block`` never raises and returns "" when the
+    learner has no stored state, so a learner with no history keeps the
+    generated prompt byte-identical to one without the block.
+    """
+    return build_learner_state_block(
+        user_id,
+        topic_id=topic_id,
+        track=track,
+        max_chars=MAX_LEARNER_STATE_CHARS,
+    )
+
+
+def _quiz_learner_scope(topics_content: list[dict]) -> dict[str, str]:
+    """Scope the learner state to the single requested quiz topic.
+
+    A multi-topic quiz asks for the learner's state across the requested
+    topics rather than one of them, so it passes no topic scope and lets
+    the block fall back to the learner's overall weakest topics.
+    """
+    if len(topics_content) == 1:
+        return {
+            "topic_id": str(topics_content[0].get("id") or ""),
+            "track": str(topics_content[0].get("track") or ""),
+        }
+    return {"topic_id": "", "track": ""}
+
+
 async def _capture_grouped_questions(
     *,
     user_id: str,
@@ -500,6 +540,9 @@ async def generate_questions(
         user_identity=user,
         llm_config=body.llm_config,
     )
+    learner_state = _learner_state_block(
+        user["user"], topic_id=body.topic_id, track=topic.track
+    )
 
     section_title, section_content, existing_questions = _bounded_section_request(body)
     response = await generator.generate(
@@ -521,6 +564,7 @@ async def generate_questions(
         prior_progress=prior_progress,
         additional_existing_questions=additional_existing,
         topic_track=topic.track,
+        learner_state=learner_state,
     )
     await _record_generated_questions(
         user_id=user["user"],
@@ -572,6 +616,9 @@ async def generate_questions_v2(
         user_identity=user,
         llm_config=body.llm_config,
     )
+    learner_state = _learner_state_block(
+        user["user"], topic_id=body.topic_id, track=topic.track
+    )
     section_title, section_content, existing_questions = _bounded_section_request(body)
     response = await generator.generate_v2(
         topic_id=body.topic_id,
@@ -592,6 +639,7 @@ async def generate_questions_v2(
         prior_progress=prior_progress,
         additional_existing_questions=additional_existing,
         topic_track=topic.track,
+        learner_state=learner_state,
     )
     await _record_generated_questions(
         user_id=user["user"],
@@ -644,6 +692,9 @@ async def generate_questions_v2_stream(
         user_identity=user,
         llm_config=body.llm_config,
     )
+    learner_state = _learner_state_block(
+        user["user"], topic_id=body.topic_id, track=topic.track
+    )
 
     async def _event_stream():
         captured: list[dict] = []
@@ -667,6 +718,7 @@ async def generate_questions_v2_stream(
             prior_progress=prior_progress,
             additional_existing_questions=additional_existing,
             topic_track=topic.track,
+            learner_state=learner_state,
         ):
             if event.get("type") == "question":
                 captured.append(event.get("question") or {})
@@ -723,6 +775,9 @@ async def generate_quiz(
         user_identity=user,
         llm_config=body.llm_config,
     )
+    learner_state = _learner_state_block(
+        user["user"], **_quiz_learner_scope(topics_content)
+    )
     response = await generator.generate_quiz(
         topics_content=topics_content,
         count=body.count,
@@ -736,6 +791,7 @@ async def generate_quiz(
         prior_progress=prior_progress,
         additional_existing_questions=additional_existing,
         target_objectives=list(body.target_objectives),
+        learner_state=learner_state,
     )
     await _capture_grouped_questions(
         user_id=user["user"],
@@ -774,6 +830,9 @@ async def generate_quiz_v2(
         user_identity=user,
         llm_config=body.llm_config,
     )
+    learner_state = _learner_state_block(
+        user["user"], **_quiz_learner_scope(topics_content)
+    )
     response = await generator.generate_quiz_v2(
         topics_content=topics_content,
         count=body.count,
@@ -787,6 +846,7 @@ async def generate_quiz_v2(
         prior_progress=prior_progress,
         additional_existing_questions=additional_existing,
         target_objectives=list(body.target_objectives),
+        learner_state=learner_state,
     )
     await _capture_grouped_questions(
         user_id=user["user"],
@@ -823,6 +883,9 @@ async def generate_quiz_v2_stream(
         llm_config=body.llm_config,
     )
     topic_titles = {tc["id"]: tc["title"] for tc in topics_content}
+    learner_state = _learner_state_block(
+        user["user"], **_quiz_learner_scope(topics_content)
+    )
 
     async def _event_stream():
         captured: list[dict] = []
@@ -854,6 +917,7 @@ async def generate_quiz_v2_stream(
             prior_progress=prior_progress,
             additional_existing_questions=additional_existing,
             target_objectives=list(body.target_objectives),
+            learner_state=learner_state,
         ):
             if event.get("type") == "question":
                 captured.append(event.get("question") or {})
