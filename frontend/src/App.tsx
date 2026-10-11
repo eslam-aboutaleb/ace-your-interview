@@ -23,8 +23,9 @@ import InterviewTrendsPage from "@/pages/InterviewTrends";
 import StarStoriesPage from "@/pages/StarStoriesPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import ExamPage from "@/pages/ExamPage";
-import { fetchUserSettings, updateUserPreferences } from "@/services/api";
+import { fetchTopicMastery, fetchUserSettings, updateUserPreferences } from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
+import { useProgressStore } from "@/store/progressStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import type { UserPreferences } from "@/types";
 
@@ -50,6 +51,9 @@ export function ProtectedRoute() {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const hydratedRef = useRef(false);
   const hydrateFromServer = useSettingsStore((s) => s.hydrateFromServer);
+  const hydrateMasteryFromServer = useProgressStore(
+    (s) => s.hydrateMasteryFromServer,
+  );
   const localLLMSource = useSettingsStore((s) => s.llmSource);
   const localProvider = useSettingsStore((s) => s.provider);
   const localModel = useSettingsStore((s) => s.model);
@@ -62,6 +66,25 @@ export function ProtectedRoute() {
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  // Reconcile the client-side mastery mirror with the server's FSRS
+  // state on session load (server wins; see store/masteryMerge.ts).
+  // Local echo writes stay until this hydration lands, so the store
+  // doubles as an optimistic cache for offline work.
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+    let active = true;
+    fetchTopicMastery()
+      .then((res) => {
+        if (active) hydrateMasteryFromServer(res);
+      })
+      .catch(() => {
+        // ignore mastery bootstrap failures (offline / learning disabled)
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAuthenticated, isLoading, hydrateMasteryFromServer]);
 
   useEffect(() => {
     if (!isAuthenticated) {

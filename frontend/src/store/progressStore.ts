@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { mergeServerMastery } from "./masteryMerge";
+import type { TopicMasteryResponse } from "@/types";
 
 const CURRICULUM_VERSION = "v3_interview_core_infra_cloud_diagrams";
 const CURRICULUM_VERSION_KEY = "ace-your-interview-curriculum-version";
@@ -73,6 +75,7 @@ interface ProgressState {
   addAnswered: (topicId: string, count: number) => void;
   recordAttempt: (topicId: string, isCorrect: boolean, confidence: number) => void;
   setMastery: (topicId: string, mastery: number) => void;
+  hydrateMasteryFromServer: (serverMastery: TopicMasteryResponse) => void;
   getTopicProgress: (topicId: string) => number;
   totalProgress: () => number;
   reset: () => void;
@@ -151,6 +154,15 @@ export const useProgressStore = create<ProgressState>()(
             ...s.masteryByTopic,
             [topicId]: Math.max(0, Math.min(1, mastery)),
           },
+        })),
+
+      // Server hydration: the server FSRS state wins for every topic it
+      // reports (see masteryMerge.ts); local-only topics stay as the
+      // optimistic cache. `recordAttempt` keeps echoing local writes for
+      // instant feedback; this override only lands on the next hydration.
+      hydrateMasteryFromServer: (serverMastery) =>
+        set((s) => ({
+          masteryByTopic: mergeServerMastery(s.masteryByTopic, serverMastery),
         })),
 
       getTopicProgress: (topicId) => {
