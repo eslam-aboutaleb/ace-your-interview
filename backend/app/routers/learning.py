@@ -33,6 +33,7 @@ from app.schemas.models import (
     ProfileDiagnosticResponse,
     RecommendationsResponse,
     ReviewQueueResponse,
+    RoleReadinessResponse,
     StudyPlanFromJDRequest,
     StudyPlanFromJDResponse,
     StudyPlanResponse,
@@ -699,3 +700,27 @@ async def uncomplete_plan_task(
     if task is None:
         raise HTTPException(status_code=404, detail="Plan task not found")
     return PlanTaskItem(**task)
+
+
+# ── Readiness per role/company ────────────────────────────────────────────────
+
+
+@router.get("/readiness", response_model=RoleReadinessResponse)
+async def role_readiness(user: dict = Depends(require_auth)):
+    """Role- and company-aware readiness over the learner's evidence.
+
+    Weighted readiness for the profile's target role (with the
+    per-track / per-competency breakdown that moves the number), the
+    ranked best-fit roles across the built-in catalog, and a fit
+    verdict per company in ``target_companies`` against the built-in
+    requirements profiles. Fully deterministic and offline: the same
+    stored evidence the diagnostic reads, re-weighted — no LLM call
+    is made.
+    """
+    _ensure_enabled()
+    if _planner is None:
+        raise HTTPException(status_code=503, detail="Learning planner not initialised")
+    data = await _planner.run_async(
+        _planner.build_readiness, user_id=user["user"]
+    )
+    return RoleReadinessResponse(**data)
