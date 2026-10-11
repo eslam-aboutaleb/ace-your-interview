@@ -2039,3 +2039,23 @@ import type {
   PlacementStartResponse,
   PlacementStatusResponse,
 } from "@/types";
+
+// ── Highlight Deep Actions ───────────────────────────────────
+
+export async function chatHighlightAction(
+  req: ChatHighlightActionRequest,
+): Promise<ChatHighlightActionResponse> {
+  const { data } = await api.post<ChatHighlightActionResponse>(
+    "/chat/highlight-action",
+    req,
+  );
+  return data;
+}
+
+// Highlight deep-action types. Imported here because this file is
+// append-only: ES module imports are hoisted, so the trailing block
+// keeps every existing line untouched.
+import type {
+  ChatHighlightActionRequest,
+  ChatHighlightActionResponse,
+} from "@/types";

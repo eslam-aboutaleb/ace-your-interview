@@ -1738,6 +1738,12 @@ export default function TopicStudy() {
                             topic.sections[activeSection]?.heading ||
                             "",
                         )}
+                        sourceSection={normalizeEscapedSingleLineText(
+                          qa.source_section || "",
+                        )}
+                        sourceQuote={normalizeEscapedSingleLineText(
+                          qa.source_quote || "",
+                        )}
                         mode="study"
                         showFloatingTrigger={
                           expandedQ === null ? idx === 0 : expandedQ === idx
