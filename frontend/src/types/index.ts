@@ -1887,3 +1887,47 @@ export interface PlacementStatusResponse {
   derived_level: string;
   steps_taken: number;
 }
+
+/* ── Highlight Deep Action Types ───────────────────────────── */
+
+export type HighlightAction =
+  | "explain"
+  | "flashcard"
+  | "review"
+  | "interview_angle";
+
+export interface ChatHighlightActionRequest {
+  action: HighlightAction;
+  word: string;
+  context_question: string;
+  context_answer: string;
+  source_section?: string;
+  source_quote?: string;
+  topic_id?: string;
+  topic_title?: string;
+  topic_track?: string;
+  section_title?: string;
+  mode?: "study" | "quiz";
+  response_detail?: ResponseDetail;
+  preferred_language?: string;
+  requires_programming?: boolean;
+  user_message?: string;
+  history: ChatMessage[];
+  conversation_id?: string;
+  use_memory?: boolean;
+  deck_id?: string;
+  llm_config?: LLMConfig;
+}
+
+export interface ChatHighlightActionResponse {
+  action: string;
+  reply: string;
+  provider_used: string;
+  model_used: string;
+  card_id: string;
+  deck_id: string;
+  deck_name: string;
+  due_at: string;
+  source_section: string;
+  source_quote: string;
+}

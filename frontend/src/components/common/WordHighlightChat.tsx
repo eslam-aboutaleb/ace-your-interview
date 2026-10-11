@@ -6,12 +6,28 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
+import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageCircle, Send, X, Loader2, Sparkles } from "lucide-react";
-import { chatFollowUp } from "@/services/api";
+import {
+  MessageCircle,
+  Send,
+  X,
+  Loader2,
+  Sparkles,
+  BookOpenCheck,
+  Layers,
+  CalendarClock,
+  Mic,
+} from "lucide-react";
+import { chatFollowUp, chatHighlightAction } from "@/services/api";
 import MarkdownRenderer from "@/components/common/MarkdownRenderer";
 import { useSettingsStore } from "@/store/settingsStore";
-import type { ChatMessage, ResponseDetail } from "@/types";
+import type {
+  ChatMessage,
+  ChatHighlightActionResponse,
+  HighlightAction,
+  ResponseDetail,
+} from "@/types";
 
 interface Props {
   contextQuestion: string;
@@ -21,6 +37,10 @@ interface Props {
   topicTitle?: string;
   topicTrack?: string;
   sectionTitle?: string;
+  /** Handbook section the Q&A was generated from, for grounded citations. */
+  sourceSection?: string;
+  /** Verbatim quote from the handbook section the Q&A was generated from. */
+  sourceQuote?: string;
   mode?: "study" | "quiz";
   selectionTargetSelector?: string;
   showFloatingTrigger?: boolean;
@@ -37,10 +57,44 @@ interface Props {
 const DEFAULT_SELECTION_SELECTOR = '[data-word-chat-target="true"]';
 const messageCacheBySession = new Map<string, ChatMessage[]>();
 
+interface HighlightActionSpec {
+  action: HighlightAction;
+  label: string;
+  icon: typeof BookOpenCheck;
+}
+
+/** Action bar shown on a selection, and again inside the open panel. */
+const HIGHLIGHT_ACTIONS: HighlightActionSpec[] = [
+  { action: "explain", label: "Explain", icon: BookOpenCheck },
+  { action: "flashcard", label: "Add flashcard", icon: Layers },
+  { action: "review", label: "Schedule review", icon: CalendarClock },
+  { action: "interview_angle", label: "Interview angle", icon: Mic },
+];
+
+interface HighlightActionResult {
+  id: number;
+  action: HighlightAction;
+  word: string;
+  status: "loading" | "done" | "error";
+  reply: string;
+  card: ChatHighlightActionResponse | null;
+  error: string;
+}
+
 function getNodeElement(node: Node | null): Element | null {
   if (!node) return null;
   if (node.nodeType === Node.ELEMENT_NODE) return node as Element;
   return node.parentElement;
+}
+
+function formatDueDate(dueAt: string): string {
+  if (!dueAt) return "";
+  const parsed = new Date(dueAt);
+  if (Number.isNaN(parsed.getTime())) return dueAt;
+  return parsed.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 export default function WordHighlightChat({
@@ -51,6 +105,8 @@ export default function WordHighlightChat({
   topicTitle = "",
   topicTrack = "",
   sectionTitle = "",
+  sourceSection = "",
+  sourceQuote = "",
   mode,
   selectionTargetSelector = DEFAULT_SELECTION_SELECTOR,
   showFloatingTrigger = false,
@@ -74,9 +130,15 @@ export default function WordHighlightChat({
   );
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [actionResults, setActionResults] = useState<HighlightActionResult[]>([]);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // A click on an action button can collapse the selection, so the word
+  // the popover was opened for is kept in a ref instead of read back.
+  const selectedWordRef = useRef("");
+  const nextActionResultId = useRef(1);
   const settings = useSettingsStore();
+  const actionPending = actionResults.some((r) => r.status === "loading");
 
   const targetSelector = useMemo(
     () => selectionTargetSelector || DEFAULT_SELECTION_SELECTOR,
@@ -90,6 +152,8 @@ export default function WordHighlightChat({
     setSelectedText("");
     setTooltipPos(null);
     setInput("");
+    setActionResults([]);
+    selectedWordRef.current = "";
   }, [qaKey]);
 
   // Restore per-topic chat thread when session key changes.
@@ -100,6 +164,8 @@ export default function WordHighlightChat({
     setSelectedText("");
     setTooltipPos(null);
     setInput("");
+    setActionResults([]);
+    selectedWordRef.current = "";
   }, [sessionKey]);
 
   // Persist thread by topic session key.
@@ -174,8 +240,15 @@ export default function WordHighlightChat({
     }
 
     setSelectedText(text);
+    selectedWordRef.current = text;
     const x = rect.left - containerRect.left + rect.width / 2;
-    const clampedX = Math.min(Math.max(x, 28), Math.max(containerRect.width - 28, 28));
+    // The popover is wider than a single button now, so its half width
+    // decides how close to the container edge it may sit.
+    const margin = Math.min(160, Math.max(28, containerRect.width / 2));
+    const clampedX = Math.min(
+      Math.max(x, margin),
+      Math.max(containerRect.width - margin, margin),
+    );
     const y = rect.top - containerRect.top - 8;
     setTooltipPos({
       x: clampedX,
@@ -223,6 +296,95 @@ export default function WordHighlightChat({
     setChatOpen(false);
     setInput("");
   };
+
+  const runHighlightAction = useCallback(
+    async (action: HighlightAction, word?: string) => {
+      const target = (word || selectedWordRef.current || chatWord).trim();
+      if (!target || actionPending) return;
+      const resultId = nextActionResultId.current++;
+      setChatWord(target);
+      setChatOpen(true);
+      setTooltipPos(null);
+      setActionResults((prev) => [
+        {
+          id: resultId,
+          action,
+          word: target,
+          status: "loading",
+          reply: "",
+          card: null,
+          error: "",
+        },
+        ...prev,
+      ]);
+      try {
+        const card = await chatHighlightAction({
+          action,
+          word: target,
+          context_question: contextQuestion,
+          context_answer: contextAnswer,
+          source_section: sourceSection,
+          source_quote: sourceQuote,
+          topic_id: topicId,
+          topic_title: topicTitle,
+          topic_track: topicTrack,
+          section_title: sectionTitle,
+          mode,
+          response_detail: responseDetail,
+          preferred_language: preferredLanguage,
+          requires_programming: requiresProgramming,
+          history: messages,
+          conversation_id: sessionKey,
+          use_memory: true,
+          llm_config: {
+            provider: settings.provider,
+            model: settings.model,
+            temperature: settings.temperature,
+            max_tokens: settings.maxTokens,
+          },
+        });
+        setActionResults((prev) =>
+          prev.map((result) =>
+            result.id === resultId
+              ? { ...result, status: "done", reply: card.reply, card }
+              : result,
+          ),
+        );
+      } catch (err) {
+        console.error(err);
+        setActionResults((prev) =>
+          prev.map((result) =>
+            result.id === resultId
+              ? {
+                  ...result,
+                  status: "error",
+                  error: "That action failed. Please try again.",
+                }
+              : result,
+          ),
+        );
+      }
+    },
+    [
+      actionPending,
+      chatWord,
+      contextAnswer,
+      contextQuestion,
+      messages,
+      mode,
+      preferredLanguage,
+      requiresProgramming,
+      responseDetail,
+      sessionKey,
+      settings,
+      sourceQuote,
+      sourceSection,
+      sectionTitle,
+      topicId,
+      topicTitle,
+      topicTrack,
+    ],
+  );
 
   const sendMessage = async () => {
     const msg = input.trim();
@@ -293,22 +455,39 @@ export default function WordHighlightChat({
 
       <AnimatePresence>
         {tooltipPos && !chatOpen && (
-          <motion.button
+          <motion.div
             initial={{ opacity: 0, y: 5, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 5, scale: 0.9 }}
             transition={{ duration: 0.15 }}
-            onClick={openSelectionChat}
-            className="absolute z-50 flex items-center gap-1.5 bg-udemy-purple text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg hover:bg-udemy-purple/90 transition-colors whitespace-nowrap max-sm:px-3 max-sm:py-2"
+            className="absolute z-50 flex max-w-[min(92vw,22rem)] flex-wrap items-center justify-center gap-1 rounded-xl bg-white p-1.5 shadow-2xl border border-udemy-border"
+            data-testid="highlight-selection-popover"
             style={{
               left: tooltipPos.x,
               top: tooltipPos.y,
               transform: "translate(-50%, -100%)",
             }}
           >
-            <MessageCircle className="w-3.5 h-3.5" />
-            Ask about this
-          </motion.button>
+            {HIGHLIGHT_ACTIONS.map(({ action, label, icon: Icon }) => (
+              <button
+                key={action}
+                onClick={() => runHighlightAction(action, selectedText)}
+                disabled={actionPending}
+                className="flex items-center gap-1 rounded-full px-2.5 py-1.5 text-xs font-medium text-udemy-text hover:bg-udemy-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                title={label}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </button>
+            ))}
+            <button
+              onClick={openSelectionChat}
+              className="flex items-center gap-1.5 bg-udemy-purple text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg hover:bg-udemy-purple/90 transition-colors whitespace-nowrap"
+            >
+              <MessageCircle className="w-3.5 h-3.5" />
+              Ask about this
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -358,7 +537,60 @@ export default function WordHighlightChat({
               ref={messagesScrollRef}
               className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3"
             >
-              {messages.length === 0 && (
+              {actionResults.map((result) => (
+                <div
+                  key={result.id}
+                  className="rounded-lg border border-udemy-border bg-white px-3 py-2 text-[13px] leading-relaxed"
+                  data-testid={`highlight-action-${result.action}`}
+                  data-status={result.status}
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-udemy-text-muted">
+                    {HIGHLIGHT_ACTIONS.find((a) => a.action === result.action)?.label ??
+                      result.action}
+                    {result.word ? ` · “${result.word}”` : ""}
+                  </p>
+                  {result.status === "loading" && (
+                    <div className="flex items-center gap-2 py-2 text-udemy-text-muted">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Working on it…</span>
+                    </div>
+                  )}
+                  {result.status === "error" && (
+                    <p className="text-red-700 pt-1">{result.error}</p>
+                  )}
+                  {result.status === "done" && result.reply && (
+                    <MarkdownRenderer
+                      content={result.reply}
+                      compact
+                      className="text-[13px]"
+                    />
+                  )}
+                  {result.status === "done" && result.card?.card_id && (
+                    <div className="pt-1 space-y-1">
+                      <p>
+                        {result.action === "flashcard"
+                          ? `Flashcard added to ${result.card.deck_name || "your deck"}.`
+                          : "Review item scheduled."}
+                      </p>
+                      <p className="text-xs text-udemy-text-muted break-all">
+                        Card {result.card.card_id}
+                        {result.card.due_at
+                          ? ` · due ${formatDueDate(result.card.due_at)}`
+                          : ""}
+                      </p>
+                      <Link
+                        to={result.action === "flashcard" ? "/decks" : "/review"}
+                        className="inline-block text-udemy-purple font-medium underline"
+                      >
+                        {result.action === "flashcard"
+                          ? "Open Flashcards"
+                          : "Open Review Queue"}
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {messages.length === 0 && actionResults.length === 0 && (
                 <p className="text-xs text-udemy-text-muted text-center py-4">
                   Ask anything about &ldquo;{chatWord}&rdquo; in this context.
                 </p>
@@ -395,7 +627,21 @@ export default function WordHighlightChat({
               )}
             </div>
 
-            <div className="border-t border-udemy-border px-3 py-2">
+            <div className="border-t border-udemy-border px-3 py-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-1" data-testid="highlight-panel-actions">
+                {HIGHLIGHT_ACTIONS.map(({ action, label, icon: Icon }) => (
+                  <button
+                    key={action}
+                    onClick={() => runHighlightAction(action, chatWord)}
+                    disabled={!chatWord.trim() || actionPending}
+                    className="flex items-center gap-1 rounded-full border border-udemy-border px-2 py-1 text-[11px] font-medium text-udemy-text hover:bg-udemy-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                    title={label}
+                  >
+                    <Icon className="w-3 h-3" />
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="flex items-center gap-2">
                 <input
                   type="text"

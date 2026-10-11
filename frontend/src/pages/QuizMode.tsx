@@ -57,6 +57,7 @@ import type {
   QuizQuestionV2,
   QuizMode,
   NextObjectiveItem,
+  TopicSection,
   WeakAreaItem,
 } from "@/types";
 
@@ -169,6 +170,51 @@ export default function QuizMode() {
       ]
         .filter(Boolean)
         .join("\n\n")
+    : "";
+  // Quiz questions carry a source quote but no section name, so the
+  // section is recovered from the topic's handbook: the section whose
+  // content contains that quote. Resolved once per topic, on demand, so
+  // quizzes started from another page get the same grounding.
+  const [topicSectionsById, setTopicSectionsById] = useState<
+    Record<string, TopicSection[]>
+  >({});
+  const topicSectionsCache = useRef<Record<string, TopicSection[]>>({});
+  const currentTopicId = current?.topic_id || "";
+  useEffect(() => {
+    if (!currentTopicId || topicSectionsCache.current[currentTopicId]) return;
+    let cancelled = false;
+    fetchTopic(currentTopicId)
+      .then((detail) => {
+        if (cancelled) return;
+        const sections = detail.sections || [];
+        topicSectionsCache.current[currentTopicId] = sections;
+        setTopicSectionsById((prev) => ({ ...prev, [currentTopicId]: sections }));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        topicSectionsCache.current[currentTopicId] = [];
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTopicId]);
+  const currentSourceSection = useMemo(() => {
+    if (!current) return "";
+    const sections = topicSectionsById[current.topic_id] || [];
+    if (sections.length === 0) return "";
+    const quote = normalizeEscapedSingleLineText(
+      current.source_quote || "",
+    ).toLowerCase();
+    if (!quote) return "";
+    const match = sections.find((section) =>
+      normalizeEscapedSingleLineText(section.content || "")
+        .toLowerCase()
+        .includes(quote),
+    );
+    return match ? normalizeEscapedSingleLineText(match.heading) : "";
+  }, [current, topicSectionsById]);
+  const currentSourceQuote = current
+    ? normalizeEscapedSingleLineText(current.source_quote || "")
     : "";
   const total = questions.length;
   const correctCount = useMemo(
@@ -1010,6 +1056,9 @@ export default function QuizMode() {
                       normalizeEscapedSingleLineText(currentTopic?.title || current.topic_id)
                     }
                     topicTrack={currentTopic?.track || ""}
+                    sectionTitle={currentSourceSection}
+                    sourceSection={currentSourceSection}
+                    sourceQuote={currentSourceQuote}
                     mode="quiz"
                     showFloatingTrigger
                     floatingTriggerWord={

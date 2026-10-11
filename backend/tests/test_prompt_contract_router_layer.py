@@ -27,8 +27,11 @@ OWNED_FILES = (
 #: Keywords every `completion(...)` call site must pass explicitly.
 REQUIRED_COMPLETION_KWARGS = ("task", "system", "structured", "max_tokens_cap")
 
-#: Module-level constants allowed to hold a "You are a ..." persona.
-SYSTEM_CONSTANTS = ("CHAT_SYSTEM_PROMPT", "SYSTEM_PROMPT", "_SYSTEM_PROMPT")
+#: Naming convention for module-level constants allowed to hold a
+#: "You are a ..." persona. Every flow names its system-role constant with
+#: this suffix (``CHAT_SYSTEM_PROMPT``, ``HIGHLIGHT_EXPLAIN_SYSTEM_PROMPT``),
+#: so a new prompt cannot inline a persona into a user turn.
+SYSTEM_CONSTANT_SUFFIX = "SYSTEM_PROMPT"
 
 
 def _completion_calls(tree: ast.AST) -> list[ast.Call]:
@@ -54,15 +57,21 @@ def _persona_nodes(tree: ast.AST) -> list[ast.AST]:
     return found
 
 
-def _system_constant_span(tree: ast.Module, name: str) -> tuple[int, int] | None:
+def _system_constant_spans(
+    tree: ast.Module, name_suffix: str
+) -> list[tuple[int, int]]:
+    """Line spans of every module-level ``*SYSTEM_PROMPT`` constant."""
+    spans: list[tuple[int, int]] = []
     for node in tree.body:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         for target in targets:
-            if isinstance(target, ast.Name) and target.id == name:
-                return (node.lineno, getattr(node, "end_lineno", node.lineno) or node.lineno)
-    return None
+            if isinstance(target, ast.Name) and target.id.endswith(name_suffix):
+                spans.append(
+                    (node.lineno, getattr(node, "end_lineno", node.lineno) or node.lineno)
+                )
+    return spans
 
 
 class RouterPromptContractTests(unittest.TestCase):
@@ -96,11 +105,7 @@ class RouterPromptContractTests(unittest.TestCase):
                 continue
             with self.subTest(file=relative):
                 tree = ast.parse(source)
-                spans = [
-                    span
-                    for span in (_system_constant_span(tree, name) for name in SYSTEM_CONSTANTS)
-                    if span
-                ]
+                spans = _system_constant_spans(tree, SYSTEM_CONSTANT_SUFFIX)
                 self.assertTrue(
                     spans,
                     f"{relative} inlines a persona; move it into system=",
