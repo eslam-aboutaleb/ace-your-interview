@@ -268,6 +268,7 @@ async def _run_generation_job(
         job["malformed_items_dropped"] = int(
             stats.get("malformed_items_dropped", 0) or 0
         )
+        job["resolved_level"] = str(stats.get("resolved_level", "") or "")
     except Exception as e:  # noqa: BLE001 - captured into the job
         logger.exception("Card generation job %s failed", job_id)
         job["status"] = "failed"
@@ -407,6 +408,7 @@ async def get_generation_job(
         malformed_items_dropped=int(
             job.get("malformed_items_dropped", 0) or 0
         ),
+        resolved_level=str(job.get("resolved_level", "") or ""),
         error=str(job.get("error", "") or ""),
     )
 
@@ -659,6 +661,7 @@ async def generate_cards(
         "cards": [],
         "retries_used": 0,
         "malformed_items_dropped": 0,
+        "resolved_level": "",
         "error": "",
         "created_at": time.time(),
         "finished_at": 0.0,

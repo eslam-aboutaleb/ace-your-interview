@@ -405,7 +405,14 @@ async def voice_stream(
                 session_row = store.create_session(
                     user_id=user_identity["user"],
                     track=config.track.value,
-                    level=config.level.value,
+                    level=(
+                        config.level.value
+                        if config.level is not None
+                        else generator.resolve_session_level(
+                            track=config.track.value,
+                            user_identity=user_identity,
+                        )
+                    ),
                     interview_type=config.interview_type.value,
                     turn_count=config.turn_count,
                     target_role=config.target_role.strip(),

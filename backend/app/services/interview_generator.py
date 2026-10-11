@@ -43,6 +43,7 @@ from app.services.prompt_registry import (
     PromptTemplate,
     default_registry,
 )
+from app.services.question_generator import is_auto_level, resolve_level
 from app.services.question_text import normalise_question
 from app.services.star_store import StarStore
 
@@ -262,6 +263,26 @@ def _learner_state_block(learner_state: str) -> str:
     if not text:
         return ""
     return f"\n{text}"
+
+
+def _safe_learner_state(user_identity: Optional[dict], track: Any) -> str:
+    """Gather the learner-state block, degrading to no block on any failure.
+
+    Learner memory is *context*, never a prerequisite: an absent store, a
+    missing accessor, or a raising read must not fail an evaluation or a
+    question, so the lookup is guarded here rather than trusted to the
+    gatherer. It returns the empty string — which
+    :func:`_learner_state_block` already renders as nothing — for a missing
+    user identity, so an anonymous caller keeps the same prompt.
+    """
+    try:
+        return build_learner_state_block(
+            str((user_identity or {}).get("user", "") or ""),
+            track=str(track or "") or None,
+        )
+    except Exception:
+        logger.warning("Learner state gathering failed", exc_info=True)
+        return ""
 
 
 def advance_progression_phase(phase: str) -> str:
@@ -1048,6 +1069,104 @@ class InterviewGenerator:
                 session["star_stories"] = stories
         return session
 
+    # ── Adaptive difficulty ──────────────────────────────────────
+    def _recommended_level(self, *, user_id: str, track: str) -> str | None:
+        """History-derived level for a session's track, or ``None`` with no signal.
+
+        Mirrors :meth:`QuestionGenerator._recommended_level`, including its
+        contract: the learner's attempt history is keyed by topic, and the
+        track is the only history key a session carries, so that is what is
+        asked for. Best-effort by design — a lookup failure degrades to
+        ``None`` (no signal) so the caller keeps its own level rather than
+        failing the interview.
+        """
+        lookup = (
+            getattr(self.run_store, "get_level_recommendation", None)
+            if self.run_store is not None
+            else None
+        )
+        if lookup is None:
+            return None
+        try:
+            recommended = lookup(user_id, track)
+        except Exception:
+            logger.warning(
+                "Interview level recommendation failed user=%s track=%s",
+                user_id,
+                track,
+                exc_info=True,
+            )
+            return None
+        return str(recommended) if recommended else None
+
+    def _resolve_generation_level(
+        self,
+        *,
+        level: Optional[str],
+        user_identity: Optional[dict],
+        track: str,
+    ) -> tuple[str, str]:
+        """Return ``(effective_level, resolved_level)`` for an interview flow.
+
+        ``effective_level`` is what the prompts, skill packs, difficulty and
+        rubric run at. ``resolved_level`` is the history-derived level
+        surfaced to the caller so it can be marked as recommended; it is empty
+        when the level was pinned, because then nothing was resolved.
+
+        The precedence is the shared one: an explicit level always wins and
+        never consults the learner's history, so a session that pinned its
+        level is unaffected. Only a level that would otherwise be defaulted
+        (absent, empty, or the literal ``"auto"``) is resolved from history,
+        and it resolves ``"mid"`` when there is no signal — the very default
+        it would otherwise have been silently given.
+        """
+        if not is_auto_level(level):
+            return resolve_level(level), ""
+        user_id = str((user_identity or {}).get("user", "") or "")
+        track_name = str(track or "")
+        recommended = (
+            self._recommended_level(user_id=user_id, track=track_name)
+            if user_id and track_name
+            else None
+        )
+        resolved_level = resolve_level(level, recommended)
+        return resolved_level, resolved_level
+
+    def resolve_session_level(self, *, track: str, user_identity: Optional[dict]) -> str:
+        """The level a new session runs at when its create request pinned none.
+
+        Called by the interview routers so the level is resolved once, at
+        creation, and persisted on the session row: generation and evaluation
+        then agree on the level, and the session can be resumed without
+        re-resolving. A request that did pin a level never reaches this.
+        """
+        level, _ = self._resolve_generation_level(
+            level=None, user_identity=user_identity, track=track
+        )
+        return level
+
+    def _apply_resolved_level(
+        self,
+        session: dict[str, Any],
+        user_identity: Optional[dict],
+    ) -> str:
+        """Resolve the session's level in place; return the resolved level.
+
+        Empty when the session already carried a level of its own. The
+        session dict is the flow's own context, so writing the resolved level
+        back keeps the question prompt, the skill packs, the difficulty and
+        the evaluation rubric all grading at one level.
+        """
+        level = session.get("level")
+        effective_level, resolved_level = self._resolve_generation_level(
+            level=level,
+            user_identity=user_identity,
+            track=str(session.get("track") or ""),
+        )
+        if resolved_level:
+            session["level"] = effective_level
+        return resolved_level
+
     @staticmethod
     def _effective_interviewer_style(session: dict[str, Any]) -> str:
         """Session style, overridden by the company pack when present."""
@@ -1448,6 +1567,7 @@ Already asked questions (do not repeat semantically):
         question_contract: dict[str, Any] | None = None,
         code_grade: dict[str, Any] | None = None,
         diagram_analysis: dict[str, Any] | None = None,
+        learner_state: str = "",
     ) -> str:
         feedback_mode = InterviewGenerator._feedback_mode(session)
         memory_summary = str(session.get("memory_summary", "")).strip()
@@ -1645,7 +1765,7 @@ Session:
 - persona: {persona}
 - feedback_mode: {feedback_mode}
 - turn_index: {turn_index}
-- session_memory_summary: {memory_block}
+- session_memory_summary: {memory_block}{_learner_state_block(learner_state)}
 
 Question:
 {question}
@@ -2024,10 +2144,8 @@ Question:
         follow_up_focus: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._enrich_session_context(session)
-        learner_state = build_learner_state_block(
-            str((user_identity or {}).get("user", "") or ""),
-            track=str(session.get("track") or "") or None,
-        )
+        learner_state = _safe_learner_state(user_identity, session.get("track"))
+        resolved_level = self._apply_resolved_level(session, user_identity)
         # The focus is chosen from the session's own scored turns, so the same
         # session state always branches the same way. Callers may pass the
         # selection explicitly (the router does) to keep one decision point.
@@ -2116,6 +2234,11 @@ Question:
                 code_contract = normalise_code_contract(payload.get("code_contract"))
                 if code_contract:
                     generated["code_contract"] = code_contract
+                if resolved_level:
+                    # Same contract as the question/quiz flows: the level this
+                    # turn was auto-resolved to, empty when the session pinned
+                    # its own.
+                    generated["resolved_level"] = resolved_level
                 return generated
             prompt = (
                 f"Your previous JSON was invalid ({issue}). Return only a corrected JSON object.\n\n"
@@ -2158,6 +2281,12 @@ Question:
             if InterviewGenerator._is_system_design_session(session)
             else None
         )
+        # Graded at the level the question was asked at, and against what this
+        # learner has already shown: both are gathered through the guarded
+        # seams so neither a memory failure nor an unresolved level can fail
+        # an evaluation.
+        self._apply_resolved_level(session, user_identity)
+        learner_state = _safe_learner_state(user_identity, session.get("track"))
         base_prompt = self._evaluate_prompt(
             session,
             question,
@@ -2167,6 +2296,7 @@ Question:
             question_contract=question_contract,
             code_grade=code_grade,
             diagram_analysis=diagram_analysis,
+            learner_state=learner_state,
         )
         if self.mcp is not None:
             mcp_context = await self.mcp.gather_context(

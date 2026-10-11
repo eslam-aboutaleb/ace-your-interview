@@ -571,3 +571,117 @@ class SystemDesignSessionContractTests(_InterviewRouterTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _PromptRecordingLLM(FakeLLM):
+    """Records every prompt the interview router sends."""
+
+    def __init__(self):
+        super().__init__()
+        self.prompts: list[str] = []
+
+    async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
+        self.prompts.append(prompt)
+        return await super().completion(
+            prompt, llm_config, user_identity, task=task, **kwargs
+        )
+
+
+class _LevelSpyStore(SpyLearningStore):
+    """Real store plus a recommendation-call recorder."""
+
+    def __init__(self, db_path: str):
+        super().__init__(db_path)
+        self.recommendation_calls: list[tuple[str, str]] = []
+
+    def get_level_recommendation(self, *args, **kwargs):
+        self.recommendation_calls.append((args[0], args[1]))
+        return super().get_level_recommendation(*args, **kwargs)
+
+
+class InterviewSessionLevelResolutionTests(_InterviewRouterTestBase):
+    """A session created without a level resolves it from the track's history."""
+
+    def _build(self, llm):
+        self.learning_store = _LevelSpyStore(
+            os.path.join(self.tempdir.name, "learning.db")
+        )
+        interview_sessions.init(
+            llm,
+            DocParser(docs_path=os.path.join(os.getcwd(), "docs")),
+            self.learning_store,
+            os.path.join(self.tempdir.name, "interview.db"),
+        )
+        app = FastAPI()
+        app.include_router(interview_sessions.router)
+        app.dependency_overrides[require_auth] = (
+            lambda: {"user": "test-user", "provider": "local"}
+        )
+        return TestClient(app)
+
+    def _fluent_history(self, count=10):
+        for index in range(count):
+            self.learning_store.record_attempt(
+                user_id="test-user",
+                question_id=f"q-{index}",
+                topic_id="backend",
+                user_answer="answer",
+                is_correct=True,
+                confidence=4,
+                response_time_ms=1500,
+                mode="quiz",
+            )
+
+    def _create(self, client: TestClient, **overrides):
+        payload = {
+            "track": "backend",
+            "interview_type": "technical",
+            "turn_count": 3,
+            "target_role": "Backend Engineer",
+            "focus_areas": ["api design"],
+        }
+        payload.update(overrides)
+        res = client.post("/api/interview-sessions", json=payload)
+        self.assertEqual(res.status_code, 200, res.text)
+        return res
+
+    def test_omitted_level_resolves_from_the_track_history(self):
+        llm = _PromptRecordingLLM()
+        client = self._build(llm)
+        self._fluent_history()
+        res = self._create(client)
+        self.assertEqual(res.json()["session"]["level"], "senior")
+        self.assertIn("- level: senior", llm.prompts[0])
+        self.assertEqual(
+            self.learning_store.recommendation_calls, [("test-user", "backend")]
+        )
+
+    def test_omitted_level_defaults_to_mid_without_history(self):
+        client = self._build(_PromptRecordingLLM())
+        res = self._create(client)
+        self.assertEqual(res.json()["session"]["level"], "mid")
+
+    def test_explicit_level_is_kept_and_never_queries_the_history(self):
+        llm = _PromptRecordingLLM()
+        client = self._build(llm)
+        self._fluent_history()
+        res = self._create(client, level="junior")
+        self.assertEqual(res.json()["session"]["level"], "junior")
+        self.assertIn("- level: junior", llm.prompts[0])
+        self.assertEqual(self.learning_store.recommendation_calls, [])
+
+    def test_struggling_history_de_escalates_the_level(self):
+        client = self._build(_PromptRecordingLLM())
+        for index in range(10):
+            self.learning_store.record_attempt(
+                user_id="test-user",
+                question_id=f"q-{index}",
+                topic_id="backend",
+                user_answer="answer",
+                is_correct=False,
+                confidence=2,
+                response_time_ms=90000,
+                mode="quiz",
+            )
+        res = self._create(client)
+        self.assertEqual(res.json()["session"]["level"], "junior")

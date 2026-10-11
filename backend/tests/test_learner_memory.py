@@ -6,6 +6,7 @@ import asyncio
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.routers import chat
 from app.schemas.models import ChatFollowUpRequest
@@ -548,12 +549,13 @@ class QuestionPromptSeamTests(unittest.TestCase):
         cases = {
             case.case_id: case
             for case in harness.load_cases(EVALS)
-            if case.flow in {"questions", "quiz", "interview_question"}
+            if case.flow in {"questions", "quiz", "interview_question", "interview"}
         }
         for case_id in (
             "questions.conceptual.prior_progress.mid.count2",
             "quiz.multi_topic.mid.count4",
             "interview_question.coding.mid.middle",
+            "interview.coding.mid.turn1",
         ):
             with self.subTest(case=case_id):
                 case = cases[case_id]
@@ -678,6 +680,155 @@ class InterviewPromptSeamTests(unittest.TestCase):
             )
         )
         self.assertNotIn(LEARNER_STATE_LABEL, llm.last_prompt)
+
+    # ── evaluation prompt seam ───────────────────────────────────
+    # The evaluation prompt is the second interview flow the learner state
+    # reaches: the rubric grades the same answer identically for a learner
+    # who has already shown the dimension and one who has not, unless the
+    # evaluator can see that history.
+
+    def test_evaluate_prompt_without_learner_state_is_unchanged(self):
+        baseline = InterviewGenerator._evaluate_prompt(
+            self._session(),
+            "How do you invalidate a cache entry on a write?",
+            "With explicit invalidation keyed by the write.",
+            1,
+        )
+        explicit_empty = InterviewGenerator._evaluate_prompt(
+            self._session(),
+            "How do you invalidate a cache entry on a write?",
+            "With explicit invalidation keyed by the write.",
+            1,
+            learner_state="",
+        )
+        self.assertEqual(baseline, explicit_empty)
+        self.assertNotIn(LEARNER_STATE_LABEL, baseline)
+
+    def test_evaluate_prompt_includes_the_learner_state_block(self):
+        learner_state = _learner_state_fixture(
+            "Interview weak dimensions (recent average, weakest first)",
+            "- reasoning depth: 2.1/5",
+        )
+        prompt = InterviewGenerator._evaluate_prompt(
+            self._session(),
+            "How do you invalidate a cache entry on a write?",
+            "With explicit invalidation keyed by the write.",
+            1,
+            learner_state=learner_state,
+        )
+        self.assertIn(learner_state, prompt)
+        # It rides with the session configuration, before the question, so the
+        # evaluator grades the answer against this learner's own history.
+        self.assertIn(
+            f"- session_memory_summary: (none)\n{learner_state}\n\nQuestion:",
+            prompt,
+        )
+
+    def test_evaluate_answer_builds_the_block_from_user_identity(self):
+        llm = RecordingLLM(self._eval_payload())
+        generator = InterviewGenerator(llm, None)
+        learner_memory.init(
+            learning_store=FakeLearningStore(),
+            learning_planner=FakePlanner(),
+            interview_store=FakeInterviewStore(),
+        )
+        self.addCleanup(learner_memory.init)
+        asyncio.run(
+            generator.evaluate_answer(
+                session=self._session(),
+                question="How do you invalidate a cache entry on a write?",
+                user_answer="With explicit invalidation keyed by the write.",
+                turn_index=1,
+                user_identity={"user": "alice"},
+            )
+        )
+        self.assertIn(LEARNER_STATE_LABEL, llm.last_prompt)
+        self.assertIn("Interview weak dimensions", llm.last_prompt)
+
+    def test_evaluate_answer_without_user_context_leaves_the_prompt_unchanged(self):
+        llm = RecordingLLM(self._eval_payload())
+        generator = InterviewGenerator(llm, None)
+        learner_memory.init(
+            learning_store=FakeLearningStore(),
+            learning_planner=FakePlanner(),
+            interview_store=FakeInterviewStore(),
+        )
+        self.addCleanup(learner_memory.init)
+        asyncio.run(
+            generator.evaluate_answer(
+                session=self._session(),
+                question="How do you invalidate a cache entry on a write?",
+                user_answer="With explicit invalidation keyed by the write.",
+                turn_index=1,
+                user_identity=None,
+            )
+        )
+        self.assertNotIn(LEARNER_STATE_LABEL, llm.last_prompt)
+
+    def test_evaluate_answer_never_fails_when_the_memory_lookup_raises(self):
+        """Memory is context, not a prerequisite.
+
+        ``build_learner_state_block`` already swallows store failures, but the
+        service call itself must not be trusted to: a raising gatherer has to
+        cost the turn its learner context, not its rubric.
+        """
+        llm = RecordingLLM(self._eval_payload())
+        generator = InterviewGenerator(llm, None)
+        with patch(
+            "app.services.interview_generator.build_learner_state_block",
+            side_effect=RuntimeError("learning db unavailable"),
+        ):
+            out = asyncio.run(
+                generator.evaluate_answer(
+                    session=self._session(),
+                    question="How do you invalidate a cache entry on a write?",
+                    user_answer="With explicit invalidation keyed by the write.",
+                    turn_index=1,
+                    user_identity={"user": "alice"},
+                )
+            )
+        self.assertFalse(out.get("degraded"))
+        self.assertEqual(out["rubric"]["overall"], 80)
+        self.assertNotIn(LEARNER_STATE_LABEL, llm.last_prompt)
+
+    def test_generate_question_never_fails_when_the_memory_lookup_raises(self):
+        llm = RecordingLLM(self._question_payload())
+        generator = InterviewGenerator(llm, None)
+        with patch(
+            "app.services.interview_generator.build_learner_state_block",
+            side_effect=RuntimeError("learning db unavailable"),
+        ):
+            generated = asyncio.run(
+                generator.generate_question(
+                    session=self._session(),
+                    turns=[],
+                    user_identity={"user": "alice"},
+                )
+            )
+        self.assertIn("question", generated)
+        self.assertNotIn(LEARNER_STATE_LABEL, llm.last_prompt)
+
+    def _eval_payload(self) -> str:
+        return json.dumps(
+            {
+                "rubric": {
+                    "technical_accuracy": 4,
+                    "reasoning_depth": 4,
+                    "communication_clarity": 4,
+                    "completeness": 4,
+                    "confidence_signal": 4,
+                    "overall": 80,
+                },
+                "strengths": ["Explicit invalidation"],
+                "improvements": ["Name the stampede control"],
+                "follow_up_note": (
+                    "### What strong interviewers wanted to hear\n"
+                    "The invalidation path and its race.\n\n"
+                    "### What to improve next\n- Quantify the stampede risk.\n\n"
+                    "### Stronger sample answer\nI would invalidate in the write path."
+                ),
+            }
+        )
 
 
 class ChatPromptSeamTests(unittest.TestCase):

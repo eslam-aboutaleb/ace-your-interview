@@ -16,6 +16,7 @@ from app.dependencies import require_auth
 from app.schemas.models import (
     CompanyPackInfo,
     CompanyPacksResponse,
+    CreateInterviewSessionRequest,
     CreateInterviewSessionRequestExtended,
     InterviewQuestionResponse,
     InterviewReportResponse,
@@ -316,6 +317,27 @@ async def personalize_session_inputs(
     return resume_summary_text, focus_areas
 
 
+def _session_level(
+    generator: InterviewGenerator,
+    body: CreateInterviewSessionRequest,
+    user: dict,
+) -> str:
+    """The level a create-session request runs at.
+
+    A pinned level is stored verbatim and never consults the learner's
+    history. An omitted level is resolved once, here, from that history for
+    the track, so the session row carries a concrete level and generation,
+    evaluation and the persisted session all agree on it. The lookup is
+    best-effort: with no user context, no store, or no history it resolves
+    ``mid`` — the value an omitted level used to default to.
+    """
+    if body.level is not None:
+        return body.level.value
+    return generator.resolve_session_level(
+        track=body.track.value, user_identity=user
+    )
+
+
 @router.post("", response_model=InterviewSessionResponseExtended)
 async def create_session(
     body: CreateInterviewSessionRequestExtended,
@@ -338,7 +360,7 @@ async def create_session(
     session = _store.create_session(
         user_id=user["user"],
         track=body.track.value,
-        level=body.level.value,
+        level=_session_level(_generator, body, user),
         interview_type=body.interview_type.value,
         turn_count=body.turn_count,
         target_role=body.target_role.strip(),
@@ -424,7 +446,7 @@ async def create_session_stream(
             session = _store.create_session(
                 user_id=user["user"],
                 track=body.track.value,
-                level=body.level.value,
+                level=_session_level(_generator, body, user),
                 interview_type=body.interview_type.value,
                 turn_count=body.turn_count,
                 target_role=body.target_role.strip(),

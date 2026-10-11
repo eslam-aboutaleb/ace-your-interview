@@ -564,3 +564,73 @@ More context for generation.
 
 if __name__ == "__main__":
     unittest.main()
+
+    # ── Generation level ───────────────────────
+    def _fluent_history(self, count=10):
+        for index in range(count):
+            self.learning_store.record_attempt(
+                user_id="alice",
+                question_id=f"q-{index}",
+                topic_id="custom-java",
+                user_answer="answer",
+                is_correct=True,
+                confidence=4,
+                response_time_ms=1500,
+                mode="quiz",
+            )
+
+    def _generate_and_poll(self, deck_id: str, payload: dict) -> dict:
+        res = self.client.post(
+            f"/api/decks/{deck_id}/generate", json=payload
+        )
+        self.assertEqual(res.status_code, 202, res.text)
+        job_id = res.json()["job_id"]
+        job = {}
+        status = "queued"
+        for _ in range(50):
+            job_res = self.client.get(f"/api/decks/generate/jobs/{job_id}")
+            self.assertEqual(job_res.status_code, 200, job_res.text)
+            job = job_res.json()
+            status = job["status"]
+            if status == "done":
+                break
+            self.assertNotEqual(status, "failed", job.get("error"))
+            time.sleep(0.05)
+        self.assertEqual(status, "done")
+        return job
+
+    def test_generate_resolves_the_card_level_from_the_topic_history(self):
+        deck = self._create_deck()
+        self._fluent_history()
+        job = self._generate_and_poll(
+            deck["deck_id"],
+            {"source_type": "topic", "topic_id": "custom-java", "count": 2},
+        )
+        self.assertEqual(job["resolved_level"], "senior")
+        # The resolved level selects the skill pack the cards are written for.
+        self.assertTrue(self.llm.prompts)
+        self.assertIn("Bit Manipulation", self.llm.prompts[0])
+        self.assertNotIn("Arrays & Two-Pointer Technique", self.llm.prompts[0])
+
+    def test_generate_defaults_the_card_level_to_mid_without_history(self):
+        deck = self._create_deck()
+        job = self._generate_and_poll(
+            deck["deck_id"],
+            {"source_type": "topic", "topic_id": "custom-java", "count": 2},
+        )
+        self.assertEqual(job["resolved_level"], "mid")
+
+    def test_generate_keeps_an_explicit_card_level(self):
+        deck = self._create_deck()
+        self._fluent_history()
+        job = self._generate_and_poll(
+            deck["deck_id"],
+            {
+                "source_type": "topic",
+                "topic_id": "custom-java",
+                "count": 2,
+                "level": "junior",
+            },
+        )
+        self.assertEqual(job["resolved_level"], "")
+        self.assertIn("Arrays & Two-Pointer Technique", self.llm.prompts[0])

@@ -894,7 +894,10 @@ class InterviewReport(BaseModel):
 
 class CreateInterviewSessionRequest(BaseModel):
     track: TrackEnum
-    level: LevelEnum = LevelEnum.MID
+    # An omitted level delegates to the learner's attempt history for the
+    # track (resolved once at creation, when there is nothing to resolve it
+    # falls back to ``mid``); an explicit level always wins.
+    level: Optional[LevelEnum] = None
     interview_type: InterviewTypeEnum = InterviewTypeEnum.MIXED
     turn_count: int = Field(default=5, ge=1, le=100)
     target_role: str = Field(default="", max_length=200)
@@ -1287,8 +1290,12 @@ class GenerateCardsRequest(BaseModel):
     document_id: Optional[str] = Field(default=None, max_length=200)
     count: int = Field(default=10, ge=1, le=50)
     # Selects the technical skill pack depth used for the card prompt; the
-    # pack itself comes from the resolved topic's track.
-    level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
+    # pack itself comes from the resolved topic's track. ``None`` (omitted)
+    # and the literal ``"auto"`` both delegate the level to the learner's
+    # attempt history for the topic; an explicit level always wins.
+    level: Optional[str] = Field(
+        default=None, pattern="^(junior|mid|senior|auto)$"
+    )
     llm_config: Optional[LLMConfigRequest] = None
 
 
@@ -1311,6 +1318,9 @@ class GenerateCardsJobResponse(BaseModel):
     cards: list[GeneratedCardItem] = Field(default_factory=list)
     retries_used: int = 0
     malformed_items_dropped: int = 0
+    #: Level auto-resolved from the learner's attempt history for the
+    #: topic; empty when the request pinned its own level.
+    resolved_level: str = ""
     error: str = ""
 
 

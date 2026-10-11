@@ -5,6 +5,8 @@ from app.schemas.models import (
     CreateCustomTopicRequest,
     CreateInterviewSessionRequest,
     FeedbackModeEnum,
+    GenerateCardsJobResponse,
+    GenerateCardsRequest,
     GenerateQuestionsRequest,
     GenerateQuizRequest,
     GenerateTopicContentRequest,
@@ -108,6 +110,28 @@ class ModelContractTests(unittest.TestCase):
         payload = ChatFollowUpRequest(word="cache", user_message="why", history=[])
         self.assertEqual(payload.conversation_id, "")
         self.assertTrue(payload.use_memory)
+
+    def test_interview_session_level_defaults_to_auto(self):
+        req = CreateInterviewSessionRequest(track="backend")
+        self.assertIsNone(req.level)
+
+    def test_interview_session_level_keeps_an_explicit_choice(self):
+        self.assertEqual(
+            CreateInterviewSessionRequest(track="backend", level="senior").level.value,
+            "senior",
+        )
+
+    def test_generate_cards_level_defaults_to_auto(self):
+        self.assertIsNone(GenerateCardsRequest(source_type="topic").level)
+
+    def test_generate_cards_level_accepts_the_auto_opt_in(self):
+        self.assertEqual(
+            GenerateCardsRequest(source_type="topic", level="auto").level, "auto"
+        )
+
+    def test_generate_cards_job_response_carries_the_resolved_level(self):
+        payload = GenerateCardsJobResponse(job_id="j", status="done")
+        self.assertEqual(payload.resolved_level, "")
 
 
 if __name__ == "__main__":

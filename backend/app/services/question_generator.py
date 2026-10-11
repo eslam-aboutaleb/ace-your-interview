@@ -274,6 +274,16 @@ def _level_is_auto(level: Optional[str]) -> bool:
     return str(level or "").strip().lower() in _AUTO_LEVEL_ALIASES
 
 
+def is_auto_level(level: Optional[str]) -> bool:
+    """Public form of :func:`_level_is_auto` for the other flow modules.
+
+    ``InterviewGenerator`` needs the same "would this level otherwise be
+    defaulted?" question the question and quiz flows ask, and the alias set
+    must stay in one place.
+    """
+    return _level_is_auto(level)
+
+
 def _attempt_budget(target_count: int) -> int:
     target = max(1, int(target_count or 1))
     return min(_MAX_TOTAL_ATTEMPTS, max(_BASE_MAX_ATTEMPTS, target + 3))
@@ -5069,6 +5079,9 @@ class QuestionGenerator:
         capped at ``MAX_CARD_GENERATION_COUNT``.
         """
         target_count = max(1, min(int(count or 10), MAX_CARD_GENERATION_COUNT))
+        effective_level, resolved_level = self._resolve_generation_level(
+            level=level, user_identity=user_identity, topic_id=topic_id
+        )
         mcp_context = await self._mcp_context_for_flow(
             flow="questions",
             query=f"{topic_title} {section_title or ''} flashcards",
@@ -5090,7 +5103,7 @@ class QuestionGenerator:
             response_detail=response_detail,
             existing_cards=existing_cards,
             mcp_context=mcp_context,
-            level=level,
+            level=effective_level,
             track=topic_track,
         )
 
@@ -5137,7 +5150,9 @@ class QuestionGenerator:
                     ).strip(),
                 }
             )
-        return cards[:target_count], stats
+        # Same contract as the question/quiz flows: the level these cards were
+        # auto-resolved to, empty when the caller pinned its own.
+        return cards[:target_count], {**stats, "resolved_level": resolved_level}
 
 
 # ── Flashcard generation (STUDY_ENABLE_FLASHCARDS_V1) ──
