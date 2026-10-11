@@ -688,6 +688,7 @@ async def submit_answer(
                 confidence=confidence_signal,
                 response_time_ms=body.response_time_ms,
                 mode="study",
+                hints_used=1 if (body.hint_level or 0) else 0,
             )
 
     if updated_session and updated_session["status"] == "completed":
@@ -850,6 +851,7 @@ async def submit_answer_stream(
                         confidence=confidence_signal,
                         response_time_ms=body.response_time_ms,
                         mode="study",
+                        hints_used=1 if (body.hint_level or 0) else 0,
                     )
 
             if updated_session and updated_session["status"] == "completed":

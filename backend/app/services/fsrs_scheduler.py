@@ -23,6 +23,11 @@ This is a heuristic, not a measurement: a self-reported confidence of 4-5 on
 a correct answer approximates an ``easy`` recall, while a correct answer with
 low confidence approximates a shaky ``hard`` recall. It is the bridge that
 routes the legacy attempt stream onto the FSRS scheduler.
+
+Attempts that leaned on generated hints are rated through
+:func:`derive_rating_with_hints`, which downgrades the derived rating by
+one grade per hint used, so scaffolded recall is scheduled as the weaker
+evidence it is.
 """
 
 from __future__ import annotations
@@ -253,6 +258,26 @@ def derive_rating(is_correct: bool, confidence: int) -> str:
     return RATING_HARD
 
 
+def derive_rating_with_hints(
+    is_correct: bool, confidence: int, hints_used: int = 0
+) -> str:
+    """Map an attempt onto an FSRS rating, penalising hint usage.
+
+    Starts from :func:`derive_rating` and downgrades one grade per
+    hint the learner used (``easy`` → ``good`` → ``hard`` →
+    ``again``), floored at ``again``: a correct answer that leaned
+    on hints is weaker recall evidence than the same answer given
+    unaided, so it must not schedule the card further out. With
+    ``hints_used`` of 0 the result is exactly :func:`derive_rating`.
+    """
+    rating = derive_rating(is_correct, confidence)
+    hints = max(0, int(hints_used or 0))
+    if hints == 0:
+        return rating
+    index = RATINGS.index(rating)
+    return RATINGS[max(0, index - hints)]
+
+
 def retention_estimate(
     card: dict[str, Any], now: datetime | None = None
 ) -> float:
@@ -314,6 +339,7 @@ __all__ = [
     "card_to_dict",
     "create_card",
     "derive_rating",
+    "derive_rating_with_hints",
     "due_cards",
     "forecast",
     "is_leech",

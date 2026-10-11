@@ -1574,3 +1574,31 @@ class MasteryTopicCurve(BaseModel):
 class MasteryCurveResponse(BaseModel):
     points: list[MasteryPoint] = Field(default_factory=list)
     topics: list[MasteryTopicCurve] = Field(default_factory=list)
+
+
+# ── Leech Management Models ─────────────────────────
+
+class LeechItem(BaseModel):
+    card_id: str
+    topic_id: str
+    source_type: str
+    state: str
+    stability: Optional[float] = None
+    difficulty: Optional[float] = None
+    due_at: str
+    last_review_at: Optional[str] = None
+    reps: int = 0
+    lapses: int = 0
+    scheduled_days: int = 0
+    elapsed_days: int = 0
+    suspended: int = 1
+
+
+class LeechesResponse(BaseModel):
+    items: list[LeechItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class LeechResumeResponse(BaseModel):
+    card: FSRSCardResponse
+    resumed: bool = True

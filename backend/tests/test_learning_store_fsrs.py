@@ -629,5 +629,336 @@ class AttemptDualWriteTests(unittest.TestCase):
         self.assertEqual(log["rating"], "again")
 
 
+class ReviewQueueRankingTests(unittest.TestCase):
+    """Queue ranking: default due order, threshold, weak-area boost."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.store = LearningStore(
+            os.path.join(self._td.name, "learning.db")
+        )
+
+    def _card(
+        self,
+        card_id: str,
+        *,
+        topic_id: str = "topic-a",
+        rating: str = "easy",
+        due_at: datetime | None = None,
+        stability: float | None = None,
+        last_review_at: datetime | None = None,
+    ) -> None:
+        """Create a reviewed card with explicit scheduling fields."""
+        self.store.record_review(
+            user_id="alice",
+            card_id=card_id,
+            topic_id=topic_id,
+            rating=rating,
+            response_time_ms=100,
+        )
+        updates: dict[str, object] = {}
+        if due_at is not None:
+            updates["due_at"] = _to_iso(due_at)
+        if stability is not None:
+            updates["stability"] = float(stability)
+        if last_review_at is not None:
+            updates["last_review_at"] = _to_iso(last_review_at)
+        if updates:
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            self.store._conn.execute(
+                f"UPDATE fsrs_cards SET {assignments} "
+                "WHERE user_id = ? AND card_id = ?",
+                (*updates.values(), "alice", card_id),
+            )
+            self.store._conn.commit()
+
+    def test_default_queue_orders_oldest_due_first(self):
+        now = _now()
+        self._card("q-new", due_at=now - timedelta(hours=1))
+        self._card("q-mid", due_at=now - timedelta(hours=2))
+        self._card("q-old", due_at=now - timedelta(hours=3))
+        queue = self.store.get_fsrs_review_queue(user_id="alice", limit=10)
+        self.assertEqual(
+            [item["question_id"] for item in queue["items"]],
+            ["q-old", "q-mid", "q-new"],
+        )
+        self.assertEqual(queue["total_due"], 3)
+
+    def test_explicit_defaults_match_the_plain_queue(self):
+        now = _now()
+        self._card("q1", due_at=now - timedelta(hours=2))
+        self._card("q2", due_at=now - timedelta(hours=1))
+        default = self.store.get_fsrs_review_queue(user_id="alice", limit=10)
+        explicit = self.store.get_fsrs_review_queue(
+            user_id="alice",
+            limit=10,
+            retrievability_threshold=None,
+            weak_area_boost=False,
+        )
+        self.assertEqual(default, explicit)
+
+    def test_threshold_pulls_low_retrievability_item_forward(self):
+        now = _now()
+        # Fading card: due tomorrow but long forgotten (retention ~0.82).
+        self._card(
+            "q-fading",
+            due_at=now + timedelta(days=1),
+            stability=5.0,
+            last_review_at=now - timedelta(days=10),
+        )
+        # Merely-due card: reviewed an hour ago, retention ~1.0.
+        self._card(
+            "q-strong",
+            due_at=now - timedelta(hours=2),
+            stability=100.0,
+            last_review_at=now - timedelta(hours=1),
+        )
+        default = self.store.get_fsrs_review_queue(user_id="alice", limit=10)
+        self.assertEqual(
+            [item["question_id"] for item in default["items"]], ["q-strong"]
+        )
+        boosted = self.store.get_fsrs_review_queue(
+            user_id="alice", limit=10, retrievability_threshold=0.9
+        )
+        self.assertEqual(
+            [item["question_id"] for item in boosted["items"]],
+            ["q-fading", "q-strong"],
+        )
+        self.assertEqual(boosted["total_due"], 2)
+
+    def test_threshold_leaves_healthy_queue_untouched(self):
+        now = _now()
+        self._card(
+            "q-strong",
+            due_at=now - timedelta(hours=1),
+            stability=100.0,
+            last_review_at=now - timedelta(hours=1),
+        )
+        queue = self.store.get_fsrs_review_queue(
+            user_id="alice", limit=10, retrievability_threshold=0.9
+        )
+        self.assertEqual(
+            [item["question_id"] for item in queue["items"]], ["q-strong"]
+        )
+
+    def test_weak_area_boost_orders_weakest_topic_first(self):
+        now = _now()
+        self._card(
+            "q-secure",
+            topic_id="topic-secure",
+            due_at=now - timedelta(hours=2),
+            stability=100.0,
+            last_review_at=now - timedelta(hours=1),
+        )
+        self._card(
+            "q-shaky",
+            topic_id="topic-shaky",
+            due_at=now - timedelta(hours=1),
+            stability=5.0,
+            last_review_at=now - timedelta(days=10),
+        )
+        default = self.store.get_fsrs_review_queue(user_id="alice", limit=10)
+        self.assertEqual(
+            [item["question_id"] for item in default["items"]],
+            ["q-secure", "q-shaky"],
+        )
+        boosted = self.store.get_fsrs_review_queue(
+            user_id="alice", limit=10, weak_area_boost=True
+        )
+        self.assertEqual(
+            [item["question_id"] for item in boosted["items"]],
+            ["q-shaky", "q-secure"],
+        )
+
+
+class LeechSuspensionTests(unittest.TestCase):
+    """Leeches auto-suspend out of the queue until explicitly resumed."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.store = LearningStore(
+            os.path.join(self._td.name, "learning.db")
+        )
+
+    def _leech(self, card_id: str = "q-leech") -> dict:
+        result = None
+        for _ in range(5):
+            result = self.store.record_review(
+                user_id="alice",
+                card_id=card_id,
+                topic_id="topic-a",
+                rating="again",
+                response_time_ms=100,
+            )
+        # Force the card due now so suspension is the only thing
+        # that can exclude it from the queue.
+        self.store._conn.execute(
+            "UPDATE fsrs_cards SET due_at = ? "
+            "WHERE user_id = ? AND card_id = ?",
+            (_to_iso(_now() - timedelta(hours=1)), "alice", card_id),
+        )
+        self.store._conn.commit()
+        assert result is not None
+        return result
+
+    def test_leech_is_auto_suspended_out_of_the_queue(self):
+        result = self._leech()
+        self.assertTrue(result["leech"])
+        self.assertEqual(result["card"]["lapses"], 5)
+        self.assertEqual(result["card"]["suspended"], 1)
+        self.assertEqual(self.store.get_due_cards(user_id="alice", limit=10), [])
+        queue = self.store.get_fsrs_review_queue(user_id="alice", limit=10)
+        self.assertEqual(queue["items"], [])
+        self.assertEqual(queue["total_due"], 0)
+
+    def test_suspension_also_excludes_from_the_filtered_queue(self):
+        self._leech("q-leech")
+        self.store.record_review(
+            user_id="alice",
+            card_id="q1",
+            topic_id="topic-a",
+            rating="good",
+            response_time_ms=100,
+        )
+        self.store._conn.execute(
+            "UPDATE fsrs_cards SET due_at = ? "
+            "WHERE user_id = ? AND card_id = ?",
+            (_to_iso(_now() - timedelta(hours=1)), "alice", "q1"),
+        )
+        self.store._conn.commit()
+        queue = self.store.get_fsrs_review_queue(
+            user_id="alice", limit=10, retrievability_threshold=0.99
+        )
+        self.assertEqual(
+            [item["question_id"] for item in queue["items"]], ["q1"]
+        )
+
+    def test_get_leeches_lists_suspended_leeches(self):
+        self._leech("q-leech")
+        self._leech("q-leech-2")
+        leeches = self.store.get_leeches(user_id="alice")
+        self.assertEqual(
+            [card["card_id"] for card in leeches], ["q-leech", "q-leech-2"]
+        )
+        self.assertEqual(leeches[0]["suspended"], 1)
+        self.assertGreaterEqual(leeches[0]["lapses"], 5)
+        self.assertEqual(self.store.get_leeches(user_id="bob"), [])
+
+    def test_non_leech_cards_are_not_listed_as_leeches(self):
+        result = None
+        for _ in range(4):
+            result = self.store.record_review(
+                user_id="alice",
+                card_id="q1",
+                topic_id="topic-a",
+                rating="again",
+                response_time_ms=100,
+            )
+        self.assertFalse(result["leech"])
+        self.assertEqual(result["card"]["suspended"], 0)
+        self.assertEqual(self.store.get_leeches(user_id="alice"), [])
+
+    def test_resume_restores_the_card_to_the_queue(self):
+        self._leech()
+        self.assertEqual(
+            self.store.get_due_cards(user_id="alice", limit=10), []
+        )
+        resumed = self.store.resume_leeched_card(
+            user_id="alice", card_id="q-leech"
+        )
+        self.assertIsNotNone(resumed)
+        self.assertEqual(resumed["suspended"], 0)
+        due = self.store.get_due_cards(user_id="alice", limit=10)
+        self.assertEqual([card["card_id"] for card in due], ["q-leech"])
+        self.assertEqual(self.store.get_leeches(user_id="alice"), [])
+        queue = self.store.get_fsrs_review_queue(user_id="alice", limit=10)
+        self.assertEqual(
+            [item["question_id"] for item in queue["items"]], ["q-leech"]
+        )
+
+    def test_resume_unknown_or_unsuspended_card_returns_none(self):
+        self.store.record_review(
+            user_id="alice",
+            card_id="q1",
+            topic_id="topic-a",
+            rating="good",
+            response_time_ms=100,
+        )
+        self.assertIsNone(
+            self.store.resume_leeched_card(user_id="alice", card_id="q1")
+        )
+        self.assertIsNone(
+            self.store.resume_leeched_card(user_id="alice", card_id="nope")
+        )
+        self._leech()
+        self.assertIsNone(
+            self.store.resume_leeched_card(user_id="bob", card_id="q-leech")
+        )
+
+
+class AttemptHintRatingTests(unittest.TestCase):
+    """Hint usage downgrades the rating derived for an attempt."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.store = LearningStore(
+            os.path.join(self._td.name, "learning.db")
+        )
+
+    def _log_rating(self, question_id: str) -> str:
+        log = self.store._conn.execute(
+            "SELECT rating FROM fsrs_review_log "
+            "WHERE user_id = ? AND card_id = ?",
+            ("alice", question_id),
+        ).fetchone()
+        assert log is not None
+        return str(log["rating"])
+
+    def test_hint_usage_downgrades_the_derived_rating(self):
+        self.store.record_attempt(
+            user_id="alice",
+            question_id="q-hinted",
+            topic_id="topic-a",
+            user_answer="a",
+            is_correct=True,
+            confidence=5,
+            response_time_ms=900,
+            mode="quiz",
+            hints_used=2,
+        )
+        # (correct, confident) is "easy"; two hints downgrade to "hard".
+        self.assertEqual(self._log_rating("q-hinted"), "hard")
+
+    def test_attempt_without_hints_keeps_the_plain_rating(self):
+        self.store.record_attempt(
+            user_id="alice",
+            question_id="q-plain",
+            topic_id="topic-a",
+            user_answer="a",
+            is_correct=True,
+            confidence=5,
+            response_time_ms=900,
+            mode="quiz",
+        )
+        self.assertEqual(self._log_rating("q-plain"), "easy")
+
+    def test_heavy_hint_usage_floors_the_rating_at_again(self):
+        self.store.record_attempt(
+            user_id="alice",
+            question_id="q-scaffolded",
+            topic_id="topic-a",
+            user_answer="a",
+            is_correct=True,
+            confidence=5,
+            response_time_ms=900,
+            mode="quiz",
+            hints_used=9,
+        )
+        self.assertEqual(self._log_rating("q-scaffolded"), "again")
+
+
 if __name__ == "__main__":
     unittest.main()
