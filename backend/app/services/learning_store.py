@@ -63,6 +63,9 @@ def _notify_review_listeners(**payload: Any) -> None:
             listener(**payload)
         except Exception:  # pragma: no cover - defensive
             logger.exception("gamification review listener failed")
+#: feature_events key/event used to bound misconception classifications per user.
+ERROR_PATTERN_FEATURE_KEY = "error_patterns"
+ERROR_PATTERN_CLASSIFIED_EVENT = "misconception_classified"
 
 
 def _utc_now() -> datetime:
@@ -500,10 +503,29 @@ class LearningStore:
                 """
             )
             self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_generation_runs_user_time "
+                "ON generation_runs(user_id, flow, created_at DESC)"
+            )
+            self._conn.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_generation_runs_user_time
-                ON generation_runs(user_id, flow, created_at DESC)
+                CREATE TABLE IF NOT EXISTS error_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    topic_id TEXT NOT NULL,
+                    objective TEXT NOT NULL,
+                    error_type TEXT NOT NULL,
+                    explanation TEXT NOT NULL,
+                    evidence TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 1,
+                    first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL,
+                    UNIQUE (user_id, topic_id, objective, error_type)
+                )
                 """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_error_patterns_ranked "
+                "ON error_patterns(user_id, topic_id, count DESC, last_seen DESC)"
             )
 
     def record_generation_run(
@@ -2756,3 +2778,150 @@ class LearningStore:
                     (user_id, card_id),
                 ).fetchone()
         return self._fsrs_row_to_dict(row) if row is not None else None
+    # ── Error-pattern memory (misconception tagging) ─────────────────
+    #
+    # Read API for the learner-memory wave: `list_error_patterns` returns the
+    # ranked rows that become the LLM-visible learner-state block.
+
+    _ERROR_PATTERN_COLUMNS = (
+        "id, user_id, topic_id, objective, error_type, explanation, evidence, "
+        "count, first_seen, last_seen"
+    )
+
+    @staticmethod
+    def _error_pattern_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": int(row["id"]),
+            "topic_id": str(row["topic_id"]),
+            "objective": str(row["objective"]),
+            "error_type": str(row["error_type"]),
+            "explanation": str(row["explanation"]),
+            "evidence": str(row["evidence"]),
+            "count": int(row["count"]),
+            "first_seen": str(row["first_seen"]),
+            "last_seen": str(row["last_seen"]),
+        }
+
+    def record_error_pattern(
+        self,
+        *,
+        user_id: str,
+        topic_id: str,
+        objective: str,
+        error_type: str,
+        explanation: str,
+        evidence: str,
+    ) -> dict:
+        """Upsert one observed error pattern, deduped on its natural key.
+
+        A repeat of an existing ``(user_id, topic_id, objective, error_type)``
+        row increments ``count`` and refreshes ``last_seen``; the explanation
+        and evidence are replaced with the most recent observation.
+        """
+        now_iso = _to_iso(_utc_now())
+        key = (
+            str(user_id or "").strip()[:160] or "anonymous",
+            str(topic_id or "").strip()[:200],
+            str(objective or "").strip()[:240] or "general",
+            str(error_type or "").strip()[:40] or "unclassified",
+        )
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO error_patterns(
+                        user_id, topic_id, objective, error_type, explanation,
+                        evidence, count, first_seen, last_seen
+                    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    ON CONFLICT(user_id, topic_id, objective, error_type) DO UPDATE SET
+                        count = error_patterns.count + 1,
+                        explanation = excluded.explanation,
+                        evidence = excluded.evidence,
+                        last_seen = excluded.last_seen
+                    """,
+                    (
+                        key[0],
+                        key[1],
+                        key[2],
+                        key[3],
+                        str(explanation or "").strip()[:600],
+                        str(evidence or "").strip()[:600],
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                row = self._conn.execute(
+                    f"""
+                    SELECT {self._ERROR_PATTERN_COLUMNS}
+                    FROM error_patterns
+                    WHERE user_id = ? AND topic_id = ? AND objective = ? AND error_type = ?
+                    LIMIT 1
+                    """,
+                    key,
+                ).fetchone()
+        if not row:  # pragma: no cover - defensive: the upsert just wrote it
+            return {
+                "topic_id": key[1],
+                "objective": key[2],
+                "error_type": key[3],
+                "explanation": str(explanation or "").strip()[:600],
+                "evidence": str(evidence or "").strip()[:600],
+                "count": 1,
+                "first_seen": now_iso,
+                "last_seen": now_iso,
+            }
+        return self._error_pattern_row_to_dict(row)
+
+    def list_error_patterns(
+        self,
+        *,
+        user_id: str,
+        topic_id: str | None = None,
+        limit: int = 20,
+        min_count: int = 1,
+    ) -> list[dict]:
+        """Return the user's error patterns ranked by occurrence count."""
+        clauses = ["user_id = ?"]
+        params: list[Any] = [str(user_id or "").strip()[:160] or "anonymous"]
+        if topic_id:
+            clauses.append("topic_id = ?")
+            params.append(str(topic_id).strip()[:200])
+        clauses.append("count >= ?")
+        params.append(max(1, int(min_count)))
+        params.append(max(1, min(int(limit), 200)))
+        rows = self._conn.execute(
+            f"""
+            SELECT {self._ERROR_PATTERN_COLUMNS}
+            FROM error_patterns
+            WHERE {' AND '.join(clauses)}
+            ORDER BY count DESC, last_seen DESC, id ASC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+        return [self._error_pattern_row_to_dict(row) for row in rows]
+
+    def count_error_pattern_classifications(
+        self,
+        *,
+        user_id: str,
+        within_hours: float = 1.0,
+    ) -> int:
+        """Classifications already recorded for this user inside the window."""
+        hours = float(within_hours) if float(within_hours) > 0 else 1.0
+        since_iso = _to_iso(_utc_now() - timedelta(hours=hours))
+        row = self._conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM feature_events
+            WHERE user_id = ? AND feature_key = ? AND event_name = ?
+              AND created_at >= ?
+            """,
+            (
+                str(user_id or "").strip()[:160] or "anonymous",
+                ERROR_PATTERN_FEATURE_KEY,
+                ERROR_PATTERN_CLASSIFIED_EVENT,
+                since_iso,
+            ),
+        ).fetchone()
+        return int(row["total"]) if row else 0

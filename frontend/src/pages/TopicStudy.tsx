@@ -1067,6 +1067,10 @@ export default function TopicStudy() {
         response_time_ms: responseTime,
         mode: "study",
         learning_objective: q.learning_objective || "",
+        question_text: q.question,
+        correct_answer: q.answer,
+        objective: q.learning_objective,
+        level,
       });
       setSubmittedAttempts((prev) => new Set(prev).add(idx));
       setOutcomeByIdx((prev) => ({ ...prev, [idx]: isCorrect }));

@@ -14,6 +14,7 @@ from app.routers import hints as hints_router
 from app.routers import interview_sessions as interview_sessions_router
 from app.schemas.models import (
     CalibrationResponse,
+    ErrorPatternListResponse,
     ForecastResponse,
     FSRSCardResponse,
     LeechItem,
@@ -38,7 +39,17 @@ from app.schemas.models import (
 )
 from app.services.doc_parser import DocParser
 from app.services.learning_planner import LearningPlannerStore
-from app.services.learning_store import LearningStore
+from app.services.learning_store import (
+    ERROR_PATTERN_CLASSIFIED_EVENT,
+    ERROR_PATTERN_FEATURE_KEY,
+    LearningStore,
+)
+from app.services.misconception_service import (
+    MIN_USER_ANSWER_CHARS,
+    MisconceptionService,
+    derive_objective,
+    resolve_topic_title,
+)
 
 router = APIRouter(prefix="/api/learning", tags=["learning"])
 
@@ -47,17 +58,20 @@ logger = logging.getLogger(__name__)
 _store: LearningStore | None = None
 _planner: LearningPlannerStore | None = None
 _parser: DocParser | None = None
+_misconception: MisconceptionService | None = None
 
 
 def init(
     store: LearningStore,
     planner: LearningPlannerStore,
     parser: DocParser | None = None,
+    llm_client=None,
 ):
-    global _store, _planner, _parser
+    global _store, _planner, _parser, _misconception
     _store = store
     _planner = planner
     _parser = parser
+    _misconception = MisconceptionService(llm_client)
     _run_startup_fsrs_backfill(store)
 
 
@@ -197,6 +211,7 @@ async def record_attempt(
         learning_objective=body.learning_objective,
         hints_used=hints_used,
     )
+    await _capture_error_pattern(user=user, body=body)
     return LearningAttemptResponse(**saved)
 
 
@@ -504,3 +519,100 @@ async def resume_leech(
     if card is None:
         raise HTTPException(status_code=404, detail="Leech not found")
     return LeechResumeResponse(card=FSRSCardResponse(**card))
+# ── Error-pattern / misconception memory ─────────────────────────────────
+
+
+async def _capture_error_pattern(*, user: dict, body: LearningAttemptRequest) -> None:
+    """Classify a wrong answer and store the resulting error pattern.
+
+    Runs after the attempt is persisted and never fails the request: the
+    attempt is already recorded, so any error here is observability only.
+    """
+    try:
+        settings = get_settings()
+        if not settings.enable_error_patterns:
+            return
+        if body.is_correct or _store is None or _misconception is None:
+            return
+        if len(str(body.user_answer or "").strip()) < MIN_USER_ANSWER_CHARS:
+            return
+        user_id = str(user.get("user", "") or "").strip()
+        if not user_id:
+            return
+
+        hourly_cap = int(getattr(settings, "error_pattern_hourly_cap", 30))
+        if hourly_cap > 0:
+            classified_recently = await _store.run_async(
+                _store.count_error_pattern_classifications,
+                user_id=user_id,
+            )
+            if classified_recently >= hourly_cap:
+                logger.info(
+                    "error_pattern_classification_capped user=%s window_hours=1 cap=%s",
+                    user_id,
+                    hourly_cap,
+                )
+                return
+
+        classified = await _misconception.classify_misconception(
+            question=body.question_text,
+            correct_answer=body.correct_answer,
+            user_answer=body.user_answer,
+            level=body.level or "",
+            topic_title=resolve_topic_title(body.topic_id),
+            user_identity=user,
+        )
+        source = str(classified.get("source", "fallback"))
+        if source != "rule":
+            # Counts against the hourly cap only when a model may have been
+            # called; deterministic labels cost nothing.
+            await _store.run_async(
+                _store.record_feature_event,
+                user_id=user_id,
+                feature_key=ERROR_PATTERN_FEATURE_KEY,
+                event_name=ERROR_PATTERN_CLASSIFIED_EVENT,
+                metadata={
+                    "question_id": body.question_id,
+                    "error_type": str(classified.get("error_type", "")),
+                    "source": source,
+                },
+            )
+
+        objective = (
+            " ".join(str(body.objective or "").split())[:240]
+            or derive_objective(body.question_text, fallback=body.question_id)
+        )
+        await _store.run_async(
+            _store.record_error_pattern,
+            user_id=user_id,
+            topic_id=body.topic_id,
+            objective=objective,
+            error_type=str(classified.get("error_type", "")),
+            explanation=str(classified.get("explanation", "")),
+            evidence=str(body.user_answer or "")[:600],
+        )
+    except Exception:
+        logger.warning(
+            "Error-pattern capture failed for user=%s question=%s",
+            user.get("user"),
+            body.question_id,
+            exc_info=True,
+        )
+
+
+@router.get("/error-patterns", response_model=ErrorPatternListResponse)
+async def error_patterns(
+    topic_id: str | None = Query(default=None, max_length=200),
+    limit: int = Query(default=20, ge=1, le=200),
+    user: dict = Depends(require_auth),
+):
+    _ensure_enabled()
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Learning store not initialised")
+    items = await _store.run_async(
+        _store.list_error_patterns,
+        user_id=user["user"],
+        topic_id=topic_id,
+        limit=limit,
+    )
+    return ErrorPatternListResponse(items=items, total=len(items))

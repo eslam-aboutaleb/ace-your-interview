@@ -147,6 +147,12 @@ class Settings(BaseSettings):
     embedding_provider: str = "openai"     # openai (text-embedding-3-small) or google (gemini-embedding)
     embedding_model: str = ""              # empty → provider default
 
+    # Error-pattern memory: classify wrong answers into tagged misconceptions
+    # (rollout flag, default on) and bound the LLM spend that classification
+    # can cause per user (0 disables the cap).
+    enable_error_patterns: bool = True
+    error_pattern_hourly_cap: int = 30
+
     # gRPC analysis backends (llm-chain / cli-agent services)
     grpc_llm_chain_host: str = "localhost"
     grpc_llm_chain_port: int = 50051

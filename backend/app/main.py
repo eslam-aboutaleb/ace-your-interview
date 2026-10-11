@@ -248,7 +248,7 @@ async def lifespan(application: FastAPI):
         pipeline=document_pipeline,
         learning_store=_learning_store,
     )
-    learning.init(_learning_store, _learning_planner, parser)
+    learning.init(_learning_store, _learning_planner, parser, _llm_client)
     cards.init(
         card_store=card_store,
         learning_store=_learning_store,

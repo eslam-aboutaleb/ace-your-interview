@@ -41,3 +41,4 @@ htmlcov/
 # PWA generated assets
 sw.js
 workbox-*.js
+node_modules
