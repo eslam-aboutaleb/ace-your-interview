@@ -214,7 +214,12 @@ def _build_stream_batch_prompt(
     existing_block = existing_blob if existing_blob else "- (none yet)"
     mcp_block = untrusted_block("external_context", mcp_context, 2500)
     selected_skills = skills_for_session(
-        level=level_start, session_type="coding", include_educational=False
+        level=level_start,
+        session_type="coding",
+        # The problem-solving roadmap is DSA by design: an empty track keeps
+        # the algorithms/data-structures pack rather than a stack pack.
+        track="",
+        include_educational=False,
     )
     technical_block = technical_skill_block(selected_skills["technical"])[
         :_MAX_SKILL_BLOCK_CHARS

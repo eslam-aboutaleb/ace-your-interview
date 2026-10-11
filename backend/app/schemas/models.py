@@ -1242,6 +1242,9 @@ class GenerateCardsRequest(BaseModel):
     section_title: Optional[str] = Field(default=None, max_length=400)
     document_id: Optional[str] = Field(default=None, max_length=200)
     count: int = Field(default=10, ge=1, le=50)
+    # Selects the technical skill pack depth used for the card prompt; the
+    # pack itself comes from the resolved topic's track.
+    level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
     llm_config: Optional[LLMConfigRequest] = None
 
 
