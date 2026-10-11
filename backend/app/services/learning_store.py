@@ -2925,3 +2925,148 @@ class LearningStore:
             ),
         ).fetchone()
         return int(row["total"]) if row else 0
+
+    # ── Adaptive difficulty (history-derived generation level) ────────────
+
+    #: Attempts the level recommendation looks at, newest first.
+    _LEVEL_RECOMMENDATION_WINDOW = 10
+
+    #: Mean-signal boundaries. One attempt contributes its hint-aware
+    #: rating band (``again``=0 … ``easy``=3) nudged by response time,
+    #: so the mean lives in ``[-1, 4]``: a learner who answers easily,
+    #: unaided and quickly recommends hard material, one who struggles
+    #: or leans on hints recommends easy material, and anything between
+    #: stays at the middle level.
+    _LEVEL_SENIOR_THRESHOLD = 2.5
+    _LEVEL_JUNIOR_THRESHOLD = 1.0
+
+    #: Response-time bands: a correct answer this fast is fluent recall,
+    #: a wrong answer this slow is a struggle.
+    _LEVEL_FAST_RESPONSE_MS = 5000
+    _LEVEL_SLOW_RESPONSE_MS = 60000
+
+    _LEVEL_RATING_BANDS = {
+        fsrs_scheduler.RATING_AGAIN: 0.0,
+        fsrs_scheduler.RATING_HARD: 1.0,
+        fsrs_scheduler.RATING_GOOD: 2.0,
+        fsrs_scheduler.RATING_EASY: 3.0,
+    }
+
+    def _hints_used_for_question(self, user_id: str, question_id: str) -> int:
+        """Hints already generated for one ``(user_id, question_id)``.
+
+        Mirrors :meth:`app.services.hint_service.HintService.count_hints_used`
+        against the shared ``feature_events`` table, so an attempt that
+        leaned on hints counts as the weaker recall it is without the
+        store importing the hint service (and its LLM client).
+        """
+        # Imported here, not at module scope: the hint service pulls in the
+        # LLM client, which the store has no other reason to depend on.
+        from app.services.hint_service import HINT_EVENT_NAME, HINT_FEATURE_KEY
+
+        try:
+            row = self._conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM feature_events
+                WHERE user_id = ? AND feature_key = ? AND event_name = ?
+                  AND json_extract(metadata_json, '$.question_id') = ?
+                """,
+                (user_id, HINT_FEATURE_KEY, HINT_EVENT_NAME, question_id),
+            ).fetchone()
+            return int(row["total"]) if row else 0
+        except sqlite3.Error:
+            # JSON1 unavailable or malformed metadata: fall back to the
+            # same textual scan the hint service uses.
+            rows = self._conn.execute(
+                """
+                SELECT metadata_json FROM feature_events
+                WHERE user_id = ? AND feature_key = ? AND event_name = ?
+                """,
+                (user_id, HINT_FEATURE_KEY, HINT_EVENT_NAME),
+            ).fetchall()
+            needle = f'"question_id": "{question_id}"'
+            return sum(
+                1 for row in rows if needle in str(row["metadata_json"] or "")
+            )
+
+    @classmethod
+    def _level_signal(
+        cls,
+        *,
+        is_correct: bool,
+        confidence: int,
+        hints_used: int,
+        response_time_ms: int,
+    ) -> float:
+        """One attempt's contribution to the level recommendation.
+
+        The base signal is the attempt's hint-aware FSRS rating band, so
+        scaffolded recall is discounted exactly as the scheduler
+        discounts it. Response time then nudges the band at the edges:
+        fluent recall (+) and a struggling miss (-). A zero response
+        time (unknown) leaves the band untouched.
+        """
+        rating = fsrs_scheduler.derive_rating_with_hints(
+            is_correct, confidence, hints_used
+        )
+        signal = cls._LEVEL_RATING_BANDS.get(rating, 0.0)
+        if response_time_ms > 0:
+            if is_correct and response_time_ms <= cls._LEVEL_FAST_RESPONSE_MS:
+                signal += 1.0
+            elif (
+                not is_correct
+                and response_time_ms >= cls._LEVEL_SLOW_RESPONSE_MS
+            ):
+                signal -= 1.0
+        return signal
+
+    def get_level_recommendation(
+        self,
+        user_id: str,
+        topic_id: str,
+        limit: int = _LEVEL_RECOMMENDATION_WINDOW,
+    ) -> str | None:
+        """Recommend a generation level from the learner's attempt history.
+
+        Scores the last ``limit`` attempts for the ``(user_id, topic_id)``
+        pair (see :meth:`_level_signal`) and maps the mean onto a level:
+
+        * >= ``_LEVEL_SENIOR_THRESHOLD`` → ``"senior"``
+        * >= ``_LEVEL_JUNIOR_THRESHOLD`` → ``"mid"``
+        * otherwise → ``"junior"``
+
+        Returns ``None`` when the learner has no attempts for the topic
+        yet, so the caller keeps its own default instead of pretending a
+        cold-start learner is mid-level.
+        """
+        window = max(1, int(limit or self._LEVEL_RECOMMENDATION_WINDOW))
+        rows = self._conn.execute(
+            """
+            SELECT question_id, is_correct, confidence, response_time_ms
+            FROM learning_attempts
+            WHERE user_id = ? AND topic_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (str(user_id), str(topic_id), window),
+        ).fetchall()
+        if not rows:
+            return None
+        signals = [
+            self._level_signal(
+                is_correct=bool(row["is_correct"]),
+                confidence=int(row["confidence"] or 0),
+                hints_used=self._hints_used_for_question(
+                    str(user_id), str(row["question_id"])
+                ),
+                response_time_ms=int(row["response_time_ms"] or 0),
+            )
+            for row in rows
+        ]
+        mean_signal = sum(signals) / len(signals)
+        if mean_signal >= self._LEVEL_SENIOR_THRESHOLD:
+            return "senior"
+        if mean_signal >= self._LEVEL_JUNIOR_THRESHOLD:
+            return "mid"
+        return "junior"

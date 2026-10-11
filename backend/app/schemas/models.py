@@ -107,7 +107,11 @@ class GenerateQuestionsRequest(BaseModel):
     requested_total_count: Optional[int] = Field(default=None, ge=1, le=100)
     existing_questions: list[str] = Field(default_factory=list, max_length=200)
     difficulty: Optional[str] = Field(default=None, pattern="^(easy|medium|hard)$")
-    level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
+    # ``None`` (omitted) and the literal ``"auto"`` both delegate the level
+    # to the learner's attempt history; an explicit level always wins.
+    level: Optional[str] = Field(
+        default=None, pattern="^(junior|mid|senior|auto)$"
+    )
     response_detail: Optional[ResponseDetailEnum] = None
     preferred_language: Optional[str] = Field(default=None, max_length=60)
     llm_config: Optional[LLMConfigRequest] = None
@@ -127,6 +131,9 @@ class GenerateQuestionsResponse(BaseModel):
     questions: list[QuestionAnswer]
     provider_used: str = ""
     model_used: str = ""
+    #: Level auto-resolved from the learner's attempt history for this
+    #: topic; empty when the request pinned its own level.
+    resolved_level: str = ""
 
 
 class QuestionAnswerV2(BaseModel):
@@ -155,6 +162,9 @@ class GenerateQuestionsV2Response(BaseModel):
     #: Wire identifier of the prompt contract that produced this
     #: payload: ``"<prompt_name>@<version>"``.
     generation_version: str = ""
+    #: Level auto-resolved from the learner's attempt history for this
+    #: topic; empty when the request pinned its own level.
+    resolved_level: str = ""
 
 
 class TopicSummary(BaseModel):
@@ -442,7 +452,11 @@ class GenerateQuizRequest(BaseModel):
     count: int = Field(default=10, ge=1, le=100)
     question_types: list[QuizQuestionType] = [QuizQuestionType.MCQ, QuizQuestionType.TRUE_FALSE]
     difficulty: Optional[str] = Field(default=None, pattern="^(easy|medium|hard)$")
-    level: Optional[str] = Field(default="mid", pattern="^(junior|mid|senior)$")
+    # ``None`` (omitted) and the literal ``"auto"`` both delegate the level
+    # to the learner's attempt history; an explicit level always wins.
+    level: Optional[str] = Field(
+        default=None, pattern="^(junior|mid|senior|auto)$"
+    )
     response_detail: Optional[ResponseDetailEnum] = None
     preferred_language: Optional[str] = Field(default=None, max_length=60)
     llm_config: Optional[LLMConfigRequest] = None
@@ -456,6 +470,9 @@ class GenerateQuizResponse(BaseModel):
     topics_used: list[str] = []
     provider_used: str = ""
     model_used: str = ""
+    #: Level auto-resolved from the learner's attempt history for the
+    #: first requested topic; empty when the request pinned its own level.
+    resolved_level: str = ""
 
 
 class QuizDistractorRationale(BaseModel):
@@ -492,6 +509,9 @@ class GenerateQuizV2Response(BaseModel):
     #: Wire identifier of the prompt contract that produced this
     #: payload: ``"<prompt_name>@<version>"``.
     generation_version: str = ""
+    #: Level auto-resolved from the learner's attempt history for the
+    #: first requested topic; empty when the request pinned its own level.
+    resolved_level: str = ""
 
 
 class LearningMode(str, Enum):

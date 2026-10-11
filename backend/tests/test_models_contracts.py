@@ -16,13 +16,21 @@ from app.schemas.models import (
 
 
 class ModelContractTests(unittest.TestCase):
-    def test_generate_questions_level_defaults_to_mid(self):
+    def test_generate_questions_level_defaults_to_auto(self):
         req = GenerateQuestionsRequest(topic_id="backend-core")
-        self.assertEqual(req.level, "mid")
+        self.assertIsNone(req.level)
 
-    def test_generate_quiz_level_defaults_to_mid(self):
+    def test_generate_questions_level_accepts_the_auto_opt_in(self):
+        req = GenerateQuestionsRequest(topic_id="backend-core", level="auto")
+        self.assertEqual(req.level, "auto")
+
+    def test_generate_quiz_level_defaults_to_auto(self):
         req = GenerateQuizRequest(topic_ids=["backend-core"])
-        self.assertEqual(req.level, "mid")
+        self.assertIsNone(req.level)
+
+    def test_generate_quiz_level_accepts_the_auto_opt_in(self):
+        req = GenerateQuizRequest(topic_ids=["backend-core"], level="auto")
+        self.assertEqual(req.level, "auto")
 
     def test_custom_topic_target_sections_defaults_to_none(self):
         req = CreateCustomTopicRequest(topic="Java")
