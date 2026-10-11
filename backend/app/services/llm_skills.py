@@ -4,7 +4,10 @@ The agentic LLM draws on three skill domains to raise the quality of
 generated questions, evaluations, and curricula:
 
 * **Technical skills** — problem-solving patterns, algorithmic thinking,
-  data-structure and system-design fundamentals.
+  data-structure and system-design fundamentals, plus per-track packs
+  (backend, frontend, system design, AI stack) so a learner practising
+  a stack topic is assessed against that stack's vocabulary rather
+  than data-structures-and-algorithms patterns.
 * **Interview skills** — communication frameworks, trick-question
   patterns, and behavioral strategies a real interviewer probes.
 * **Educational skills** — pedagogy: Socratic questioning, scaffolding,
@@ -160,6 +163,295 @@ TECHNICAL_SKILLS: dict[str, dict[str, Any]] = {
         "common_mistakes": ["jumping to components before estimating load", "ignoring the consistency/availability tradeoff", "not stating assumptions"],
         "interview_tricks": ["What are the QPS and storage estimates?", "Where is the bottleneck?", "What happens on failure?"],
         "complexity": "N/A — tradeoff-driven",
+    },
+}
+
+# ── Per-track technical skill packs ───────────────────────────
+# Same record shape as ``TECHNICAL_SKILLS`` (name, category,
+# description, patterns, common_mistakes, interview_tricks,
+# complexity). One pack per interview track, so a session whose topic
+# is backend, frontend, system design or the AI stack reasons with the
+# vocabulary of that stack instead of DSA patterns.
+
+BACKEND_SKILLS: dict[str, dict[str, Any]] = {
+    "http-semantics": {
+        "name": "HTTP Semantics & Methods",
+        "category": "protocols",
+        "description": "Use methods, status codes, and headers with their safety and idempotency semantics, and reason about how client, proxies, and server share state.",
+        "patterns": ["map an operation to GET/POST/PUT/PATCH/DELETE with the right safety", "choose 200 vs 201 vs 202 vs 204 by the effect produced", "validate a cached response with ETag/If-None-Match and 304", "set Cache-Control max-age for a cacheable resource", "propagate a request id across services"],
+        "common_mistakes": ["using POST for a read because a body is easier", "returning 200 with an error body instead of a 4xx/5xx", "treating PUT as non-idempotent", "assuming a 3xx is always followed automatically"],
+        "interview_tricks": ["Which methods are safe and idempotent, and why does retry depend on it?", "Where does the cache live and who is allowed to invalidate it?", "How would you make a retried POST safe?"],
+        "complexity": "N/A — semantics-driven",
+    },
+    "api-contract-design": {
+        "name": "API Contract Design",
+        "category": "api-design",
+        "description": "Design resource-oriented endpoints with stable schemas, explicit versioning, predictable pagination, and a consistent error envelope.",
+        "patterns": ["model collections and sub-resources as nested paths", "paginate with cursor/limit instead of offset", "return a typed error envelope with a machine-readable code", "version a breaking change behind a new path or media type", "document partial failure for batch endpoints"],
+        "common_mistakes": ["exposing internal table names as URLs", "returning 500 for a client mistake", "leaking nullable fields whose meaning is undefined", "adding a required field to an existing response without a version"],
+        "interview_tricks": ["How do you evolve this contract without breaking existing clients?", "What does a caller do with a 429, and what should the response say?", "Where would you draw the boundary between two services here?"],
+        "complexity": "N/A — tradeoff-driven",
+    },
+    "data-modeling-persistence": {
+        "name": "Data Modeling & Persistence",
+        "category": "data",
+        "description": "Choose entities, keys, and indexes for the access pattern; decide between normalised relational rows and embedded documents deliberately.",
+        "patterns": ["normalise to the third normal form then denormalise a hot read path", "add a covering/composite index for a filter-plus-sort query", "use a junction table for many-to-many", "enforce invariants with constraints not application code", "plan a migration that is online and reversible"],
+        "common_mistakes": ["indexing every column", "storing computed state that can go stale", "using an autoincrement key where a natural key is required", "forgetting the nullability and default of a new column"],
+        "interview_tricks": ["Which query is this model optimised for, and which one does it hurt?", "How do you add a NOT NULL column to a billion-row table?", "What is the isolation level this code assumes?"],
+        "complexity": "O(log n) reads with a B-tree index; O(1) by primary key",
+    },
+    "authn-authz": {
+        "name": "Authentication & Authorization",
+        "category": "security",
+        "description": "Verify identity with sessions or tokens, then authorise every action with object-level checks that do not depend on the client hiding UI.",
+        "patterns": ["issue short-lived access tokens with a rotating refresh token", "authorise per object, not per endpoint", "store passwords with a slow salted hash", "scope machine-to-machine calls with a least-privilege token", "audit privilege changes"],
+        "common_mistakes": ["trusting a user id from the request body", "storing a session token in a predictable place", "checking authorisation only in the frontend", "rolling your own crypto"],
+        "interview_tricks": ["Where is the authorisation decision made and who can bypass it?", "What happens when a token is stolen — how do you revoke it?", "How would you model roles that vary per tenant?"],
+        "complexity": "O(1) per check with an indexed policy/role lookup",
+    },
+    "observability": {
+        "name": "Observability & Operability",
+        "category": "operability",
+        "description": "Instrument logs, metrics, and traces with stable dimensions so an incident can be localised without a redeploy.",
+        "patterns": ["emit structured logs with a correlation id", "track p50/p95/p99 latency and error ratio per endpoint", "add a trace span across an outbound call", "define an SLO with an error budget", "alert on symptoms, page on causes"],
+        "common_mistakes": ["logging secrets or whole request bodies", "using an unbounded label cardinality that explodes metrics", "alerting on CPU instead of user-visible latency", "tracing synchronously in a hot path"],
+        "interview_tricks": ["Which single metric tells you this is broken before users do?", "How do you debug a request that only fails in production?", "What would you put on the dashboards for this service?"],
+        "complexity": "N/A — operability-driven",
+    },
+    "concurrency-async": {
+        "name": "Concurrency & Async Execution",
+        "category": "concurrency",
+        "description": "Share mutable state safely with locks, queues, or isolation, and keep blocking work off the event loop.",
+        "patterns": ["protect a critical section with a lock sized to the invariant", "use a connection/worker pool instead of unbounded threads", "make an update idempotent so a retry is safe", "serialise conflicting work through a queue", "detect and break a deadlock cycle"],
+        "common_mistakes": ["holding a lock across an await or an I/O call", "read-modify-write without a compare-and-set", "blocking the event loop with CPU work", "assuming a thread-safe library makes the composition safe"],
+        "interview_tricks": ["What is the invariant the lock protects, and what breaks without it?", "Where is the race window in this read-modify-write?", "How does this behave under 10x concurrency?"],
+        "complexity": "O(1) amortised per op; contention bounded by critical-section length",
+    },
+    "testing-strategy": {
+        "name": "Testing Strategy",
+        "category": "quality",
+        "description": "Choose the cheapest test that can catch each defect: unit for logic, integration for contracts, contract tests across service boundaries, and a few end-to-end journeys.",
+        "patterns": ["test the behaviour, not the implementation", "stub at the boundary you own", "use a real database for a migration or transaction test", "pin a contract with a schema check", "make the suite deterministic with fixed clocks and seeds"],
+        "common_mistakes": ["mocking the code under test", "asserting on log lines instead of outcomes", "a suite that needs a specific run order", "chasing coverage instead of risk"],
+        "interview_tricks": ["Which failure would this test catch that a unit test cannot?", "How do you test a retry path without sleeping?", "What is your strategy for a flaky test you cannot fix today?"],
+        "complexity": "N/A — risk-driven",
+    },
+    "caching-databases": {
+        "name": "Caching & Database Access Patterns",
+        "category": "data",
+        "description": "Put a cache in front of a hot path with an explicit invalidation rule, and keep connection and transaction boundaries tight.",
+        "patterns": ["cache-aside with a TTL plus explicit invalidation", "use a write-through cache for read-heavy counters", "batch and index the query behind a N+1", "use a read replica for stale-tolerant reads", "set a statement and transaction timeout"],
+        "common_mistakes": ["cache without an invalidation or eviction story", "caching per-user secrets", "letting a transaction span an external call", "assuming a replica read is immediately current"],
+        "interview_tricks": ["What is the staleness budget, and what makes this value incorrect?", "How do you handle a cache stampede?", "When would you drop the cache entirely?"],
+        "complexity": "O(1) hit; miss costs the origin query, usually O(log n) indexed",
+    },
+}
+
+FRONTEND_SKILLS: dict[str, dict[str, Any]] = {
+    "react-state-and-rendering": {
+        "name": "React State & Rendering",
+        "category": "frontend",
+        "description": "Separate server cache, URL state, and local UI state, and derive values instead of duplicating them, so renders stay predictable.",
+        "patterns": ["lift or colocate state to the closest common owner", "derive a value during render instead of mirroring it in state", "key a list by a stable id, not the index", "memoise only a measured expensive subtree", "batch related updates"],
+        "common_mistakes": ["state that duplicates props", "mutating state in place", "an effect that copies props into state", "a key that changes on every render"],
+        "interview_tricks": ["Why did this component render twice, and which render is wasted?", "Where should this value live: server cache, URL, or local state?", "What happens when two updates land in the same tick?"],
+        "complexity": "O(n) per render of the affected subtree",
+    },
+    "component-architecture": {
+        "name": "Component Architecture",
+        "category": "frontend",
+        "description": "Compose small presentational components with containers that own data access, and keep prop surfaces explicit.",
+        "patterns": ["split container from presentational components", "compose with children and slots instead of prop drilling", "extract a hook for reusable stateful logic", "co-locate a component with its styles and tests"],
+        "common_mistakes": ["a god component that fetches and renders and validates", "boolean props that select a whole different UI", "a context that re-renders the whole tree on every change"],
+        "interview_tricks": ["Which part of this component would you reuse elsewhere, and how?", "What is the public API of this component and what does it not know?", "How would you add a second variant without another prop?"],
+        "complexity": "N/A — structure-driven",
+    },
+    "data-fetching-caching": {
+        "name": "Data Fetching & Caching",
+        "category": "frontend",
+        "description": "Own server state with a cache keyed by request, so loading, refetching, and invalidation are explicit and race-free.",
+        "patterns": ["key the cache by the real request identity", "invalidate or update the cache after a mutation", "cancel or ignore a stale response", "prefetch on hover or focus", "optimistic update with a rollback"],
+        "common_mistakes": ["fetching in an effect without a cleanup, so an old response wins", "refetching on every mount with no invalidation", "storing server data in component state", "blocking the whole page on one request"],
+        "interview_tricks": ["What happens if the response arrives after the user navigates away?", "How do you keep this list fresh without polling?", "Where does the cache live and who invalidates it?"],
+        "complexity": "O(1) cache lookup; render cost O(n) of the result set",
+    },
+    "performance-web-vitals": {
+        "name": "Performance & Web Vitals",
+        "category": "frontend",
+        "description": "Move work off the critical path: cut the main-thread and payload cost that decides LCP, INP, and CLS.",
+        "patterns": ["code-split a route or a heavy widget", "lazy-load below-the-fold media", "preload the hero asset", "defer a non-critical third-party script", "reserve space to avoid layout shift"],
+        "common_mistakes": ["measuring on a throttled dev build", "shipping a whole icon library for three icons", "a layout shift from an un-sized image or late font", "a long task that blocks the first interaction"],
+        "interview_tricks": ["Which metric would you improve first here, and how would you measure it in the field?", "What is on the critical path to first paint?", "What changed if INP regressed after that feature?"],
+        "complexity": "Budget-driven: LCP < 2.5s, INP < 200ms, CLS < 0.1",
+    },
+    "accessibility": {
+        "name": "Accessibility",
+        "category": "frontend",
+        "description": "Expose correct semantics, names, and focus order so the UI is operable by keyboard and assistive technology.",
+        "patterns": ["use a native control before a div", "label every input and name every icon button", "manage focus in a modal or route change", "respect prefers-reduced-motion", "check contrast and target size"],
+        "common_mistakes": ["a custom widget with no keyboard support", "an aria-role that fights the native semantics", "removing the focus ring", "announcing a live region that never changes"],
+        "interview_tricks": ["How would you complete this flow with only a keyboard?", "What does a screen reader announce for this button?", "Which WCAG rule would a user complain about first?"],
+        "complexity": "N/A — compliance-driven (WCAG 2.2 AA)",
+    },
+    "css-layout-systems": {
+        "name": "CSS & Layout Systems",
+        "category": "frontend",
+        "description": "Build layouts from the browser's own model — normal flow, flex, grid, and container queries — with tokens instead of ad-hoc values.",
+        "patterns": ["grid for the page, flex for the component", "use clamp/container queries over media-query breakpoints", "express spacing and colour as design tokens", "scope a component's styles"],
+        "common_mistakes": ["absolute positioning for whole layouts", "magic pixel values that break at a new viewport", "specificity escalation with nested selectors", "a fixed height that clips translated content"],
+        "interview_tricks": ["How does this layout degrade at 320px and at 2560px?", "Why does the container overflow and what is the cheapest fix?", "What is the cascade order here?"],
+        "complexity": "N/A — layout-driven",
+    },
+    "typescript-type-design": {
+        "name": "TypeScript Type Design",
+        "category": "frontend",
+        "description": "Model the domain so illegal states cannot be constructed, and let the compiler carry the invariants across component boundaries.",
+        "patterns": ["discriminated unions over optional flags", "brand or template types for ids and units", "narrow at the boundary, trust afterwards", "share the API type with the backend contract", "exhaustive switch on a union"],
+        "common_mistakes": ["any at a boundary that then spreads", "a type that asserts instead of verifying", "overloaded generics nobody can read", "duplicating a type the API already owns"],
+        "interview_tricks": ["What state can this type represent that the domain cannot?", "Where does the unknown become a known?", "How would you make the compiler reject this call?"],
+        "complexity": "N/A — type-driven (compile-time cost only)",
+    },
+    "testing-ui": {
+        "name": "UI Testing",
+        "category": "frontend",
+        "description": "Test what a user can observe — roles, text, and behaviour — instead of implementation details that refactors break.",
+        "patterns": ["query by role and accessible name", "fire user events, not internal calls", "await an appearance assertion rather than a timeout", "mock at the network boundary", "test keyboard and focus behaviour"],
+        "common_mistakes": ["selecting by class name or snapshot text", "waiting on a fixed sleep", "mocking the component's own hook", "asserting on a store's internal shape"],
+        "interview_tricks": ["What would break if this markup changed but the behaviour did not?", "How do you test a flow that depends on a slow request?", "Which test would catch a regression a snapshot cannot?"],
+        "complexity": "N/A — risk-driven",
+    },
+}
+
+SYSTEM_DESIGN_SKILLS: dict[str, dict[str, Any]] = {
+    "load-estimation": {
+        "name": "Load Estimation",
+        "category": "system-design",
+        "description": "Turn a product description into QPS, storage, and bandwidth numbers before naming any component.",
+        "patterns": ["state assumptions then round to powers of ten", "derive QPS from DAU and actions per user", "size storage from write rate times retention", "apply a peak-to-average factor", "sanity-check the result against a known system"],
+        "common_mistakes": ["skipping assumptions and jumping to a component", "ignoring the read/write ratio", "forgetting replication factor in storage", "designing for the average, not the peak"],
+        "interview_tricks": ["What are your QPS and storage estimates, and what assumption drives them?", "How does this change at 10x the users you assumed?", "Where does the peak come from — time of day or an event?"],
+        "complexity": "N/A — estimation-driven",
+    },
+    "caching-strategies": {
+        "name": "Caching Strategies",
+        "category": "system-design",
+        "description": "Place a cache where it removes the most load, with a policy for staleness, eviction, and failure.",
+        "patterns": ["cache-aside with TTL plus explicit invalidation", "write-through for read-heavy counters", "CDN or edge cache for immutable assets", "request coalescing to stop a stampede", "negative caching for misses"],
+        "common_mistakes": ["no invalidation or eviction story", "caching personalised data on a shared key", "a cache that fails open with no origin protection", "measuring hit rate while the origin still saturates"],
+        "interview_tricks": ["What is the staleness budget for this value?", "What happens to the database when the cache goes cold?", "How would you detect that the cache is silently wrong?"],
+        "complexity": "O(1) hit; miss pays the origin cost",
+    },
+    "database-scaling": {
+        "name": "Database Scaling",
+        "category": "system-design",
+        "description": "Scale reads and writes with replicas, sharding, or partitioning, and keep the key choice and joins honest.",
+        "patterns": ["read replicas for stale-tolerant reads", "partition by a key that spreads load", "shard by tenant or hash with a resharding plan", "move a hot counter to an approximate sketch", "archive cold rows to cheaper storage"],
+        "common_mistakes": ["a shard key that creates a hotspot", "cross-shard joins and transactions", "replication lag treated as an error", "scaling up forever with no exit plan"],
+        "interview_tricks": ["What is your shard key and what breaks when it is uneven?", "How do you reshard without downtime?", "Which query cannot be served by this design?"],
+        "complexity": "O(log n) indexed reads; shards scale linearly in count",
+    },
+    "consistency-tradeoffs": {
+        "name": "Consistency Tradeoffs",
+        "category": "system-design",
+        "description": "Choose the consistency level the feature actually needs, and make the visible anomalies explicit.",
+        "patterns": ["strong consistency for money, eventual for feeds", "linearisable writes via a single leader or consensus", "read-your-writes with a session pin", "idempotent consumers for at-least-once delivery", "a saga with compensating actions"],
+        "common_mistakes": ["claiming consistency without proving the failure case", "ignoring that a clock read is not an oracle", "a distributed transaction with no compensation path", "assuming a quorum read implies a quorum write"],
+        "interview_tricks": ["What does a user see during a partition here?", "Which invariant would you never relax, and why?", "How do you reconcile two divergent writes?"],
+        "complexity": "Consensus adds a round trip: O(1) ops, latency-bound",
+    },
+    "queues-backpressure": {
+        "name": "Queues & Backpressure",
+        "category": "system-design",
+        "description": "Decouple producers and consumers with a durable queue, and bound the in-flight work so a slow consumer cannot take the system down.",
+        "patterns": ["durable queue with an explicit DLQ", "bounded concurrency on the consumer", "retry with jittered backoff and an idempotency key", "shed load at the edge when full", "drain and replay after an incident"],
+        "common_mistakes": ["an unbounded queue that hides failure until it is fatal", "at-least-once delivery without idempotency", "a retry storm with no backoff", "no visibility into queue depth or consumer lag"],
+        "interview_tricks": ["What happens when the consumer falls an hour behind?", "How do you make a redelivered message safe?", "Where do you drop load first, and what does the user see?"],
+        "complexity": "O(1) enqueue; throughput bounded by consumer concurrency",
+    },
+    "infrastructure-as-code": {
+        "name": "Infrastructure as Code",
+        "category": "system-design",
+        "description": "Describe every environment declaratively, review it like code, and roll out changes gradually.",
+        "patterns": ["one module per environment with shared variables", "state stored remotely with locking", "plan/apply with a human review", "immutable images over in-place mutation", "drift detection against the declared state"],
+        "common_mistakes": ["hand edits that drift from the declared state", "secrets in the repository or the state file", "an apply that cannot be rolled back", "a single state file everyone writes to at once"],
+        "interview_tricks": ["How do you promote this change from staging to production?", "What is your rollback if the apply half-succeeds?", "How do you prevent drift between environments?"],
+        "complexity": "N/A — process-driven",
+    },
+    "kubernetes-orchestration": {
+        "name": "Kubernetes Orchestration",
+        "category": "system-design",
+        "description": "Run stateless workloads as deployments behind a service, with probes, limits, and a rollout strategy that never drops the floor.",
+        "patterns": ["deployment plus service for stateless tiers", "readiness vs liveness probes with distinct purposes", "CPU/memory requests and limits per container", "rolling update with maxUnavailable and maxSurge", "HPA on the metric that is actually saturated"],
+        "common_mistakes": ["a liveness probe that restarts a slow-but-healthy pod", "no resource limits so one pod starves the node", "state in the container filesystem", "a single replica behind a PDB that allows zero"],
+        "interview_tricks": ["Why did this pod get OOM-killed and how would you size it?", "What happens to in-flight requests during a rollout?", "How do you drain a node without dropping traffic?"],
+        "complexity": "O(1) control loop per object; scheduling cost O(nodes) per pod",
+    },
+    "cloud-service-selection": {
+        "name": "Cloud Service Selection",
+        "category": "system-design",
+        "description": "Pick the managed service that removes the most undifferentiated work, and state what you give up for it.",
+        "patterns": ["managed relational for transactional state", "object storage plus a queue for async work", "a managed cache in front of a hot read", "serverless for spiky low-duty-cycle jobs", "a managed observability stack instead of self-hosted"],
+        "common_mistakes": ["self-hosting a database to avoid a vendor", "ignoring egress and request costs", "choosing a queue with no DLQ or delay", "a vendor default that silently imposes a quota"],
+        "interview_tricks": ["What does this managed service cost you in control?", "Which part of this pipeline would you keep self-hosted?", "What is the exit path if you need to leave this vendor?"],
+        "complexity": "N/A — selection-driven",
+    },
+}
+
+AI_STACK_SKILLS: dict[str, dict[str, Any]] = {
+    "prompt-design": {
+        "name": "Prompt Design",
+        "category": "ai-stack",
+        "description": "Write an instruction with an explicit contract, role, constraints, and output schema so the model's degrees of freedom are closed.",
+        "patterns": ["state the task, the audience, and the output schema", "show one worked example of the required shape", "bound the answer length and allowed values", "put untrusted content in a marked block with an ignore-instructions rule", "iterate against a fixed eval set, not one lucky call"],
+        "common_mistakes": ["a vague verb with no accept/reject criteria", "an output schema the validator then rejects", "instructions buried under untrusted text", "tuning the prompt against a single anecdote"],
+        "interview_tricks": ["What makes this prompt deterministic, and what is still random?", "How would you handle a model that returns prose when JSON was required?", "What is your eval for this prompt and what is its pass bar?"],
+        "complexity": "N/A — contract-driven",
+    },
+    "rag-retrieval": {
+        "name": "RAG & Retrieval",
+        "category": "ai-stack",
+        "description": "Retrieve the right chunks, ground the answer in them, and make the failure modes (miss, wrong chunk, stale index) visible.",
+        "patterns": ["chunk by semantic unit with overlap", "hybrid search: dense plus lexical", "rerank the top-k before answering", "cite the source chunk for each claim", "evaluate retrieval separately from generation"],
+        "common_mistakes": ["chunking mid-sentence so evidence is split", "top-k with no relevance threshold, so a miss still answers", "no citation, so a hallucination is indistinguishable", "index that is never refreshed after a source edit"],
+        "interview_tricks": ["What happens when no chunk is relevant — do you still answer?", "How do you measure retrieval quality without reading every result?", "How would you keep the index fresh and the cost bounded?"],
+        "complexity": "O(log n) approximate search; cost dominated by rerank",
+    },
+    "agent-tool-use": {
+        "name": "Agent & Tool Use",
+        "category": "ai-stack",
+        "description": "Give a model a small, typed tool set with a stop condition, and keep the loop bounded and auditable.",
+        "patterns": ["bound the loop with a step and time budget", "typed tool schemas with narrow arguments", "validate arguments before the side effect", "one tool per intent, no grab-bag endpoint", "log every step for replay"],
+        "common_mistakes": ["tools that overlap so the model picks randomly", "a side-effecting tool with no confirmation", "an unbounded loop that retries forever", "no trace, so a bad outcome cannot be explained"],
+        "interview_tricks": ["When does this agent stop, and what does it do when it is wrong?", "How do you keep a tool call from reaching production by accident?", "What would you log to debug this run after the fact?"],
+        "complexity": "O(steps x tool cost), bounded by an explicit budget",
+    },
+    "evaluation-metrics": {
+        "name": "Evaluation & Metrics",
+        "category": "ai-stack",
+        "description": "Decide with an offline eval set and a rubric, then watch a live metric that can regress.",
+        "patterns": ["a golden set that covers the failure classes you care about", "deterministic checks for schema and grounding", "LLM-as-judge with a rubric and a human spot check", "a held-out regression set per release", "track cost and latency beside quality"],
+        "common_mistakes": ["judging with the same prompt you tuned on", "a single accuracy number that hides the bad class", "no baseline, so a change cannot be shown to help", "evaluating on the training examples"],
+        "interview_tricks": ["How would you know this change made the system better?", "Which failure mode does your metric miss?", "What is the cheapest eval that would have caught this regression?"],
+        "complexity": "N/A — measurement-driven",
+    },
+    "serving-cost-optimization": {
+        "name": "Serving & Cost Optimization",
+        "category": "ai-stack",
+        "description": "Serve the model behind a path that keeps latency and spend predictable as traffic varies.",
+        "patterns": ["route by task size to a cheaper model", "cache deterministic or repeated responses", "batch requests where latency allows", "cap the output token budget per call", "track cost per request and per user"],
+        "common_mistakes": ["one model for every task", "no cap on context, so every call pays for a huge prompt", "ignoring the p95 latency of the fallback path", "cost dashboards that arrive a month late"],
+        "interview_tricks": ["What is the cost per request and what dominates it?", "How do you keep p95 latency stable when traffic triples?", "Where would you cache without making answers stale?"],
+        "complexity": "Latency O(computed tokens); cost O(input + output tokens)",
+    },
+    "guardrails-safety": {
+        "name": "Guardrails & Safety",
+        "category": "ai-stack",
+        "description": "Constrain inputs, tool calls, and outputs, and fail closed when a constraint is violated.",
+        "patterns": ["classify the request before it reaches the model", "validate and escape anything before execution", "redact PII and secrets from prompts and logs", "refuse with a fixed, tested message", "keep an audit trail of blocked requests"],
+        "common_mistakes": ["filtering only the output, never the input", "a prompt-level rule with no enforcement", "secrets or PII in the trace log", "a jailbreak test that only checks one phrasing"],
+        "interview_tricks": ["Where does an untrusted instruction stop being data?", "What happens if the classifier fails — does the system fail open?", "How would you test this guard against a novel attack?"],
+        "complexity": "O(1) per request; cost is the classifier plus the base call",
     },
 }
 
@@ -331,8 +623,13 @@ def render_skill_block(title: str, skill_ids: Iterable[str], source: dict[str, d
     return f"{title}:\n" + "\n".join(lines)
 
 
-def technical_skill_block(skill_ids: Iterable[str]) -> str:
-    return render_skill_block("Technical & coding skills to apply and assess", skill_ids, TECHNICAL_SKILLS)
+def technical_skill_block(skill_ids: Iterable[str], track: str = "") -> str:
+    """Render the technical block for ``track`` (DSA pack when unknown)."""
+    return render_skill_block(
+        "Technical & coding skills to apply and assess",
+        skill_ids,
+        track_technical_skills(track),
+    )
 
 
 def interview_skill_block(skill_ids: Iterable[str]) -> str:
@@ -386,22 +683,125 @@ _CORE_EDUCATIONAL: tuple[str, ...] = (
     "retrieval-practice", "feedback-sandwich", "metacognition",
 )
 
+#: Per-track technical skill packs, keyed by the canonical track id
+#: used across the topic catalogue and interview sessions.
+_TRACK_SKILLS: dict[str, dict[str, dict[str, Any]]] = {
+    "backend": BACKEND_SKILLS,
+    "frontend": FRONTEND_SKILLS,
+    "system_design": SYSTEM_DESIGN_SKILLS,
+    "ai_stack": AI_STACK_SKILLS,
+}
+
+#: Per-track technical skills by level, mirroring ``_LEVEL_TECHNICAL``.
+#: A track that is absent here (or an unknown track) falls back to the
+#: DSA pack, which the problem-solving topic depends on.
+_TRACK_TECHNICAL: dict[str, dict[str, tuple[str, ...]]] = {
+    "backend": {
+        "junior": (
+            "http-semantics", "api-contract-design",
+            "data-modeling-persistence", "testing-strategy",
+        ),
+        "mid": (
+            "api-contract-design", "data-modeling-persistence",
+            "authn-authz", "concurrency-async", "caching-databases",
+        ),
+        "senior": (
+            "concurrency-async", "authn-authz", "observability",
+            "caching-databases", "data-modeling-persistence", "testing-strategy",
+        ),
+    },
+    "frontend": {
+        "junior": (
+            "react-state-and-rendering", "component-architecture",
+            "css-layout-systems", "accessibility",
+        ),
+        "mid": (
+            "react-state-and-rendering", "component-architecture",
+            "data-fetching-caching", "css-layout-systems", "accessibility",
+        ),
+        "senior": (
+            "react-state-and-rendering", "performance-web-vitals",
+            "typescript-type-design", "data-fetching-caching",
+            "testing-ui", "accessibility",
+        ),
+    },
+    "system_design": {
+        "junior": (
+            "load-estimation", "caching-strategies",
+            "cloud-service-selection", "database-scaling",
+        ),
+        "mid": (
+            "load-estimation", "caching-strategies", "database-scaling",
+            "consistency-tradeoffs", "kubernetes-orchestration",
+        ),
+        "senior": (
+            "consistency-tradeoffs", "database-scaling",
+            "queues-backpressure", "kubernetes-orchestration",
+            "infrastructure-as-code", "cloud-service-selection",
+        ),
+    },
+    "ai_stack": {
+        "junior": (
+            "prompt-design", "evaluation-metrics", "guardrails-safety",
+        ),
+        "mid": (
+            "prompt-design", "rag-retrieval", "evaluation-metrics",
+            "agent-tool-use", "guardrails-safety",
+        ),
+        "senior": (
+            "agent-tool-use", "rag-retrieval", "evaluation-metrics",
+            "serving-cost-optimization", "guardrails-safety",
+        ),
+    },
+}
+
+
+def normalise_track(track: str | None) -> str:
+    """Canonicalise a track id, or ``""`` when it names no known pack.
+
+    Mirrors the topic catalogue's normalisation (case, ``-``/``_``,
+    whitespace) so a track that arrives as ``"System-Design"`` or
+    ``"ai stack"`` still selects its pack.
+    """
+    raw = str(track or "").strip().lower().replace("-", "_").replace(" ", "_")
+    while "__" in raw:
+        raw = raw.replace("__", "_")
+    return raw if raw in _TRACK_SKILLS else ""
+
+
+def track_technical_skills(track: str | None) -> dict[str, dict[str, Any]]:
+    """Return the technical pack for ``track`` (DSA pack when unknown)."""
+    return _TRACK_SKILLS.get(normalise_track(track), TECHNICAL_SKILLS)
+
+
+def _level_key(level: str) -> str:
+    level_key = str(level or "").strip().lower()
+    if level_key not in _LEVEL_TECHNICAL:
+        level_key = "mid"
+    return level_key
+
 
 def skills_for_session(
     *,
     level: str = "mid",
     session_type: str = "general",
+    track: str = "",
     include_educational: bool = True,
 ) -> dict[str, list[str]]:
-    """Select the skill ids relevant to a session's level and type."""
-    level_key = str(level or "").strip().lower()
-    if level_key not in _LEVEL_TECHNICAL:
-        level_key = "mid"
+    """Select the skill ids relevant to a session's level and type.
+
+    ``track`` selects the per-track technical pack (backend, frontend,
+    system design, AI stack). An empty or unknown track keeps the DSA
+    selection, which the problem-solving topic relies on.
+    """
+    level_key = _level_key(level)
     session_key = str(session_type or "").strip().lower()
     if session_key not in _SESSION_INTERVIEW:
         session_key = "general"
+    track_levels = _TRACK_TECHNICAL.get(normalise_track(track))
+    technical = list(track_levels[level_key]) if track_levels else list(_LEVEL_TECHNICAL[level_key])
     result: dict[str, list[str]] = {
-        "technical": list(_LEVEL_TECHNICAL[level_key]),
+        "technical": technical,
         "interview": list(_SESSION_INTERVIEW[session_key]),
     }
     if include_educational:
@@ -413,14 +813,18 @@ def skill_context_block(
     *,
     level: str = "mid",
     session_type: str = "general",
+    track: str = "",
     include_educational: bool = True,
 ) -> str:
     """Render the full skill context for a session as one fenced block."""
     selected = skills_for_session(
-        level=level, session_type=session_type, include_educational=include_educational
+        level=level,
+        session_type=session_type,
+        track=track,
+        include_educational=include_educational,
     )
     parts = [
-        technical_skill_block(selected["technical"]),
+        technical_skill_block(selected["technical"], track),
         interview_skill_block(selected["interview"]),
     ]
     if include_educational:

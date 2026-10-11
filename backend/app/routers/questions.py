@@ -393,6 +393,7 @@ async def _resolve_quiz_topic(*, topic_id: str, user: dict, store: LearningStore
         "response_detail": ai_settings.get("response_detail", "concise"),
         "preferred_language": ai_settings.get("preferred_language", ""),
         "requires_programming": bool(ai_settings.get("requires_programming")),
+        "track": topic.track,
     }
 
 
@@ -519,6 +520,7 @@ async def generate_questions(
         requires_programming=bool(ai_settings.get("requires_programming")),
         prior_progress=prior_progress,
         additional_existing_questions=additional_existing,
+        topic_track=topic.track,
     )
     await _record_generated_questions(
         user_id=user["user"],
@@ -589,6 +591,7 @@ async def generate_questions_v2(
         requires_programming=bool(ai_settings.get("requires_programming")),
         prior_progress=prior_progress,
         additional_existing_questions=additional_existing,
+        topic_track=topic.track,
     )
     await _record_generated_questions(
         user_id=user["user"],
@@ -663,6 +666,7 @@ async def generate_questions_v2_stream(
             requires_programming=bool(ai_settings.get("requires_programming")),
             prior_progress=prior_progress,
             additional_existing_questions=additional_existing,
+            topic_track=topic.track,
         ):
             if event.get("type") == "question":
                 captured.append(event.get("question") or {})

@@ -599,6 +599,7 @@ async def generate_cards(
     source_type = body.source_type.value
     topic_title = ""
     doc_content = ""
+    topic: TopicDetail | None = None
     section_title = body.section_title
     section_content: str | None = None
 
@@ -640,6 +641,8 @@ async def generate_cards(
                     status_code=404, detail="section not found in topic"
                 )
 
+    topic_track = topic.track if topic is not None else ""
+
     # Existing card fronts feed the no-repeat uniqueness block.
     existing = await store.run_async(
         store.list_card_texts, user_id=user["user"], deck_id=deck_id
@@ -672,6 +675,8 @@ async def generate_cards(
         "existing_cards": existing_fronts,
         "llm_config": body.llm_config,
         "user_identity": user,
+        "level": body.level,
+        "topic_track": topic_track,
     }
     asyncio.create_task(_run_generation_job(job_id, generator, kwargs))
     return GenerateCardsResponse(job_id=job_id, status="queued")

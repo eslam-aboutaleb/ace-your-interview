@@ -15,13 +15,18 @@ from app.dependencies import require_auth
 from app.routers import cards as cards_router_module
 from app.services.card_store import CardStore
 from app.services.doc_parser import DocParser
+from app.services.document_store import DocumentStore
 from app.services.learning_store import LearningStore
 
 
 class FakeLLM:
     """Returns flashcards grounded in the custom topic."""
 
+    def __init__(self):
+        self.prompts: list[str] = []
+
     async def completion(self, prompt, llm_config=None, user_identity=None, **kwargs):
+        self.prompts.append(prompt)
         system = str(kwargs.get("system") or "")
         if "flashcards" in system.lower():
             payload = [
@@ -53,6 +58,7 @@ class CardsRouterContractTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)
+        self.llm = FakeLLM()
         handbook = os.path.join(self.tempdir.name, "owner-handbook")
         os.makedirs(handbook, exist_ok=True)
         with open(os.path.join(handbook, "01-static.md"), "w", encoding="utf-8") as f:
@@ -96,10 +102,10 @@ More context for generation.
         cards_router_module.init(
             card_store=self.card_store,
             learning_store=self.learning_store,
-            llm_client=FakeLLM(),
+            llm_client=self.llm,
             parser=self.parser,
             mcp_gateway=None,
-            document_store=None,
+            document_store=DocumentStore(os.path.join(self.tempdir.name, "docs.db")),
             embedding_client=None,
         )
         self.app = FastAPI()
@@ -487,6 +493,61 @@ More context for generation.
         )
         # The static topic resolves from the temp curriculum.
         self.assertIn(res.status_code, (202, 404))
+
+    # ── Track-aware skill packs ─────────────────
+    def _run_job(self, payload):
+        res = self.client.post(
+            f"/api/decks/{self._create_deck()['deck_id']}/generate",
+            json=payload,
+        )
+        self.assertEqual(res.status_code, 202, res.text)
+        job_id = res.json()["job_id"]
+        for _ in range(50):
+            job = self.client.get(f"/api/decks/generate/jobs/{job_id}").json()
+            if job["status"] in ("done", "failed"):
+                break
+            time.sleep(0.05)
+        return job
+
+    def test_topic_track_selects_the_card_skill_pack(self):
+        job = self._run_job(
+            {
+                "source_type": "topic",
+                "topic_id": "custom-java",
+                "count": 2,
+            }
+        )
+        self.assertEqual(job["status"], "done", job.get("error"))
+        # The custom topic is a backend-track topic, so its skill pack —
+        # not the DSA pack — is injected into the card prompt.
+        self.assertTrue(self.llm.prompts)
+        self.assertIn("API Contract Design", self.llm.prompts[0])
+        self.assertNotIn("Stacks & Monotonic Variants", self.llm.prompts[0])
+
+    def test_document_source_generation_has_no_track_pack(self):
+        store = DocumentStore(os.path.join(self.tempdir.name, "docs.db"))
+        document = store.create_document("alice", "notes.txt", "text/plain", "Notes")
+        store.persist_chunks(
+            "alice",
+            document["document_id"],
+            [
+                "Authentication verifies the caller identity before access "
+                "is granted."
+            ],
+            [[1.0, 0.0]],
+        )
+        self.addCleanup(store._executor.shutdown, wait=False)
+        job = self._run_job(
+            {
+                "source_type": "document",
+                "document_id": document["document_id"],
+                "count": 2,
+            }
+        )
+        self.assertEqual(job["status"], "done", job.get("error"))
+        # A document has no topic track, so the card skill section stays DSA.
+        self.assertTrue(self.llm.prompts)
+        self.assertIn("Stacks & Monotonic Variants", self.llm.prompts[0])
 
     # ── Feature flag ───────────────────────────
     def test_disabled_flag_returns_503(self):

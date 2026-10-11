@@ -462,6 +462,10 @@ class InterviewGenerator:
         selected_skills = skills_for_session(
             level=str(session.get("level") or ""),
             session_type=InterviewGenerator._session_type_for_skills(session),
+            # The session track selects the per-track technical pack the
+            # interview is assessed against (backend, frontend, system
+            # design, AI stack); an unknown track keeps the DSA pack.
+            track=str(session.get("track") or ""),
             include_educational=False,
         )
         interview_block = interview_skill_block(selected_skills["interview"])[
@@ -614,6 +618,7 @@ Already asked questions (do not repeat semantically):
         selected_skills = skills_for_session(
             level=str(session.get("level") or ""),
             session_type=InterviewGenerator._session_type_for_skills(session),
+            track=str(session.get("track") or ""),
             include_educational=False,
         )
         interview_block = interview_skill_block(selected_skills["interview"])[

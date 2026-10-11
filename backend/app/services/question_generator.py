@@ -42,7 +42,7 @@ from app.services.llm_policy import (
     StudyAppLLMNotAssignedError,
     raise_if_policy_blocked_result,
 )
-from app.services.llm_skills import skill_context_block
+from app.services.llm_skills import normalise_track, skill_context_block
 from app.services.learning_store import record_generation_run_safe
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
@@ -316,21 +316,51 @@ def _target_objectives_block(target_objectives: list[str] | None) -> str:
     )
 
 
-def _skill_context_section(level: str, session_type: str) -> str:
+def _skill_context_section(level: str, session_type: str, track: str = "") -> str:
     """Render the bounded skill-taxonomy context for a generation prompt.
 
     The taxonomy is module-authored (trusted), so unlike the untrusted
     blocks it is not fenced; it is still capped so the injection stays
     a fixed-size addition to every prompt.
+
+    ``track`` selects the per-track technical pack (backend, frontend,
+    system design, AI stack). An empty or unknown track keeps the DSA
+    pack the problem-solving flow is generated against.
     """
     block = skill_context_block(
         level=level,
         session_type=session_type,
+        track=track,
         include_educational=True,
     )
     if not block:
         return ""
     return f"{_SKILL_CONTEXT_LABEL}:\n{block[:_MAX_SKILL_CONTEXT_CHARS]}"
+
+
+def _skill_track_for_topic(topic_id: str, track: str) -> str:
+    """Return the track that selects the technical skill pack.
+
+    The problem-solving topic is catalogue-tracked as ``backend`` but is
+    generated against the DSA pack, so its track is deliberately dropped
+    to keep that flow byte-identical.
+    """
+    if is_problem_solving_topic(topic_id):
+        return ""
+    return normalise_track(track)
+
+
+def _skill_track_for_topics(topics_content: list[dict]) -> str:
+    """Return the dominant track across the requested topics.
+
+    A multi-topic quiz can mix tracks; the first topic that declares one
+    picks the pack, and a quiz with no declared track keeps DSA.
+    """
+    for topic in topics_content or []:
+        track = normalise_track(topic.get("track"))
+        if track:
+            return track
+    return ""
 
 
 def _problem_solving_language(preferred_language: str) -> str:
@@ -2254,11 +2284,16 @@ def _build_prompt(
     additional_existing_questions: Optional[list[str]] = None,
     prior_progress: str = "",
     mcp_context: str = "",
+    track: str = "",
 ) -> str:
     problem_solving_mode = is_problem_solving_topic(topic_id)
     target_level = _normalise_level(level)
     session_type = "coding" if problem_solving_mode else "general"
-    skill_section = _skill_context_section(target_level, session_type)
+    skill_section = _skill_context_section(
+        target_level,
+        session_type,
+        _skill_track_for_topic(topic_id, track),
+    )
     requested_total = max(1, int(requested_total_count or count or 1))
     existing_seed = _merge_existing_questions(existing_questions, additional_existing_questions)
     diff_clause = ""
@@ -2491,7 +2526,11 @@ def _build_quiz_prompt(
     """Build the quiz user turn. The creator persona lives in ``system``."""
     target_level = _normalise_level(level)
     types = question_types or ["mcq", "true_false"]
-    skill_section = _skill_context_section(target_level, "general")
+    skill_section = _skill_context_section(
+        target_level,
+        "general",
+        _skill_track_for_topics(topics_content),
+    )
     existing_seed = _merge_existing_questions(existing_questions, additional_existing_questions)
     diff_clause = ""
     if difficulty:
@@ -3600,6 +3639,7 @@ class QuestionGenerator:
         requires_programming: bool = False,
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
+        topic_track: str = "",
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(0, int(count))
         requested_total = max(1, int(requested_total_count or count or 1))
@@ -3660,6 +3700,7 @@ class QuestionGenerator:
                 additional_existing_questions=additional_existing_questions,
                 prior_progress=prior_progress,
                 mcp_context=mcp_context,
+                track=topic_track,
             )
             prompt = base_prompt
             system_prompt = _question_system_prompt(problem_solving_mode)
@@ -4050,6 +4091,7 @@ class QuestionGenerator:
         requires_programming: bool = False,
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
+        topic_track: str = "",
     ) -> GenerateQuestionsResponse:
         problem_solving_mode = is_problem_solving_topic(topic_id)
         selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
@@ -4073,6 +4115,7 @@ class QuestionGenerator:
             requires_programming=requires_programming,
             prior_progress=prior_progress,
             additional_existing_questions=additional_existing_questions,
+            topic_track=topic_track,
         )
         merged_seed = _merge_existing_questions(
             existing_questions, additional_existing_questions
@@ -4162,6 +4205,7 @@ class QuestionGenerator:
         requires_programming: bool = False,
         prior_progress: str = "",
         additional_existing_questions: Optional[list[str]] = None,
+        topic_track: str = "",
     ) -> GenerateQuestionsV2Response:
         target_count = max(1, int(count or 1))
         problem_solving_mode = is_problem_solving_topic(topic_id)
@@ -4269,6 +4313,7 @@ class QuestionGenerator:
                 preferred_language=mode["preferred_language"],
                 requires_programming=mode["requires_programming"],
                 mcp_context=mcp_context,
+                track=topic_track,
             )
             pass_items, pass_stats = await _collect_with_retries(
                 llm=self.llm,
@@ -4867,6 +4912,8 @@ class QuestionGenerator:
         existing_cards: Optional[list[str]] = None,
         llm_config: Optional[LLMConfigRequest] = None,
         user_identity: Optional[dict] = None,
+        level: Optional[str] = None,
+        topic_track: str = "",
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Generate flashcards ``{front, back, source_quote, source_section}``.
 
@@ -4898,6 +4945,8 @@ class QuestionGenerator:
             response_detail=response_detail,
             existing_cards=existing_cards,
             mcp_context=mcp_context,
+            level=level,
+            track=topic_track,
         )
 
         def validator(item: dict[str, Any]) -> tuple[bool, str]:
@@ -4966,9 +5015,15 @@ def _build_card_prompt(
     response_detail: str = "very_detailed",
     existing_cards: Optional[list[str]] = None,
     mcp_context: str = "",
+    level: Optional[str] = None,
+    track: str = "",
 ) -> str:
     """Build the flashcard generation user turn."""
-    skill_section = _skill_context_section("mid", "general")
+    skill_section = _skill_context_section(
+        _normalise_level(level),
+        "general",
+        _skill_track_for_topic(topic_id, track),
+    )
     if section_title and section_content:
         scope = f'the "{section_title}" section of "{topic_title}"'
         content = _clamp_content(section_content)
