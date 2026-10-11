@@ -116,6 +116,9 @@ _MAX_TOTAL_ATTEMPTS = 18
 _MAX_RECOVERY_ATTEMPTS = 24
 _VALID_DIFFICULTIES = {"easy", "medium", "hard"}
 _VALID_LEVELS = {"junior", "mid", "senior"}
+#: Requested levels that delegate depth to the learner's attempt history:
+#: a level the client left out, and the explicit ``"auto"`` opt-in.
+_AUTO_LEVEL_ALIASES = {"", "auto"}
 _PROBLEM_SOLVING_SECTION_HEADINGS = (
     "Problem",
     "Solution Walkthrough",
@@ -242,6 +245,33 @@ def _clamp_content(doc_content: str) -> str:
 def _normalise_level(level: Optional[str]) -> str:
     lv = (level or "mid").strip().lower()
     return lv if lv in _VALID_LEVELS else "mid"
+
+
+def resolve_level(level: Optional[str], recommended_level: Optional[str] = None) -> str:
+    """Resolve the level a generation flow runs at.
+
+    An explicit level (``junior``/``mid``/``senior``) always wins, so a
+    client that pins its level — including the level this defaulted to
+    before adaptive difficulty existed — is unaffected. An omitted level
+    or the literal ``"auto"`` delegates to ``recommended_level``, the
+    history-derived level from
+    :meth:`LearningStore.get_level_recommendation`, and falls back to
+    ``"mid"`` when there is no recommendation (no user context, or a
+    learner with no attempt history for the topic yet).
+    """
+    explicit = str(level or "").strip().lower()
+    if explicit in _VALID_LEVELS:
+        return explicit
+    if explicit in _AUTO_LEVEL_ALIASES:
+        recommendation = str(recommended_level or "").strip().lower()
+        if recommendation in _VALID_LEVELS:
+            return recommendation
+    return "mid"
+
+
+def _level_is_auto(level: Optional[str]) -> bool:
+    """True when a request left its level to the learner's history."""
+    return str(level or "").strip().lower() in _AUTO_LEVEL_ALIASES
 
 
 def _attempt_budget(target_count: int) -> int:
@@ -3548,8 +3578,63 @@ class QuestionGenerator:
         self.mcp = mcp_gateway
         #: Optional :class:`~app.services.learning_store.LearningStore`
         #: (or any object exposing ``record_generation_run``) that
-        #: persists one telemetry row per completed generation flow.
+        #: persists one telemetry row per completed generation flow. When
+        #: it also exposes ``get_level_recommendation`` it is the source
+        #: for adaptive difficulty (see :meth:`_resolve_generation_level`).
         self.run_store = run_store
+
+    def _recommended_level(self, *, user_id: str, topic_id: str) -> str | None:
+        """History-derived level for one topic, or ``None`` with no signal.
+
+        Best-effort by design: a recommendation failure must never fail
+        the generation, so any error degrades to ``None`` (no signal) and
+        the caller keeps its own default level.
+        """
+        store = self.run_store
+        lookup = (
+            getattr(store, "get_level_recommendation", None)
+            if store is not None
+            else None
+        )
+        if lookup is None:
+            return None
+        try:
+            recommended = lookup(user_id, topic_id)
+        except Exception:
+            logger.warning(
+                "level recommendation failed user=%s topic=%s",
+                user_id,
+                topic_id,
+                exc_info=True,
+            )
+            return None
+        return str(recommended) if recommended else None
+
+    def _resolve_generation_level(
+        self,
+        *,
+        level: Optional[str],
+        user_identity: Optional[dict],
+        topic_id: str,
+    ) -> tuple[str, str]:
+        """Return ``(effective_level, resolved_level)`` for a flow.
+
+        ``effective_level`` is what the prompts and validators run at.
+        ``resolved_level`` is the history-derived level surfaced to the
+        client so the UI can mark it as recommended; it is empty when the
+        request pinned its own level, because then nothing was resolved.
+        """
+        if not _level_is_auto(level):
+            # An explicit level never consults the learner's history.
+            return resolve_level(level), ""
+        user_id = str((user_identity or {}).get("user", "") or "")
+        recommended = (
+            self._recommended_level(user_id=user_id, topic_id=topic_id)
+            if user_id and topic_id
+            else None
+        )
+        resolved_level = resolve_level(level, recommended)
+        return resolved_level, resolved_level
 
     async def _mcp_context_for_flow(
         self,
@@ -3643,6 +3728,9 @@ class QuestionGenerator:
     ) -> AsyncIterator[dict[str, Any]]:
         target_count = max(0, int(count))
         requested_total = max(1, int(requested_total_count or count or 1))
+        effective_level, resolved_level = self._resolve_generation_level(
+            level=level, user_identity=user_identity, topic_id=topic_id
+        )
         seed_existing = _merge_existing_questions(
             existing_questions, additional_existing_questions
         )
@@ -3689,7 +3777,7 @@ class QuestionGenerator:
                 doc_content=doc_content,
                 count=1,
                 difficulty=None if relaxed else difficulty,
-                level=level,
+                level=effective_level,
                 section_title=active_section_title,
                 section_content=active_section_content,
                 response_detail=response_detail,
@@ -3786,7 +3874,7 @@ class QuestionGenerator:
                             item,
                             topic_id,
                             difficulty,
-                            level,
+                            effective_level,
                             preferred_language=selected_language,
                             requires_programming=requires_programming,
                             topic_title=topic_title,
@@ -3911,6 +3999,7 @@ class QuestionGenerator:
                 "degraded": False,
                 "requested_count": 0,
                 "returned_count": 0,
+                "resolved_level": resolved_level,
             }
             return
 
@@ -4023,7 +4112,7 @@ class QuestionGenerator:
                     problem_solving_mode,
                 ),
                 difficulty=difficulty,
-                level=level,
+                level=effective_level,
                 section_title=None,
                 section_content=None,
                 existing_questions=generated_question_texts,
@@ -4070,6 +4159,7 @@ class QuestionGenerator:
             "degraded": fallback_injected,
             "requested_count": target_count,
             "returned_count": generated_count,
+            "resolved_level": resolved_level,
         }
 
     async def generate(
@@ -4094,6 +4184,9 @@ class QuestionGenerator:
         topic_track: str = "",
     ) -> GenerateQuestionsResponse:
         problem_solving_mode = is_problem_solving_topic(topic_id)
+        effective_level, resolved_level = self._resolve_generation_level(
+            level=level, user_identity=user_identity, topic_id=topic_id
+        )
         selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
             (preferred_language or "").strip().lower()
         )
@@ -4105,7 +4198,7 @@ class QuestionGenerator:
             requested_total_count=requested_total_count,
             existing_questions=existing_questions,
             difficulty=difficulty,
-            level=level,
+            level=effective_level,
             llm_config=llm_config,
             user_identity=user_identity,
             section_title=section_title,
@@ -4147,7 +4240,7 @@ class QuestionGenerator:
                     problem_solving_mode,
                 ),
                 difficulty=difficulty,
-                level=level,
+                level=effective_level,
                 section_title=section_title,
                 section_content=section_content,
                 existing_questions=[
@@ -4184,6 +4277,7 @@ class QuestionGenerator:
             questions=questions[:target_count],
             provider_used=v2.provider_used,
             model_used=v2.model_used,
+            resolved_level=resolved_level,
         )
 
     async def generate_v2(
@@ -4209,6 +4303,9 @@ class QuestionGenerator:
     ) -> GenerateQuestionsV2Response:
         target_count = max(1, int(count or 1))
         problem_solving_mode = is_problem_solving_topic(topic_id)
+        effective_level, resolved_level = self._resolve_generation_level(
+            level=level, user_identity=user_identity, topic_id=topic_id
+        )
         selected_language = _problem_solving_language(preferred_language) if problem_solving_mode else (
             (preferred_language or "").strip().lower()
         )
@@ -4289,7 +4386,7 @@ class QuestionGenerator:
                     item,
                     topic_id,
                     mode["difficulty"],
-                    level,
+                    effective_level,
                     preferred_language=str(mode["preferred_language"]),
                     requires_programming=bool(mode["requires_programming"]),
                     topic_title=topic_title,
@@ -4306,7 +4403,7 @@ class QuestionGenerator:
                 additional_existing_questions=additional_existing_questions,
                 prior_progress=prior_progress,
                 difficulty=mode["difficulty"],
-                level=level,
+                level=effective_level,
                 section_title=mode["section_title"],
                 section_content=mode["section_content"],
                 response_detail=response_detail,
@@ -4440,6 +4537,7 @@ class QuestionGenerator:
             requested_count=target_count,
             returned_count=len(questions),
             generation_version=generation_version,
+            resolved_level=resolved_level,
         )
 
     async def generate_quiz_v2_stream(
@@ -4472,6 +4570,12 @@ class QuestionGenerator:
         allowed_types = set(question_types or ["mcq", "true_false"])
         if not allowed_types:
             allowed_types = {"mcq", "true_false"}
+        # A quiz spans topics but runs at one level, so the history of
+        # the first requested topic picks the level.
+        quiz_topic_id = str(topics_content[0].get("id", "")) if topics_content else ""
+        effective_level, resolved_level = self._resolve_generation_level(
+            level=level, user_identity=user_identity, topic_id=quiz_topic_id
+        )
 
         dedup_norm: set[str] = set()
         generated_question_texts: list[str] = _merge_existing_questions(
@@ -4495,7 +4599,7 @@ class QuestionGenerator:
                 1,
                 question_types,
                 difficulty,
-                level,
+                effective_level,
                 response_detail=effective_detail,
                 preferred_language=(preferred_language or "").strip().lower(),
                 additional_existing_questions=additional_existing_questions,
@@ -4569,7 +4673,7 @@ class QuestionGenerator:
                             allowed_topics,
                             allowed_types,
                             difficulty,
-                            level,
+                            effective_level,
                             topic_content=_topic_content_for(item, topics_content),
                         )
                         if not is_valid:
@@ -4737,6 +4841,7 @@ class QuestionGenerator:
             "degraded": generated_count < target_count,
             "requested_count": target_count,
             "returned_count": generated_count,
+            "resolved_level": resolved_level,
         }
 
     async def generate_quiz(
@@ -4754,12 +4859,18 @@ class QuestionGenerator:
         additional_existing_questions: Optional[list[str]] = None,
         target_objectives: list[str] | None = None,
     ) -> GenerateQuizResponse:
+        # A quiz spans topics but runs at one level, so the history of
+        # the first requested topic picks the level.
+        quiz_topic_id = str(topics_content[0].get("id", "")) if topics_content else ""
+        effective_level, resolved_level = self._resolve_generation_level(
+            level=level, user_identity=user_identity, topic_id=quiz_topic_id
+        )
         v2 = await self.generate_quiz_v2(
             topics_content=topics_content,
             count=count,
             question_types=question_types,
             difficulty=difficulty,
-            level=level,
+            level=effective_level,
             response_detail=response_detail,
             preferred_language=preferred_language,
             llm_config=llm_config,
@@ -4785,6 +4896,7 @@ class QuestionGenerator:
             topics_used=v2.topics_used,
             provider_used=v2.provider_used,
             model_used=v2.model_used,
+            resolved_level=resolved_level,
         )
 
     async def generate_quiz_v2(
@@ -4803,6 +4915,12 @@ class QuestionGenerator:
         target_objectives: list[str] | None = None,
     ) -> GenerateQuizV2Response:
         effective_detail = "very_detailed" if response_detail == "very_detailed" else "concise"
+        # A quiz spans topics but runs at one level, so the history of
+        # the first requested topic picks the level.
+        quiz_topic_id = str(topics_content[0].get("id", "")) if topics_content else ""
+        effective_level, resolved_level = self._resolve_generation_level(
+            level=level, user_identity=user_identity, topic_id=quiz_topic_id
+        )
         mcp_context = await self._mcp_context_for_flow(
             flow="quiz",
             query=" ".join(
@@ -4817,7 +4935,7 @@ class QuestionGenerator:
             count,
             question_types,
             difficulty,
-            level,
+            effective_level,
             response_detail=effective_detail,
             preferred_language=(preferred_language or "").strip().lower(),
             additional_existing_questions=additional_existing_questions,
@@ -4833,7 +4951,7 @@ class QuestionGenerator:
                 allowed_topics,
                 allowed_types,
                 difficulty,
-                level,
+                effective_level,
                 topic_content=_topic_content_for(item, topics_content),
             )
 
@@ -4898,6 +5016,7 @@ class QuestionGenerator:
             requested_count=count,
             returned_count=len(questions),
             generation_version=generation_version,
+            resolved_level=resolved_level,
         )
 
     async def generate_cards(

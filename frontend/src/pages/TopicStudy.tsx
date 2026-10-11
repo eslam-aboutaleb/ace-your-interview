@@ -56,6 +56,7 @@ import {
 import type {
   TopicDetail,
   QuestionAnswerV2,
+  GenerationLevel,
   InterviewLevel,
   LearningTrack,
   ResponseDetail,
@@ -74,6 +75,18 @@ const TRACK_LABELS: Record<LearningTrack, string> = {
   system_design: "System Design",
   ai_stack: "AI Stack",
 };
+
+const LEVEL_LABELS: Record<InterviewLevel, string> = {
+  junior: "Junior",
+  mid: "Mid",
+  senior: "Senior",
+};
+
+//: The pinned levels a learner can pick by hand; "auto" (the default) lets the
+//: server resolve the level from the learner's attempt history.
+const LEVEL_OPTIONS: { value: InterviewLevel; label: string }[] = (
+  ["junior", "mid", "senior"] as InterviewLevel[]
+).map((value) => ({ value, label: LEVEL_LABELS[value] }));
 
 type IndexedSection = {
   index: number;
@@ -164,7 +177,10 @@ export default function TopicStudy() {
   const [navViewportHeight, setNavViewportHeight] = useState(0);
   const [questionCount, setQuestionCount] = useState(5);
   const [difficulty, setDifficulty] = useState<string>("");
-  const [level, setLevel] = useState<InterviewLevel>("mid");
+  const [level, setLevel] = useState<GenerationLevel>("auto");
+  // Level the server resolved from the learner's attempt history, so the
+  // selector can mark it as recommended (empty when the level was pinned).
+  const [resolvedLevel, setResolvedLevel] = useState<string>("");
   const [providerInfo, setProviderInfo] = useState<TopicStudyProviderInfo>(
     DEFAULT_PROVIDER_INFO,
   );
@@ -730,8 +746,19 @@ export default function TopicStudy() {
     setAnswerDrafts({});
     setConfidenceByIdx({});
     setQuestionStartMs({});
+    setResolvedLevel("");
 
     const isCurrentRun = () => isRunCurrent(cacheKey, runId);
+    // The level the server resolved from the learner's history, surfaced by
+    // whichever path answered. Only the first non-empty value is kept.
+    let notedResolvedLevel = "";
+    const noteResolvedLevel = (value?: string) => {
+      if (!isCurrentRun() || notedResolvedLevel) return;
+      const resolved = (value || "").trim();
+      if (!resolved) return;
+      notedResolvedLevel = resolved;
+      setResolvedLevel(resolved);
+    };
     const updateRunEntry = (
       producer: (
         previous: TopicStudyQuestionCacheEntry,
@@ -868,6 +895,7 @@ export default function TopicStudy() {
                 }),
               );
               if (!isCurrentRun()) break;
+              noteResolvedLevel(res.resolved_level);
               merged = mergeUniqueQuestions(merged, res.questions).slice(0, targetCount);
               updateRunEntry((previous) => ({
                 ...previous,
@@ -894,6 +922,7 @@ export default function TopicStudy() {
                 }),
               );
               if (!isCurrentRun()) break;
+              noteResolvedLevel(legacy.resolved_level);
               const upgraded = mapLegacyQuestions(legacy, merged.length);
               merged = mergeUniqueQuestions(merged, upgraded).slice(0, targetCount);
               updateRunEntry((previous) => ({
@@ -934,6 +963,7 @@ export default function TopicStudy() {
             },
             onDone: (event) => {
               if (!isCurrentRun()) return;
+              noteResolvedLevel(event.resolved_level);
               latestProviderInfo = {
                 provider: event.provider_used,
                 model: event.model_used,
@@ -1070,7 +1100,12 @@ export default function TopicStudy() {
         question_text: q.question,
         correct_answer: q.answer,
         objective: q.learning_objective,
-        level,
+        // The attempt API takes a pinned level, so an "auto" session
+        // reports the level the server actually served.
+        level:
+          level === "auto"
+            ? ((resolvedLevel || "mid") as InterviewLevel)
+            : level,
       });
       setSubmittedAttempts((prev) => new Set(prev).add(idx));
       setOutcomeByIdx((prev) => ({ ...prev, [idx]: isCorrect }));
@@ -1575,13 +1610,29 @@ export default function TopicStudy() {
                   </label>
                   <select
                     value={level}
-                    onChange={(e) => setLevel(e.target.value as InterviewLevel)}
+                    onChange={(e) =>
+                      setLevel(e.target.value as GenerationLevel)
+                    }
                     className="border border-udemy-border rounded px-3 py-2 text-sm"
                   >
-                    <option value="junior">Junior</option>
-                    <option value="mid">Mid</option>
-                    <option value="senior">Senior</option>
+                    <option value="auto">
+                      Auto (from your progress)
+                    </option>
+                    {LEVEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                        {resolvedLevel === option.value ? " (recommended)" : ""}
+                      </option>
+                    ))}
                   </select>
+                  {resolvedLevel && level === "auto" && (
+                    <p className="mt-1 text-xs text-udemy-text-muted">
+                      Serving{" "}
+                      {LEVEL_LABELS[resolvedLevel as InterviewLevel] ||
+                        resolvedLevel}{" "}
+                      questions for your current performance.
+                    </p>
+                  )}
                 </div>
 
                 <button

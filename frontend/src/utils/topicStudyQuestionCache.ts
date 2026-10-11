@@ -1,4 +1,8 @@
-import type { InterviewLevel, QuestionAnswerV2, ResponseDetail } from "@/types";
+import type {
+  GenerationLevel,
+  QuestionAnswerV2,
+  ResponseDetail,
+} from "@/types";
 
 export type TopicStudyQuestionStatus = "generating" | "ready" | "error";
 
@@ -15,7 +19,7 @@ export type TopicStudyQuestionSignature = {
   sectionFingerprint: string;
   questionCount: number;
   difficulty: string;
-  level: InterviewLevel;
+  level: GenerationLevel;
   responseDetail: ResponseDetail;
   preferredLanguage: string;
   requiresProgramming: boolean;
@@ -106,7 +110,10 @@ function normalizeSignature(raw: unknown): TopicStudyQuestionSignature | null {
       : 0,
     difficulty: typeof maybe.difficulty === "string" ? maybe.difficulty : "",
     level:
-      maybe.level === "junior" || maybe.level === "mid" || maybe.level === "senior"
+      maybe.level === "junior" ||
+      maybe.level === "mid" ||
+      maybe.level === "senior" ||
+      maybe.level === "auto"
         ? maybe.level
         : "mid",
     responseDetail:

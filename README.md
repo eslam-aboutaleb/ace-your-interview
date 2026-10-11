@@ -20,6 +20,7 @@ Adaptive, LLM-powered interview preparation platform. Level-aware question and q
 
 ### Adaptive learning
 - **FSRS-4.5** spaced-repetition scheduler (`fsrs>=4.1,<4.2`) driving the review queue, mastery, weak-area analysis, study plan, forecast, and calibration endpoints.
+- **Adaptive difficulty**: when a question/quiz request omits its level (or sends `"auto"`), the level is resolved from the learner's recent attempt history — hint-aware FSRS rating plus response time — and returned as `resolved_level`; an explicit level always wins.
 - Flashcard **decks** with Anki import/export, duplicate detection, and per-card review recording.
 - **Timed exams** with server-side start/submit timestamps, auto-grading, pass/fail scoring, and deterministic remark re-grading.
 - **Gamification**: XP, levels, streaks, badges, and a daily goal, updated from attempts, reviews, and exam completion.
