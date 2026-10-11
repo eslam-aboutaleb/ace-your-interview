@@ -1792,3 +1792,83 @@ export interface MasteryCurveResponse {
   points: MasteryPoint[];
   topics: MasteryTopicCurve[];
 }
+
+// ── Placement onboarding (adaptive cold-start) ──
+
+export interface PlacementQuestion {
+  question_id: string;
+  question: string;
+  options: string[];
+  level: InterviewLevel;
+  topic_id: string;
+  topic_title: string;
+  concept: string;
+  source: string;
+}
+
+export interface PlacementStartRequest {
+  track: LearningTrack;
+  target_role?: string;
+  daily_goal?: number;
+}
+
+export interface PlacementStartResponse {
+  session_id: string;
+  track: LearningTrack;
+  status: string;
+  level: InterviewLevel;
+  step_index: number;
+  max_steps: number;
+  question: PlacementQuestion | null;
+}
+
+export interface PlacementAnswerRequest {
+  session_id: string;
+  question_id: string;
+  selected_answer: string;
+  response_time_ms?: number;
+}
+
+export interface PlacementAnswerResponse {
+  session_id: string;
+  status: string;
+  level: InterviewLevel;
+  step_index: number;
+  max_steps: number;
+  is_correct: boolean;
+  correct_answer: string;
+  explanation: string;
+  complete: boolean;
+  question: PlacementQuestion | null;
+}
+
+export interface PlacementFinishRequest {
+  session_id: string;
+}
+
+export interface PlacementWeakObjective {
+  topic_id: string;
+  topic_title: string;
+  objective: string;
+  level: InterviewLevel;
+}
+
+export interface PlacementFinishResponse {
+  session_id: string;
+  track: LearningTrack;
+  derived_level: InterviewLevel;
+  per_track_levels: Record<string, string>;
+  steps_taken: number;
+  weak_objectives: PlacementWeakObjective[];
+  level_path: string[];
+  level_stats: Record<string, { correct: number; answered: number }>;
+  profile: LearnerProfile | null;
+}
+
+export interface PlacementStatusResponse {
+  completed: boolean;
+  completed_at: string;
+  track: string;
+  derived_level: string;
+  steps_taken: number;
+}

@@ -11,6 +11,7 @@ import TopicStudy from "@/pages/TopicStudy";
 import QuizMode from "@/pages/QuizMode";
 import ReviewQueue from "@/pages/ReviewQueue";
 import StudyPlan from "@/pages/StudyPlan";
+import OnboardingPage from "@/pages/OnboardingPage";
 import DocumentsPage from "@/pages/DocumentsPage";
 import DecksPage from "@/pages/DecksPage";
 import Settings from "@/pages/Settings";
@@ -247,6 +248,14 @@ export default function App() {
               element={
                 <ErrorBoundary>
                   <StudyPlan />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="onboarding"
+              element={
+                <ErrorBoundary>
+                  <OnboardingPage />
                 </ErrorBoundary>
               }
             />
