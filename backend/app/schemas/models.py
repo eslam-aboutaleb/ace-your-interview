@@ -739,6 +739,10 @@ class StudyPlanTask(BaseModel):
     reason: str
     estimated_minutes: int = Field(default=20, ge=5, le=120)
     cta_route: str
+    # Appended for the commitment device: stable identity across plan
+    # regeneration plus the persisted completion state.
+    task_key: str = ""
+    completed: bool = False
 
 
 class StudyPlanDay(BaseModel):
@@ -754,6 +758,9 @@ class StudyPlanResponse(BaseModel):
     daily_items: int = Field(default=3, ge=1, le=10)
     total_tasks: int = 0
     days_plan: list[StudyPlanDay] = Field(default_factory=list)
+    # Appended for the commitment device: streak/daily-goal context and
+    # the completed/pending split for the scheduled tasks.
+    commitment: Optional[PlanCommitmentSummary] = None
 
 
 class StudyPlanFromJDRequest(BaseModel):
@@ -1737,3 +1744,55 @@ class PlacementStatusResponse(BaseModel):
     track: str = ""
     derived_level: str = ""
     steps_taken: int = 0
+
+
+# ── Plan commitment (study plan as a commitment device) ─────────────────────
+
+
+class PlanTaskItem(BaseModel):
+    """One persisted, completable plan task.
+
+    ``task_key`` is the stable identity derived from
+    (task_date, task_type, topic_id) by the planner, so a completion
+    survives plan regeneration.
+    """
+
+    task_key: str
+    task_date: str
+    task_type: StudyPlanTaskType
+    topic_id: str = ""
+    title: str = ""
+    reason: str = ""
+    estimated_minutes: int = Field(default=20, ge=0, le=180)
+    cta_route: str = ""
+    completed: bool = False
+    completed_at: Optional[str] = None
+
+
+class PlanTaskListResponse(BaseModel):
+    items: list[PlanTaskItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class PlanCommitmentSummary(BaseModel):
+    """Streak/daily-goal context that shapes the plan load.
+
+    Mirrors the gamification summary on read (the live streak is
+    recomputed, never mutated). When the learner has missed days
+    (``streak_at_risk`` or ``streak_lapsed``) the daily item count is
+    halved to ``effective_daily_items`` (ceil, minimum 1) so the
+    commitment stays restartable.
+    """
+
+    daily_goal: int = 3
+    today_progress: int = 0
+    current_streak: int = 0
+    longest_streak: int = 0
+    streak_at_risk: bool = False
+    streak_lapsed: bool = False
+    behind: bool = False
+    catch_up: bool = False
+    requested_daily_items: int = 0
+    effective_daily_items: int = 0
+    completed_tasks: int = 0
+    pending_tasks: int = 0

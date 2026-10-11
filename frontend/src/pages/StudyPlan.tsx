@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import {
   AlertTriangle,
   CalendarDays,
+  Flame,
   Loader2,
   RefreshCw,
   Save,
@@ -12,21 +13,28 @@ import {
 } from "lucide-react";
 import { pageTransition, pageVariants } from "@/utils/animations";
 import {
+  completePlanTask,
+  fetchGamificationSummary,
   fetchLearnerProfile,
   fetchRecommendations,
   fetchStudyPlan,
   fetchTopics,
   runProfileDiagnostic,
+  uncompletePlanTask,
+  updateDailyGoal,
   updateLearnerProfile,
 } from "@/services/api";
 import { normalizeEscapedSingleLineText } from "@/utils/textNormalization";
 import type {
+  GamificationSummaryResponse,
   LearnerProfileUpdateRequest,
   LearningTrack,
+  PlanCommitmentSummary,
   ProfileDiagnosticResponse,
   RecommendationItem,
   RecommendationsResponse,
   StudyPlanResponse,
+  StudyPlanTask,
   TopicSummary,
 } from "@/types";
 
@@ -108,6 +116,9 @@ export default function StudyPlanPage() {
   const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
   const [diagnostic, setDiagnostic] = useState<ProfileDiagnosticResponse | null>(null);
   const [draft, setDraft] = useState<ProfileDraft>(emptyDraft());
+  const [gamification, setGamification] = useState<GamificationSummaryResponse | null>(null);
+  const [goalDraft, setGoalDraft] = useState(3);
+  const [savingGoal, setSavingGoal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [runningDiagnostic, setRunningDiagnostic] = useState(false);
@@ -118,16 +129,20 @@ export default function StudyPlanPage() {
     setLoading(true);
     setErrorMsg("");
     try {
-      const [studyPlan, topicList, profile, nextRecommendations] = await Promise.all([
-        fetchStudyPlan(7, 3),
-        fetchTopics(),
-        fetchLearnerProfile(),
-        fetchRecommendations(6),
-      ]);
+      const [studyPlan, topicList, profile, nextRecommendations, gamificationSummary] =
+        await Promise.all([
+          fetchStudyPlan(7, 3),
+          fetchTopics(),
+          fetchLearnerProfile(),
+          fetchRecommendations(6),
+          fetchGamificationSummary().catch(() => null),
+        ]);
       setPlan(studyPlan);
       setTopics(topicList);
       setDraft(profileToDraft(profile));
       setRecommendations(nextRecommendations.items || []);
+      setGamification(gamificationSummary);
+      setGoalDraft(gamificationSummary?.daily_goal ?? 3);
 
       if (profile.diagnostic_updated_at) {
         runProfileDiagnostic()
@@ -175,12 +190,17 @@ export default function StudyPlanPage() {
       });
       setDraft(profileToDraft(saved));
       setMessage("Learner profile saved.");
-      const [studyPlan, nextRecommendations] = await Promise.all([
+      const [studyPlan, nextRecommendations, gamificationSummary] = await Promise.all([
         fetchStudyPlan(7, 3),
         fetchRecommendations(6),
+        fetchGamificationSummary().catch(() => null),
       ]);
       setPlan(studyPlan);
       setRecommendations(nextRecommendations.items || []);
+      if (gamificationSummary) {
+        setGamification(gamificationSummary);
+        setGoalDraft(gamificationSummary.daily_goal);
+      }
     } catch (err) {
       console.error(err);
       setErrorMsg("Could not save your learner profile.");
@@ -194,14 +214,20 @@ export default function StudyPlanPage() {
     setMessage("");
     setErrorMsg("");
     try {
-      const [diagnosticResult, studyPlan, nextRecommendations] = await Promise.all([
-        runProfileDiagnostic(),
-        fetchStudyPlan(7, 3),
-        fetchRecommendations(6),
-      ]);
+      const [diagnosticResult, studyPlan, nextRecommendations, gamificationSummary] =
+        await Promise.all([
+          runProfileDiagnostic(),
+          fetchStudyPlan(7, 3),
+          fetchRecommendations(6),
+          fetchGamificationSummary().catch(() => null),
+        ]);
       setDiagnostic(diagnosticResult);
       setPlan(studyPlan);
       setRecommendations(nextRecommendations.items || []);
+      if (gamificationSummary) {
+        setGamification(gamificationSummary);
+        setGoalDraft(gamificationSummary.daily_goal);
+      }
       setMessage("Diagnostic refreshed.");
     } catch (err) {
       console.error(err);
@@ -221,6 +247,76 @@ export default function StudyPlanPage() {
     }));
   };
 
+  // ── Plan commitment: optimistic completion with a revert path ──
+  const applyTaskCompletion = (
+    target: StudyPlanResponse | null,
+    taskDate: string,
+    taskKey: string,
+    completed: boolean,
+  ): StudyPlanResponse | null => {
+    if (!target) return target;
+    const daysPlan = target.days_plan.map((day) =>
+      day.date !== taskDate
+        ? day
+        : {
+            ...day,
+            tasks: day.tasks.map((task) =>
+              task.task_key === taskKey ? { ...task, completed } : task,
+            ),
+          },
+    );
+    const previous = target.commitment as PlanCommitmentSummary | undefined;
+    let commitment = previous;
+    if (previous) {
+      const wasCompleted = !completed;
+      commitment = {
+        ...previous,
+        completed_tasks: Math.max(0, previous.completed_tasks + (wasCompleted ? -1 : 1)),
+        pending_tasks: Math.max(0, previous.pending_tasks + (wasCompleted ? 1 : -1)),
+      };
+    }
+    return { ...target, days_plan: daysPlan, commitment };
+  };
+
+  const handleToggleTask = async (taskDate: string, task: StudyPlanTask) => {
+    const taskKey = task.task_key;
+    if (!taskKey) return;
+    const nextCompleted = !task.completed;
+    setMessage("");
+    setErrorMsg("");
+    setPlan((prev) => applyTaskCompletion(prev, taskDate, taskKey, nextCompleted));
+    try {
+      if (nextCompleted) {
+        await completePlanTask(taskKey, taskDate);
+      } else {
+        await uncompletePlanTask(taskKey, taskDate);
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("Could not save that plan task, so the change was reverted.");
+      setPlan((prev) => applyTaskCompletion(prev, taskDate, taskKey, !nextCompleted));
+    }
+  };
+
+  const handleSaveGoal = async () => {
+    setSavingGoal(true);
+    setMessage("");
+    setErrorMsg("");
+    try {
+      const saved = await updateDailyGoal(goalDraft);
+      setGamification((prev) =>
+        prev ? { ...prev, daily_goal: saved.daily_goal } : prev,
+      );
+      setGoalDraft(saved.daily_goal);
+      setMessage(`Daily goal set to ${saved.daily_goal} learning event(s) per day.`);
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("Could not update your daily goal.");
+    } finally {
+      setSavingGoal(false);
+    }
+  };
+
   const toggleModality = (modality: "study" | "quiz" | "interview" | "voice") => {
     setDraft((prev) => {
       const current = new Set(prev.preferred_modalities);
@@ -236,13 +332,20 @@ export default function StudyPlanPage() {
     });
   };
 
+  const commitment = plan?.commitment;
   const planSummary = plan
     ? [
         `${plan.days} days`,
-        `${plan.daily_items} item(s)/day`,
+        `${commitment?.effective_daily_items ?? plan.daily_items} item(s)/day`,
         `${plan.total_tasks} total task(s)`,
       ].join(" · ")
     : "";
+
+  const todayProgress =
+    plan && plan.days_plan.length > 0
+      ? plan.days_plan[0].tasks.filter((task) => task.completed).length
+      : 0;
+  const todayTotal = plan && plan.days_plan.length > 0 ? plan.days_plan[0].tasks.length : 0;
 
   return (
     <motion.div
@@ -534,12 +637,25 @@ export default function StudyPlanPage() {
           </div>
 
           <div className="udemy-card p-6">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold">7-Day Plan</h2>
                 <p className="text-sm text-udemy-text-muted mt-1">
-                  Scheduled from your recommendation stack.
+                  Scheduled from your recommendation stack. Check tasks off as you
+                  finish them — progress is saved with your plan.
                 </p>
+                {commitment?.behind && (
+                  <p className="text-xs text-amber-700 mt-2">
+                    You have missed days, so today&apos;s load was halved to
+                    restart your streak.
+                  </p>
+                )}
+                {commitment && !commitment.behind && commitment.catch_up && (
+                  <p className="text-xs text-udemy-text-muted mt-2">
+                    {commitment.today_progress}/{commitment.daily_goal} of today&apos;s
+                    learning events are done — completing plan tasks keeps your streak.
+                  </p>
+                )}
               </div>
               {plan && (
                 <span className="text-xs text-udemy-text-muted">
@@ -547,6 +663,11 @@ export default function StudyPlanPage() {
                 </span>
               )}
             </div>
+            {plan && todayTotal > 0 && (
+              <p className="text-xs font-medium text-udemy-purple mt-3">
+                Today: {todayProgress}/{todayTotal} task(s) complete
+              </p>
+            )}
 
             <div className="mt-5">
               {loading ? (
@@ -590,17 +711,44 @@ export default function StudyPlanPage() {
                                 key={`${day.day_index}:${idx}:${task.task_type}:${task.cta_route}`}
                                 className="rounded-lg border border-udemy-border p-3"
                               >
-                                <p className="text-sm font-semibold">{taskTitle}</p>
-                                <p className="text-xs text-udemy-text-muted mt-1">
-                                  {taskTopicTitle} · {task.task_type.replace("_", " ")} · ~
-                                  {task.estimated_minutes} min
-                                </p>
-                                <p className="text-xs text-udemy-text-muted mt-1">
-                                  {taskReason}
-                                </p>
-                                <Link to={task.cta_route} className="btn-secondary mt-3 inline-flex text-sm">
-                                  Open task
-                                </Link>
+                                <div className="flex items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(task.completed)}
+                                    disabled={!task.task_key}
+                                    aria-label={
+                                      task.completed
+                                        ? `Mark "${taskTitle}" as not done`
+                                        : `Mark "${taskTitle}" as done`
+                                    }
+                                    onChange={() => handleToggleTask(day.date, task)}
+                                    className="mt-0.5 h-4 w-4 flex-shrink-0 cursor-pointer accent-udemy-purple disabled:cursor-not-allowed"
+                                  />
+                                  <div className="flex-1">
+                                    <p
+                                      className={`text-sm font-semibold ${
+                                        task.completed
+                                          ? "line-through text-udemy-text-muted"
+                                          : ""
+                                      }`}
+                                    >
+                                      {taskTitle}
+                                    </p>
+                                    <p className="text-xs text-udemy-text-muted mt-1">
+                                      {taskTopicTitle} · {task.task_type.replace("_", " ")} · ~
+                                      {task.estimated_minutes} min
+                                    </p>
+                                    <p className="text-xs text-udemy-text-muted mt-1">
+                                      {taskReason}
+                                    </p>
+                                    <Link
+                                      to={task.cta_route}
+                                      className="btn-secondary mt-3 inline-flex text-sm"
+                                    >
+                                      Open task
+                                    </Link>
+                                  </div>
+                                </div>
                               </div>
                             );
                           })}
@@ -670,6 +818,63 @@ export default function StudyPlanPage() {
               )}
             </div>
           </div>
+
+          {gamification && (
+            <div className="udemy-card p-6">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <Flame className="w-5 h-5 text-udemy-purple" />
+                Daily Goal
+              </h2>
+              <p className="text-sm text-udemy-text-muted mt-1">
+                Learning events (quiz attempts and card reviews) you commit to each day.
+                The plan shrinks today&apos;s load automatically when your streak is at
+                risk.
+              </p>
+
+              <div className="grid grid-cols-2 gap-3 mt-5">
+                <Metric label="Streak" value={`${gamification.current_streak}d`} />
+                <Metric
+                  label="Today"
+                  value={`${gamification.today_progress}/${gamification.daily_goal}`}
+                />
+              </div>
+
+              <div className="mt-4 flex items-end gap-2">
+                <div className="flex-1">
+                  <label
+                    htmlFor="daily-goal"
+                    className="block text-sm font-medium mb-2"
+                  >
+                    Daily goal (1-50 events)
+                  </label>
+                  <input
+                    id="daily-goal"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={goalDraft}
+                    onChange={(e) => setGoalDraft(Number(e.target.value))}
+                    className="w-full border border-udemy-border rounded-lg px-3 py-2.5 text-sm"
+                  />
+                </div>
+                <button
+                  onClick={handleSaveGoal}
+                  disabled={savingGoal || loading}
+                  className="btn-secondary inline-flex items-center gap-2 disabled:opacity-50"
+                >
+                  {savingGoal ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  Save Goal
+                </button>
+              </div>
+              <p className="text-xs text-udemy-text-muted mt-2">
+                Longest streak: {gamification.longest_streak} days
+              </p>
+            </div>
+          )}
 
           <div className="udemy-card p-6">
             <h2 className="text-lg font-bold">Diagnostic</h2>

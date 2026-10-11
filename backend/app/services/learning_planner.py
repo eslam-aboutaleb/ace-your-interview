@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -10,8 +11,14 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Callable, TypeVar
+from zoneinfo import ZoneInfo
 
 from app.services import fsrs_scheduler
+from app.services.gamification_store import (
+    DEFAULT_DAILY_GOAL,
+    add_days,
+    today_in_timezone,
+)
 from app.services.learning_store import accuracy_uncertainty
 
 T = TypeVar("T")
@@ -74,6 +81,52 @@ def _loads_json_dict(value: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+# ── Plan commitment ─────────────────────────────────────────────
+# The 7-day plan used to be rebuilt identically on every load with no
+# record of what had actually been done, so it was not a commitment
+# device. Scheduled tasks are now persisted in ``plan_tasks`` under a
+# stable key, and the daily load is shaped by the learner's streak.
+
+#: Learning-event types that count towards the daily goal. Mirrors
+#: ``gamification_store.LEARNING_EVENT_TYPES`` without importing the
+#: tuple, so a rename there cannot silently change this count.
+_COMMITMENT_EVENT_TYPES = ("attempt", "review")
+
+
+def plan_task_key(
+    *, task_date: str, task_type: str, topic_id: str, occurrence: int = 1
+) -> str:
+    """Stable identity for one scheduled plan task.
+
+    The plan is regenerated on every load, so a completion only
+    survives regeneration when the key is derived from *what* the
+    task is and *when* it is scheduled — never from volatile fields
+    such as the recommendation title, its priority, or the cursor
+    position inside the plan. The hash of
+    ``task_date | task_type | topic_id | occurrence`` is stable
+    across regenerations and unique per scheduled slot:
+    ``occurrence`` counts how many tasks with the same
+    (type, topic) already fill that day, which matters for
+    topic-less recommendations (an interview rec can legitimately
+    fill several slots in the same day).
+    """
+    raw = f"{task_date}|{task_type}|{str(topic_id or '')}|{int(occurrence)}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _streak_adjusted_daily_items(daily_items: int, *, behind: bool) -> int:
+    """Halve the daily item count (rounding up, minimum 1) when behind.
+
+    A learner who has missed days gets a smaller, restart-sized
+    commitment instead of the full load they already failed to
+    clear, so the plan nudges the habit back instead of
+    overwhelming it. ``ceil(n / 2)`` keeps 3 → 2 and 1 → 1.
+    """
+    if not behind:
+        return daily_items
+    return max(1, (int(daily_items) + 1) // 2)
 
 
 class LearningPlannerStore:
@@ -169,6 +222,26 @@ class LearningPlannerStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_learner_competencies_priority
                 ON learner_competency_scores(user_id, priority DESC, updated_at DESC)
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS plan_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    task_date TEXT NOT NULL,
+                    task_key TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    completed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE (user_id, task_date, task_key)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_plan_tasks_user_date
+                ON plan_tasks(user_id, task_date)
                 """
             )
 
@@ -957,8 +1030,24 @@ class LearningPlannerStore:
         }
 
     def build_study_plan(self, *, user_id: str, days: int = 7, daily_items: int = 3) -> dict[str, Any]:
+        """Build the 7-day plan as a persistent commitment device.
+
+        Every scheduled task is persisted in ``plan_tasks`` under a
+        stable :func:`plan_task_key`, so re-generating the plan (which
+        happens on every load) recognises previously completed work
+        instead of resurrecting identical unchecked items. The per-day
+        item count is shaped by the learner's streak via
+        :meth:`_commitment_context`.
+        """
         target_days = max(1, min(int(days), 31))
-        target_daily_items = max(1, min(int(daily_items), 10))
+        requested_daily_items = max(1, min(int(daily_items), 10))
+        profile = self.get_profile(user_id=user_id)
+        commitment = self._commitment_context(user_id=user_id, profile=profile)
+        target_daily_items = _streak_adjusted_daily_items(
+            requested_daily_items, behind=commitment["behind"]
+        )
+        commitment["requested_daily_items"] = requested_daily_items
+        commitment["effective_daily_items"] = target_daily_items
         recs_payload = self.build_recommendations(
             user_id=user_id,
             limit=max(target_days * target_daily_items * 2, 8),
@@ -978,19 +1067,27 @@ class LearningPlannerStore:
                         "tasks": [],
                     }
                 )
+            self._annotate_plan_completion(
+                user_id=user_id,
+                days_plan=days_plan,
+                commitment=commitment,
+            )
             return {
                 "generated_at": _to_iso(now),
                 "days": target_days,
                 "daily_items": target_daily_items,
                 "total_tasks": 0,
                 "days_plan": days_plan,
+                "commitment": commitment,
             }
 
         cursor = 0
         for idx in range(target_days):
             tasks: list[dict[str, Any]] = []
             used_ids: set[str] = set()
+            day_occurrences: dict[tuple[str, str], int] = {}
             guard = 0
+            day_date = (now + timedelta(days=idx)).date().isoformat()
             while len(tasks) < target_daily_items and guard < len(recs) * 4:
                 guard += 1
                 rec = recs[cursor % len(recs)]
@@ -1000,6 +1097,8 @@ class LearningPlannerStore:
                     continue
                 rec_type = str(rec["recommendation_type"])
                 task_type = "topic_study" if rec_type == "study" else rec_type
+                occurrence = day_occurrences.get((task_type, topic_id), 0) + 1
+                day_occurrences[(task_type, topic_id)] = occurrence
                 tasks.append(
                     {
                         "task_type": task_type,
@@ -1008,12 +1107,18 @@ class LearningPlannerStore:
                         "reason": str(rec["reason"]),
                         "estimated_minutes": int(rec["estimated_minutes"]),
                         "cta_route": str(rec["cta_route"]),
+                        "recommendation_id": str(rec.get("recommendation_id") or ""),
+                        "task_key": plan_task_key(
+                            task_date=day_date,
+                            task_type=task_type,
+                            topic_id=topic_id,
+                            occurrence=occurrence,
+                        ),
                     }
                 )
                 if topic_id:
                     used_ids.add(topic_id)
 
-            day_date = (now + timedelta(days=idx)).date().isoformat()
             days_plan.append(
                 {
                     "day_index": idx + 1,
@@ -1023,10 +1128,358 @@ class LearningPlannerStore:
                 }
             )
 
+        self._persist_plan_tasks(
+            user_id=user_id, days_plan=days_plan, created_at=_to_iso(now)
+        )
+        self._annotate_plan_completion(
+            user_id=user_id,
+            days_plan=days_plan,
+            commitment=commitment,
+        )
         return {
             "generated_at": _to_iso(now),
             "days": target_days,
             "daily_items": target_daily_items,
             "total_tasks": sum(len(day["tasks"]) for day in days_plan),
             "days_plan": days_plan,
+            "commitment": commitment,
         }
+
+    # ── Plan-task persistence (commitment device) ────────────────
+    def _commitment_context(
+        self, *, user_id: str, profile: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Streak/daily-goal inputs that shape today's plan load.
+
+        The gamification tables (``gamification_state`` +
+        ``xp_events``) share this database file, so the planner reads
+        them directly instead of holding a service reference — the
+        router and the MCP ``get_study_plan`` tool then get identical
+        commitment shaping for free.
+
+        Streak semantics mirror
+        :meth:`GamificationService.get_summary`: the live streak is
+        recomputed on read, so activity today (or yesterday, with the
+        day not over yet) keeps the live streak, while any longer
+        silence lapses it to zero without mutating history.
+
+        Documented rule (deterministic; the only clock input is the
+        user-timezone date):
+
+        * ``streak_at_risk`` — last activity was *yesterday* and
+          nothing is logged today: the streak survives only if the
+          learner does something today.
+        * ``streak_lapsed`` — at least one full day was missed while
+          the learner had earlier activity (``longest_streak`` > 0 or
+          any learning event); the live streak already reads zero.
+        * ``behind`` = ``streak_at_risk or streak_lapsed`` — the
+          learner has missed days, so
+          :meth:`build_study_plan` halves the daily item count
+          (``ceil(n / 2)``, minimum 1) to a restart-sized commitment.
+        * ``catch_up`` = ``behind or today_progress < daily_goal`` —
+          surfaced by the UI as a catch-up prompt. A learner with no
+          history at all is not "behind" and keeps the full load.
+        """
+        timezone = str(profile.get("timezone") or "UTC")
+        today = today_in_timezone(timezone)
+        state = {
+            "current_streak": 0,
+            "longest_streak": 0,
+            "daily_goal": DEFAULT_DAILY_GOAL,
+            "last_activity_date": None,
+        }
+        if self._table_exists("gamification_state"):
+            row = self._conn.execute(
+                """
+                SELECT current_streak, longest_streak, daily_goal,
+                       last_activity_date
+                FROM gamification_state
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            if row is not None:
+                state = {
+                    "current_streak": int(row["current_streak"] or 0),
+                    "longest_streak": int(row["longest_streak"] or 0),
+                    "daily_goal": int(row["daily_goal"] or DEFAULT_DAILY_GOAL),
+                    "last_activity_date": (
+                        str(row["last_activity_date"])
+                        if row["last_activity_date"] is not None
+                        else None
+                    ),
+                }
+
+        last_activity = state["last_activity_date"]
+        has_history = state["longest_streak"] > 0 or self._count_commitment_events(
+            user_id=user_id
+        ) > 0
+        try:
+            streak_at_risk = bool(
+                last_activity and add_days(last_activity, 1) == today
+            )
+        except ValueError:
+            # Malformed anchor: treat it as no streak rather than failing
+            # the whole plan build.
+            streak_at_risk = False
+        streak_lapsed = bool(
+            last_activity and last_activity != today and not streak_at_risk
+        ) and has_history
+        today_progress = self._count_commitment_events(
+            user_id=user_id, day=today, timezone=timezone
+        )
+        behind = bool(streak_at_risk or streak_lapsed)
+        return {
+            "daily_goal": max(1, state["daily_goal"]),
+            "today_progress": today_progress,
+            "current_streak": state["current_streak"],
+            "longest_streak": state["longest_streak"],
+            "streak_at_risk": streak_at_risk,
+            "streak_lapsed": streak_lapsed,
+            "behind": behind,
+            "catch_up": bool(behind or today_progress < state["daily_goal"]),
+            "completed_tasks": 0,
+            "pending_tasks": 0,
+        }
+
+    def _count_commitment_events(
+        self,
+        *,
+        user_id: str,
+        day: str | None = None,
+        timezone: str = "UTC",
+    ) -> int:
+        """Learning events (attempts + card reviews) for the daily goal.
+
+        Mirrors :meth:`GamificationStore.count_events_on_date`: with
+        no ``day`` it counts every learning event (used to decide
+        whether the learner has any history at all); with one it
+        counts the events whose ``created_at`` falls on that date in
+        the user's timezone.
+        """
+        if not self._table_exists("xp_events"):
+            return 0
+        rows = self._conn.execute(
+            """
+            SELECT created_at FROM xp_events
+            WHERE user_id = ?
+              AND event_type IN (?, ?)
+            """,
+            (user_id, *_COMMITMENT_EVENT_TYPES),
+        ).fetchall()
+        if day is None:
+            return len(rows)
+        try:
+            tz = ZoneInfo(str(timezone or "UTC"))
+        except Exception:
+            tz = ZoneInfo("UTC")
+        count = 0
+        for row in rows:
+            try:
+                moment = datetime.fromisoformat(str(row["created_at"]))
+            except ValueError:
+                continue
+            if moment.astimezone(tz).date().isoformat() == day:
+                count += 1
+        return count
+
+    @staticmethod
+    def _plan_task_payload(task: dict[str, Any]) -> dict[str, Any]:
+        """The persisted slice of a scheduled task.
+
+        ``task_key`` rides along so a stored row stays self-describing
+        (it is derivable from the key schedule, but the planner hands
+        it over when it builds the plan).
+        """
+        return {
+            "task_type": str(task.get("task_type") or ""),
+            "topic_id": str(task.get("topic_id") or ""),
+            "title": str(task.get("title") or ""),
+            "reason": str(task.get("reason") or ""),
+            "estimated_minutes": int(task.get("estimated_minutes") or 0),
+            "cta_route": str(task.get("cta_route") or ""),
+            "recommendation_id": str(task.get("recommendation_id") or ""),
+            "task_key": str(task.get("task_key") or ""),
+        }
+
+    def _persist_plan_tasks(
+        self,
+        *,
+        user_id: str,
+        days_plan: list[dict[str, Any]],
+        created_at: str,
+    ) -> None:
+        """Upsert every scheduled task, preserving completion state.
+
+        ``completed_at`` is deliberately never touched here: a task
+        the learner already completed stays completed when the plan is
+        regenerated, which is what makes the plan a commitment device
+        rather than a snapshot.
+        """
+        rows: list[tuple[Any, ...]] = []
+        for day in days_plan:
+            task_date = str(day["date"])
+            for task in day["tasks"]:
+                rows.append(
+                    (
+                        user_id,
+                        task_date,
+                        str(task["task_key"]),
+                        json.dumps(
+                            self._plan_task_payload(task), ensure_ascii=True
+                        ),
+                        created_at,
+                    )
+                )
+        if not rows:
+            return
+        with self._lock:
+            with self._conn:
+                self._conn.executemany(
+                    """
+                    INSERT INTO plan_tasks(
+                        user_id, task_date, task_key, payload_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, task_date, task_key) DO UPDATE SET
+                        payload_json = excluded.payload_json
+                    """,
+                    rows,
+                )
+
+    @staticmethod
+    def _plan_task_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        payload = _loads_json_dict(str(row["payload_json"]))
+        completed_at = row["completed_at"]
+        return {
+            "task_key": str(row["task_key"]),
+            "task_date": str(row["task_date"]),
+            "task_type": str(payload.get("task_type") or ""),
+            "topic_id": str(payload.get("topic_id") or ""),
+            "title": str(payload.get("title") or ""),
+            "reason": str(payload.get("reason") or ""),
+            "estimated_minutes": int(payload.get("estimated_minutes") or 0),
+            "cta_route": str(payload.get("cta_route") or ""),
+            "completed": completed_at is not None,
+            "completed_at": str(completed_at) if completed_at is not None else None,
+        }
+
+    def _annotate_plan_completion(
+        self,
+        *,
+        user_id: str,
+        days_plan: list[dict[str, Any]],
+        commitment: dict[str, Any],
+    ) -> None:
+        """Attach ``task_key``/``completed`` to every scheduled task.
+
+        Also fills the commitment counters so completed work is never
+        re-counted as pending.
+        """
+        dates = [str(day["date"]) for day in days_plan]
+        if dates:
+            placeholders = ", ".join("?" for _ in dates)
+            rows = self._conn.execute(
+                f"""
+                SELECT task_date, task_key, completed_at
+                FROM plan_tasks
+                WHERE user_id = ? AND task_date IN ({placeholders})
+                """,
+                (user_id, *dates),
+            ).fetchall()
+        else:
+            rows = []
+        completed_keys = {
+            (str(row["task_date"]), str(row["task_key"]))
+            for row in rows
+            if row["completed_at"] is not None
+        }
+        completed = 0
+        total = 0
+        for day in days_plan:
+            task_date = str(day["date"])
+            for task in day["tasks"]:
+                total += 1
+                task_key = str(task.get("task_key") or "")
+                task["task_key"] = task_key
+                task["completed"] = (task_date, task_key) in completed_keys
+                if task["completed"]:
+                    completed += 1
+        commitment["completed_tasks"] = completed
+        commitment["pending_tasks"] = total - completed
+
+    def list_plan_tasks(self, *, user_id: str, task_date: str) -> list[dict[str, Any]]:
+        """Every persisted task scheduled on ``task_date`` (ISO date)."""
+        rows = self._conn.execute(
+            """
+            SELECT * FROM plan_tasks
+            WHERE user_id = ? AND task_date = ?
+            ORDER BY id ASC
+            """,
+            (user_id, task_date),
+        ).fetchall()
+        return [self._plan_task_row_to_dict(row) for row in rows]
+
+    def complete_plan_task(
+        self, *, user_id: str, task_key: str, task_date: str
+    ) -> dict[str, Any] | None:
+        """Mark a persisted task complete; ``None`` when it is unknown.
+
+        Idempotent: completing an already-completed task keeps the
+        original ``completed_at``.
+        """
+        key = str(task_key or "").strip()
+        if not key:
+            return None
+        now_iso = _to_iso(_utc_now())
+        with self._lock:
+            with self._conn:
+                cursor = self._conn.execute(
+                    """
+                    UPDATE plan_tasks
+                    SET completed_at = ?
+                    WHERE user_id = ? AND task_key = ? AND task_date = ?
+                      AND completed_at IS NULL
+                    """,
+                    (now_iso, user_id, key, task_date),
+                )
+                if cursor.rowcount == 0 and self._plan_task_row(
+                    user_id=user_id, task_key=key, task_date=task_date
+                ) is None:
+                    return None
+        row = self._plan_task_row(
+            user_id=user_id, task_key=key, task_date=task_date
+        )
+        return self._plan_task_row_to_dict(row) if row is not None else None
+
+    def uncomplete_plan_task(
+        self, *, user_id: str, task_key: str, task_date: str
+    ) -> dict[str, Any] | None:
+        """Clear a completion; ``None`` when the task is unknown."""
+        key = str(task_key or "").strip()
+        if not key:
+            return None
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    UPDATE plan_tasks
+                    SET completed_at = NULL
+                    WHERE user_id = ? AND task_key = ? AND task_date = ?
+                    """,
+                    (user_id, key, task_date),
+                )
+        row = self._plan_task_row(
+            user_id=user_id, task_key=key, task_date=task_date
+        )
+        return self._plan_task_row_to_dict(row) if row is not None else None
+
+    def _plan_task_row(
+        self, *, user_id: str, task_key: str, task_date: str
+    ) -> sqlite3.Row | None:
+        return self._conn.execute(
+            """
+            SELECT * FROM plan_tasks
+            WHERE user_id = ? AND task_key = ? AND task_date = ?
+            """,
+            (user_id, task_key, task_date),
+        ).fetchone()

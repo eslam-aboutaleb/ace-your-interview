@@ -28,6 +28,8 @@ from app.schemas.models import (
     LearningReviewResponse,
     NextObjectiveItem,
     NextObjectivesResponse,
+    PlanTaskItem,
+    PlanTaskListResponse,
     ProfileDiagnosticResponse,
     RecommendationsResponse,
     ReviewQueueResponse,
@@ -616,3 +618,84 @@ async def error_patterns(
         limit=limit,
     )
     return ErrorPatternListResponse(items=items, total=len(items))
+
+
+# ── Plan commitment: completable study-plan tasks ───────────────────────────
+
+
+def _require_task_date(value: str) -> str:
+    task_date = LearningPlannerStore._sanitize_date(value)
+    if not task_date:
+        raise HTTPException(
+            status_code=422, detail="task_date must be an ISO date (YYYY-MM-DD)"
+        )
+    return task_date
+
+
+@router.get("/plan-tasks", response_model=PlanTaskListResponse)
+async def list_plan_tasks(
+    task_date: str = Query(..., description="ISO date (YYYY-MM-DD)"),
+    user: dict = Depends(require_auth),
+):
+    """Persisted plan tasks for one date, with their completion state.
+
+    The study-plan endpoint already embeds per-task completion; this
+    endpoint reads the same ``plan_tasks`` rows on their own so any
+    surface can poll a single day's commitment.
+    """
+    _ensure_enabled()
+    if _planner is None:
+        raise HTTPException(status_code=503, detail="Learning planner not initialised")
+    clean_date = _require_task_date(task_date)
+    items = await _planner.run_async(
+        _planner.list_plan_tasks,
+        user_id=user["user"],
+        task_date=clean_date,
+    )
+    return PlanTaskListResponse(
+        items=[PlanTaskItem(**item) for item in items], total=len(items)
+    )
+
+
+@router.post("/plan-tasks/{task_key}/complete", response_model=PlanTaskItem)
+async def complete_plan_task(
+    task_key: str,
+    task_date: str = Query(..., description="ISO date (YYYY-MM-DD)"),
+    user: dict = Depends(require_auth),
+):
+    """Mark a scheduled plan task complete (idempotent)."""
+    _ensure_enabled()
+    if _planner is None:
+        raise HTTPException(status_code=503, detail="Learning planner not initialised")
+    clean_date = _require_task_date(task_date)
+    task = await _planner.run_async(
+        _planner.complete_plan_task,
+        user_id=user["user"],
+        task_key=task_key,
+        task_date=clean_date,
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="Plan task not found")
+    return PlanTaskItem(**task)
+
+
+@router.post("/plan-tasks/{task_key}/uncomplete", response_model=PlanTaskItem)
+async def uncomplete_plan_task(
+    task_key: str,
+    task_date: str = Query(..., description="ISO date (YYYY-MM-DD)"),
+    user: dict = Depends(require_auth),
+):
+    """Clear a completion (idempotent revert path for the UI)."""
+    _ensure_enabled()
+    if _planner is None:
+        raise HTTPException(status_code=503, detail="Learning planner not initialised")
+    clean_date = _require_task_date(task_date)
+    task = await _planner.run_async(
+        _planner.uncomplete_plan_task,
+        user_id=user["user"],
+        task_key=task_key,
+        task_date=clean_date,
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="Plan task not found")
+    return PlanTaskItem(**task)

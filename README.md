@@ -163,6 +163,7 @@ STUDY_DEV_AUTH_BYPASS_LOCALHOST=true
 | GET | `/api/learning/study-plan`, `/forecast`, `/calibration`, `/recommendations`, `/next-objectives` | Planning endpoints |
 | GET/PUT/POST | `/api/learning/profile`, `/profile/diagnostic`, `/review` | Learning profile & review recording |
 | POST | `/api/learning/plan-from-jd` | Study plan built from a job description |
+| GET/POST | `/api/learning/plan-tasks`, `/plan-tasks/{task_key}/complete`, `/plan-tasks/{task_key}/uncomplete` | Persisted plan tasks and their completion state (commitment device) |
 | **Flashcards** | | |
 | GET/POST | `/api/decks` | List / create decks |
 | GET/PUT/DELETE | `/api/decks/{deck_id}` | Deck management |
