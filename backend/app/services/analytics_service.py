@@ -171,12 +171,17 @@ class AnalyticsService:
         ``is_correct`` is computed per topic and overall,
         in ``created_at`` order; each day contributes the
         EMA value at the end of that day.
+
+        Interview turns (``mode='interview'``) are excluded: they grade a
+        competency rather than a topic, so counting them would move the
+        curve whenever a mock interview ran. They stay readable through
+        ``LearningStore.get_interview_competencies``.
         """
         rows = self._conn.execute(
             """
             SELECT topic_id, is_correct, created_at
             FROM learning_attempts
-            WHERE user_id = ?
+            WHERE user_id = ? AND mode != 'interview'
             ORDER BY created_at ASC, id ASC
             """,
             (user_id,),

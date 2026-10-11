@@ -560,12 +560,16 @@ class LearningPlannerStore:
         if not self._table_exists("fsrs_cards"):
             return []
         now_iso = _to_iso(_utc_now())
+        # Interview-sourced cards are excluded: their pseudo-topic
+        # (``interview-competency``) is a skill bucket, not curriculum, so a
+        # plan must never be built around it.
         cards = self._conn.execute(
             """
             SELECT topic_id, card_id, stability, difficulty,
-                   due_at, last_review_at, reps, lapses, suspended
+                   due_at, last_review_at, reps, lapses, suspended,
+                   source_type
             FROM fsrs_cards
-            WHERE user_id = ?
+            WHERE user_id = ? AND source_type != 'interview'
             ORDER BY topic_id ASC, card_id ASC
             """,
             (user_id,),

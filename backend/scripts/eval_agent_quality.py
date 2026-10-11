@@ -1560,7 +1560,214 @@ def _case_input_for(fixture_dir: Path, case: CaseResult) -> dict[str, Any]:
     return {}
 
 
+# ── Interview calibration (LIVE tier only) ─────────────────────────────────
+#: Human-graded interview answers, kept out of ``FLOW_FILES`` on purpose: the
+#: deterministic tier never reads this file, so adding or editing it cannot move
+#: an offline gate. Only ``--live`` replays the answers and reports the model's
+#: rubric against the human scores.
+CALIBRATION_FILE = "interview_calibration.jsonl"
+
+#: Rubric dimensions a calibration row must supply a human score for.
+CALIBRATION_DIMENSIONS: tuple[str, ...] = (
+    "technical_accuracy",
+    "reasoning_depth",
+    "communication_clarity",
+    "completeness",
+    "confidence_signal",
+)
+
+
+def load_calibration_fixtures(fixture_dir: Path) -> list[dict[str, Any]]:
+    """Load the human-graded interview calibration answers.
+
+    Each row carries the interview ``session``, the ``question``, the human
+    ``answer``, that answer's ``human_scores`` (0-5 per rubric dimension), and a
+    ``rationale`` naming the evidence behind the human grade. The shape is
+    validated here so a malformed file fails loudly in the live tier instead of
+    silently reporting agreement against nothing.
+    """
+    path = Path(fixture_dir) / CALIBRATION_FILE
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{CALIBRATION_FILE}:{line_no}: invalid JSON ({exc})") from exc
+        where = f"{CALIBRATION_FILE}:{line_no}"
+        case_id = str(row.get("case_id") or "").strip()
+        if not case_id:
+            raise ValueError(f"{where}: missing case_id")
+        if case_id in seen:
+            raise ValueError(f"{where}: duplicate case_id {case_id!r}")
+        seen.add(case_id)
+        case_input = row.get("input")
+        if not isinstance(case_input, dict):
+            raise ValueError(f"{where}: missing input object")
+        for key in ("session", "question", "answer"):
+            if key not in case_input:
+                raise ValueError(f"{where}: input.{key} is required")
+        if not isinstance(case_input["session"], dict):
+            raise ValueError(f"{where}: input.session must be an object")
+        scores = row.get("human_scores")
+        if not isinstance(scores, dict):
+            raise ValueError(f"{where}: human_scores object is required")
+        for dimension in CALIBRATION_DIMENSIONS:
+            value = scores.get(dimension)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 5:
+                raise ValueError(
+                    f"{where}: human_scores.{dimension} must be an integer 0-5"
+                )
+        if not str(row.get("rationale") or "").strip():
+            raise ValueError(f"{where}: rationale is required")
+        rows.append(
+            {
+                "case_id": case_id,
+                "input": {
+                    "session": dict(case_input["session"]),
+                    "question": str(case_input["question"]),
+                    "answer": str(case_input["answer"]),
+                    "question_contract": dict(case_input.get("question_contract") or {}),
+                },
+                "human_scores": {d: int(scores[d]) for d in CALIBRATION_DIMENSIONS},
+                "rationale": str(row["rationale"]),
+            }
+        )
+    return rows
+
+
+def compare_calibration(human: dict[str, int], model: dict[str, Any]) -> dict[str, Any]:
+    """Compare one answer's human rubric against the model's rubric.
+
+    The model scores 0-5 per dimension, so the comparison is direct: per
+    dimension delta plus whether the two agree within one point.
+    """
+    deltas: dict[str, int] = {}
+    within_one = True
+    for dimension in CALIBRATION_DIMENSIONS:
+        human_value = int(human.get(dimension, 0))
+        model_raw = (model or {}).get(dimension)
+        model_value = (
+            int(model_raw)
+            if isinstance(model_raw, (int, float)) and not isinstance(model_raw, bool)
+            else human_value
+        )
+        deltas[dimension] = model_value - human_value
+        if abs(deltas[dimension]) > 1:
+            within_one = False
+    return {
+        "deltas": deltas,
+        "mean_absolute_error": round(
+            sum(abs(delta) for delta in deltas.values()) / len(deltas), 4
+        ),
+        "within_one_point": within_one,
+    }
+
+
+def _live_calibration(
+    cases: Sequence[dict[str, Any]],
+    interview: Any,
+    *,
+    provider_configured: bool,
+) -> dict[str, Any]:
+    """Replay calibration answers and score the model against the humans.
+
+    A per-answer failure is recorded and the run continues, so one provider
+    outage cannot cost the whole calibration report. Without credentials the
+    section reports unavailable rather than inventing agreement.
+    """
+    if not cases:
+        return {"available": False, "reason": "calibration_file_absent", "answers": 0, "rows": []}
+    if not provider_configured:
+        return {
+            "available": False,
+            "reason": "provider_not_configured",
+            "answers": 0,
+            "rows": [],
+        }
+    rows: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    total_mae = 0.0
+    compared = 0
+    for case in cases:
+        case_id = case["case_id"]
+        human = case["human_scores"]
+        try:
+            result = asyncio.run(
+                interview.evaluate_answer(
+                    session=dict(case["input"]["session"]),
+                    question=case["input"]["question"],
+                    user_answer=case["input"]["answer"],
+                    turn_index=int(case["input"]["session"].get("turns_completed", 0) or 0),
+                    question_contract=dict(case["input"].get("question_contract") or {})
+                    or None,
+                )
+            )
+        except Exception as exc:  # pragma: no cover - live tier only
+            errors.append({"case_id": case_id, "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        rubric = result.get("rubric") if isinstance(result, dict) else {}
+        comparison = compare_calibration(human, rubric or {})
+        compared += 1
+        total_mae += float(comparison["mean_absolute_error"])
+        rows.append(
+            {
+                "case_id": case_id,
+                "human_scores": human,
+                "model_scores": {
+                    dimension: rubric.get(dimension)
+                    for dimension in CALIBRATION_DIMENSIONS
+                },
+                "deltas": comparison["deltas"],
+                "within_one_point": comparison["within_one_point"],
+                "rationale": case["rationale"],
+            }
+        )
+    return {
+        "available": bool(cases),
+        "answers": compared,
+        "errors": errors,
+        "mean_absolute_error": round(total_mae / compared, 4) if compared else 0.0,
+        "agreement_within_one_point": round(
+            sum(1 for row in rows if row["within_one_point"]) / len(rows), 4
+        )
+        if rows
+        else 0.0,
+        "rows": rows,
+    }
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────
+
+
+def _live_interview_generator() -> Any:
+    """A real ``InterviewGenerator`` on a plain client for the calibration pass."""
+    from app.services.doc_parser import DocParser
+    from app.services.interview_generator import InterviewGenerator
+    from app.services.llm_client import LLMClient
+
+    return InterviewGenerator(LLMClient(), DocParser())
+
+
+def _print_calibration(calibration: dict[str, Any]) -> None:
+    print("\nCALIBRATION (human-graded interview answers)")
+    if not calibration.get("available"):
+        print(f"- unavailable ({calibration.get('reason', 'unknown')})")
+        return
+    print(f"- answers: {calibration['answers']}")
+    print(f"- mean_absolute_error: {calibration['mean_absolute_error']}")
+    print(f"- agreement_within_one_point: {calibration['agreement_within_one_point']}")
+    for row in calibration.get("rows", []):
+        print(
+            f"- {row['case_id']}: within_one_point={row['within_one_point']} "
+            f"deltas={json.dumps(row['deltas'], sort_keys=True)}"
+        )
+    for error in calibration.get("errors", []):
+        print(f"- {error['case_id']}: {error['error']}")
 
 
 def _print_report(report: dict[str, Any]) -> None:
@@ -1642,16 +1849,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         live = asyncio.run(
             _live_regenerate(cases, fixture_dir, golden_dir, [f for f in args.live_flow.split(",") if f])
         )
+        calibration_cases = load_calibration_fixtures(fixture_dir)
         report = run_eval(fixture_dir)
         report["tier"] = "live"
         report["live"] = live
         report["golden_diff"] = diff_golden(fixture_dir, golden_dir)
+        # Human-graded calibration: only reported here, and only when the file
+        # exists, so the offline tier's report shape is unchanged.
+        report["calibration"] = _live_calibration(
+            calibration_cases,
+            _live_interview_generator(),
+            provider_configured=bool(live.get("provider_configured")),
+        )
         if args.json:
             print(json.dumps(report, ensure_ascii=True, indent=2))
         else:
             _print_report(report)
             print("\nGOLDEN DIFF")
             print(json.dumps(report["golden_diff"], ensure_ascii=True, indent=2))
+            _print_calibration(report["calibration"])
         return 1 if report["gate_failures"] else 0
 
     report = run_eval(fixture_dir)

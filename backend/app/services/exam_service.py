@@ -30,6 +30,7 @@ from app.services.exam_store import (
     ExamStore,
 )
 from app.services.gamification_service import GamificationService
+from app.services.learner_memory import build_learner_state_block
 from app.services.learning_store import LearningStore
 from app.services.card_store import CardStore
 from app.services.llm_client import parse_json_object
@@ -294,11 +295,20 @@ class ExamService:
             )
         if not topics_content:
             return []
+        # Same learner-state seam questions.py uses: exams must see the
+        # learner's weak areas, error patterns, and interview competency gaps
+        # instead of generating questions from a blank slate.
+        learner_state = build_learner_state_block(
+            str(user_id or ""),
+            topic_id=(topic_ids[0] if topic_ids else None),
+            track=None,
+        )
         try:
             response = await self._question_generator.generate_quiz_v2(
                 topics_content=topics_content,
                 count=max(1, min(int(count), MAX_QUESTIONS)),
                 question_types=["mcq"],
+                learner_state=learner_state,
             )
         except Exception:
             logger.warning(

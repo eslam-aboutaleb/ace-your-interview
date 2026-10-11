@@ -816,8 +816,13 @@ class LearningStore:
         ``question``/``flashcard``/``interview``/``exam``. The
         ``LearningMode`` values are ``study``/``quiz``, so both map to
         ``question``. Interview turns are recorded with
-        ``interview:``-prefixed question ids and map to ``interview``.
+        ``interview:``-prefixed question ids — including the
+        ``interview-competency:<dimension>`` competency cards — and map to
+        ``interview``, so topic-mastery aggregation can exclude them while the
+        rows stay available for competency analysis.
         """
+        if str(mode).strip().lower() == "interview":
+            return "interview"
         if str(question_id).startswith("interview:"):
             return "interview"
         return "question"
@@ -1190,13 +1195,15 @@ class LearningStore:
             SELECT topic_id, card_id, stability, difficulty,
                    due_at, last_review_at, reps, lapses, suspended
             FROM fsrs_cards
-            WHERE user_id = ?
+            WHERE user_id = ? AND source_type != 'interview'
             ORDER BY topic_id ASC, card_id ASC
             """,
             (user_id,),
         ).fetchall()
         # Per-topic review accuracy from the review log, joined to
         # cards so each logged review rolls up under its card's topic.
+        # Interview-sourced cards are excluded here too: an interview
+        # competency is not a topic, so it must not move a topic's accuracy.
         accuracy_rows = self._conn.execute(
             """
             SELECT c.topic_id AS topic_id,
@@ -1206,6 +1213,7 @@ class LearningStore:
             FROM fsrs_review_log l
             JOIN fsrs_cards c
               ON c.user_id = l.user_id AND c.card_id = l.card_id
+             AND c.source_type != 'interview'
             WHERE l.user_id = ?
             GROUP BY c.topic_id
             """,
@@ -1260,6 +1268,73 @@ class LearningStore:
             for topic_id, scores in sorted(totals.items())
         ]
         return {"topics": topics[: max(0, int(limit))]}
+
+    def get_interview_competencies(self, *, user_id: str) -> dict:
+        """Competency-level strength read from interview turns.
+
+        Interview turns are recorded as one competency card per scored rubric
+        dimension (``interview-competency:<dimension>``, ``mode="interview"``).
+        They are excluded from topic mastery on purpose, so this is where that
+        evidence is read from: weaknesses come back weakest-first so the next
+        interview round can focus on them.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT card_id, stability, difficulty, due_at,
+                   last_review_at, reps, lapses, suspended
+            FROM fsrs_cards
+            WHERE user_id = ? AND source_type = 'interview'
+            ORDER BY card_id ASC
+            """,
+            (user_id,),
+        ).fetchall()
+        now_iso = _to_iso(_utc_now())
+        competencies: list[dict[str, Any]] = []
+        for row in rows:
+            card_id = str(row["card_id"])
+            prefix = "interview-competency:"
+            competency = (
+                card_id[len(prefix):] if card_id.startswith(prefix) else card_id
+            )
+            if not competency:
+                continue
+            reps = int(row["reps"] or 0)
+            lapses = int(row["lapses"] or 0)
+            suspended = int(row["suspended"] or 0) == 1
+            competencies.append(
+                {
+                    "competency": competency,
+                    "reps": reps,
+                    "lapses": lapses,
+                    "retention": fsrs_scheduler.retention_estimate(
+                        {
+                            "stability": (
+                                float(row["stability"])
+                                if row["stability"] is not None
+                                else None
+                            ),
+                            "last_review_at": (
+                                str(row["last_review_at"])
+                                if row["last_review_at"] is not None
+                                else None
+                            ),
+                        }
+                    ),
+                    "due": bool(
+                        not suspended and str(row["due_at"] or "") <= now_iso
+                    ),
+                    "suspended": suspended,
+                }
+            )
+        weaknesses = sorted(
+            competencies,
+            key=lambda item: (item["retention"], -item["reps"], item["competency"]),
+        )
+        return {
+            "competencies": competencies,
+            "weakest": [item["competency"] for item in weaknesses],
+            "total": len(competencies),
+        }
 
     def backfill_fsrs_from_progress(
         self, *, batch_size: int = 500
@@ -1366,13 +1441,21 @@ class LearningStore:
         }
 
     def get_weak_areas(self, *, user_id: str, limit: int = 10) -> dict:
+        """Topic-level weakness, driven by the FSRS curriculum cards.
+
+        Interview competency cards are excluded: they teach a skill
+        (communication, tradeoffs, system design), not a topic, so including
+        the ``interview-competency`` pseudo-topic would invent a weak area
+        that no study material addresses. The rows stay readable through
+        :meth:`get_interview_competencies`.
+        """
         now_iso = _to_iso(_utc_now())
         rows = self._conn.execute(
             """
             SELECT topic_id, card_id, stability, difficulty,
                    due_at, last_review_at, reps, lapses, suspended
             FROM fsrs_cards
-            WHERE user_id = ?
+            WHERE user_id = ? AND source_type != 'interview'
             ORDER BY topic_id ASC, card_id ASC
             """,
             (user_id,),
@@ -1388,6 +1471,7 @@ class LearningStore:
             FROM fsrs_review_log l
             JOIN fsrs_cards c
               ON c.user_id = l.user_id AND c.card_id = l.card_id
+             AND c.source_type != 'interview'
             WHERE l.user_id = ?
             GROUP BY c.topic_id
             """,

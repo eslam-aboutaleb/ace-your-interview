@@ -21,7 +21,7 @@ class AnalyticsServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def _record_attempt(
-        self, *, user_id="u1", topic_id="t1", is_correct=True
+        self, *, user_id="u1", topic_id="t1", is_correct=True, mode="quiz"
     ):
         return self.learning.record_attempt(
             user_id=user_id,
@@ -31,8 +31,23 @@ class AnalyticsServiceTests(unittest.IsolatedAsyncioTestCase):
             is_correct=is_correct,
             confidence=4,
             response_time_ms=1200,
-            mode="quiz",
+            mode=mode,
         )
+
+    async def test_mastery_curve_excludes_interview_turns(self):
+        # A quiz run and an interview turn both write learning_attempts rows;
+        # the curve must track topic mastery only, so the interview row is
+        # invisible to it while still being stored for competency analysis.
+        await self._record_attempt(is_correct=True)
+        await self._record_attempt(is_correct=False, mode="interview")
+        curve = await self.service.run_async(
+            self.service.mastery_curve, user_id="u1"
+        )
+        topics = {t["topic_id"] for t in curve["topics"]}
+        self.assertIn("t1", topics)
+        self.assertNotIn("interview-competency", topics)
+        points = curve["points"]
+        self.assertEqual(points[-1]["mastery"], 1.0)
 
     async def test_heatmap_empty(self):
         result = await self.service.run_async(

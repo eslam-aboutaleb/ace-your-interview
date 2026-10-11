@@ -24,6 +24,7 @@ and validators, so a number it reports is a number production would agree with.
 | `interview.jsonl` | interview evaluation | the same 3x3 type/level matrix, notes that need follow-up-note repair, two degraded outputs, a hostile answer |
 | `chat.jsonl` | chat follow-up | normal markdown reply, a reply to a fence-breakout attempt |
 | `custom_topics.jsonl` | roadmap generation | opening/middle batches, hostile topic name, a 100-section aggregate |
+| `interview_calibration.jsonl` | interview calibration (**live tier only**) | human-graded interview answers with human rubric scores, used to report where the evaluator disagrees with a human |
 
 ### Matrix coverage is gated
 
@@ -81,6 +82,51 @@ python scripts/eval_agent_quality.py --blame-prompts
 and review the diff. The snapshot never suppresses the two derived gates
 (`prompt_contract_rate`, `prompt_output_field_rate`), so re-baselining cannot
 hide a contract that production no longer describes.
+
+`prompt_snapshots.json` covers every prompt the harness rebuilds, and the
+snapshot never suppresses the two derived gates
+(`prompt_contract_rate`, `prompt_output_field_rate`), so re-baselining cannot
+hide a contract that production no longer describes.
+
+## `interview_calibration.jsonl` (human grading, live tier only)
+
+Twelve interview answers a human graded on the same 0-5 rubric the evaluator
+uses, so a live run can report **where the model's rubric disagrees with a
+human** rather than only whether it parsed:
+
+```json
+{
+  "case_id": "interview_calibration.coding.mid.algorithmic",
+  "flow": "interview_calibration",
+  "tags": ["coding", "mid", "algorithm"],
+  "input": {
+    "session": { "...interview session, including persona: neutral..." },
+    "question": "…",
+    "answer": "…the human answer that was graded…",
+    "question_contract": { "...assessment contract, incl. optional code_contract..." }
+  },
+  "human_scores": {
+    "technical_accuracy": 5,
+    "reasoning_depth": 4,
+    "communication_clarity": 4,
+    "completeness": 4,
+    "confidence_signal": 4
+  },
+  "rationale": "…the evidence behind each human grade…"
+}
+```
+
+* The file is **not** in `FLOW_FILES`: the deterministic tier never reads it, so
+  editing or adding a row cannot move an offline gate.
+* `load_calibration_fixtures(evals)` validates the shape (case id, session,
+  question, answer, integer human scores 0-5, rationale) and raises rather than
+  reporting agreement against nothing.
+* `--live` replays each answer through
+  `InterviewGenerator.evaluate_answer` and reports per-dimension deltas, mean
+  absolute error, and the share of answers within one point of the human grade.
+  Without credentials the section reports `unavailable`, it never reports a pass.
+* `compare_calibration(human, model)` is exported for tests: it is the pure
+  comparison, deterministic and offline.
 
 ## `golden/`
 

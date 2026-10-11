@@ -11,10 +11,14 @@ from typing import Any
 
 from scripts import eval_agent_quality as harness
 from scripts.eval_agent_quality import (
+    CALIBRATION_DIMENSIONS,
+    CALIBRATION_FILE,
     DEFAULT_THRESHOLDS,
     FLOW_CONTRACTS,
     FORBIDDEN_FIXTURE_KEYS,
     PRODUCTION_VALIDATORS,
+    compare_calibration,
+    load_calibration_fixtures,
     load_cases,
     prompt_contract_violations,
     rebuild_prompt,
@@ -488,6 +492,170 @@ class DeterminismTests(unittest.TestCase):
         report = json.loads(buffer.getvalue())
         self.assertEqual(report["summary"]["total_cases"], len(load_cases(EVALS)))
         self.assertIn("retry_rate", report["summary"]["retry_distribution"])
+
+
+class InterviewCalibrationTests(unittest.TestCase):
+    """Human-graded calibration answers: live tier only, offline never.
+
+    The calibration file is deliberately outside ``FLOW_FILES``, so the
+    deterministic tier cannot load it, move a gate, or be blocked by it.
+    """
+
+    def test_the_calibration_file_is_not_a_deterministic_flow(self):
+        self.assertNotIn(CALIBRATION_FILE, FLOW_CONTRACTS)
+        self.assertNotIn(
+            CALIBRATION_FILE, [filename for filename in FLOW_CONTRACTS.values()]
+        )
+
+    def test_the_checked_in_fixtures_are_well_formed(self):
+        rows = load_calibration_fixtures(EVALS)
+        self.assertGreaterEqual(len(rows), 8)
+        self.assertLessEqual(len(rows), 12)
+        seen: set[str] = set()
+        for row in rows:
+            self.assertTrue(row["case_id"])
+            self.assertNotIn(row["case_id"], seen)
+            seen.add(row["case_id"])
+            self.assertIn(
+                row["input"]["session"]["interview_type"],
+                {"coding", "behavioral", "mixed", "system_design"},
+            )
+            self.assertTrue(row["input"]["question"].strip())
+            self.assertTrue(row["input"]["answer"].strip())
+            self.assertEqual(
+                sorted(row["human_scores"]), sorted(CALIBRATION_DIMENSIONS)
+            )
+            for score in row["human_scores"].values():
+                self.assertIsInstance(score, int)
+                self.assertGreaterEqual(score, 0)
+                self.assertLessEqual(score, 5)
+            self.assertTrue(row["rationale"].strip())
+
+    def test_the_fixtures_cover_the_system_design_and_coding_dimensions(self):
+        rows = load_calibration_fixtures(EVALS)
+        types = {row["input"]["session"]["interview_type"] for row in rows}
+        self.assertIn("system_design", types)
+        self.assertIn("coding", types)
+        # At least one answer carries a code contract, so the deterministic
+        # grader has something to grade.
+        contracts = [
+            row["input"].get("question_contract", {}).get("code_contract")
+            for row in rows
+        ]
+        self.assertTrue(any(contracts))
+        # At least one answer draws a diagram and one does not.
+        diagrams = ["```mermaid" in row["input"]["answer"] for row in rows]
+        self.assertTrue(any(diagrams))
+        self.assertFalse(all(diagrams))
+
+    def test_the_offline_report_carries_no_calibration_section(self):
+        import contextlib
+        import io
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            exit_code = harness.main(["--fixture-dir", str(EVALS), "--json"])
+        self.assertEqual(exit_code, 0)
+        report = json.loads(buffer.getvalue())
+        self.assertNotIn("calibration", report)
+
+    def test_a_live_run_reports_per_dimension_deltas_without_touching_a_provider(self):
+        """The live replay reports human-vs-model deltas, or nothing at all."""
+
+        class _StubEvaluator:
+            def __init__(self):
+                self.calls: list[dict] = []
+
+            async def evaluate_answer(self, **kwargs):
+                self.calls.append(dict(kwargs))
+                return {"rubric": {d: 3 for d in CALIBRATION_DIMENSIONS}}
+
+        evaluator = _StubEvaluator()
+        rows = load_calibration_fixtures(EVALS)
+        calibration = harness._live_calibration(
+            rows, evaluator, provider_configured=True
+        )
+        self.assertTrue(calibration["available"])
+        self.assertEqual(calibration["answers"], len(rows))
+        self.assertEqual(len(evaluator.calls), len(rows))
+        # Every dimension is graded one point away from the human's score, so
+        # the row records the delta rather than only the absolute numbers.
+        first = calibration["rows"][0]
+        # The stub scores a flat 3 everywhere, so the delta is the distance
+        # between that and the human grade, not an absolute score.
+        self.assertEqual(
+            first["deltas"]["technical_accuracy"],
+            3 - first["human_scores"]["technical_accuracy"],
+        )
+        self.assertIn(first["deltas"]["technical_accuracy"], range(-5, 6))
+        self.assertTrue(
+            all(abs(d) <= 3 for d in first["deltas"].values())
+        )
+        self.assertIsInstance(first["within_one_point"], bool)
+        self.assertGreaterEqual(calibration["agreement_within_one_point"], 0.0)
+        # The answer is replayed with the contract that produced it.
+        self.assertIn("question_contract", evaluator.calls[0])
+
+    def test_a_live_per_answer_failure_does_not_cost_the_report(self):
+        class _BrokenEvaluator:
+            async def evaluate_answer(self, **kwargs):
+                raise RuntimeError("provider 500")
+
+        calibration = harness._live_calibration(
+            load_calibration_fixtures(EVALS),
+            _BrokenEvaluator(),
+            provider_configured=True,
+        )
+        self.assertTrue(calibration["available"])
+        self.assertEqual(calibration["answers"], 0)
+        self.assertEqual(len(calibration["errors"]), len(load_calibration_fixtures(EVALS)))
+
+    def test_a_malformed_calibration_row_fails_loudly(self):
+        row = {
+            "case_id": "bad",
+            "input": {"session": {}, "question": "q", "answer": "a"},
+            "human_scores": {"technical_accuracy": 7},
+            "rationale": "r",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / CALIBRATION_FILE
+            path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_calibration_fixtures(Path(tmp))
+
+    def test_missing_dimension_fails_loudly(self):
+        row = {
+            "case_id": "bad",
+            "input": {"session": {}, "question": "q", "answer": "a"},
+            "human_scores": {"technical_accuracy": 3},
+            "rationale": "r",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / CALIBRATION_FILE
+            path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_calibration_fixtures(Path(tmp))
+
+    def test_comparison_reports_deltas_and_agreement(self):
+        human = {d: 3 for d in CALIBRATION_DIMENSIONS}
+        model = {d: 3 for d in CALIBRATION_DIMENSIONS}
+        result = compare_calibration(human, model)
+        self.assertEqual(result["mean_absolute_error"], 0.0)
+        self.assertTrue(result["within_one_point"])
+
+    def test_comparison_flags_a_disagreement_outside_one_point(self):
+        human = {d: 2 for d in CALIBRATION_DIMENSIONS}
+        model = {
+            "technical_accuracy": 5,
+            "reasoning_depth": 2,
+            "communication_clarity": 2,
+            "completeness": 2,
+            "confidence_signal": 2,
+        }
+        result = compare_calibration(human, model)
+        self.assertEqual(result["deltas"]["technical_accuracy"], 3)
+        self.assertFalse(result["within_one_point"])
+        self.assertAlmostEqual(result["mean_absolute_error"], 0.6)
 
 
 if __name__ == "__main__":
