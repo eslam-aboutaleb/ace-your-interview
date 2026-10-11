@@ -31,6 +31,7 @@ from app.services.llm_skills import (
     skills_for_session,
 )
 from app.services.learning_store import record_generation_run_safe
+from app.services.learner_memory import build_learner_state_block
 from app.services.markdown_formatter import format_markdown_readable
 from app.services.mcp_gateway import MCPGateway
 from app.services.prompt_blocks import render_contract
@@ -106,6 +107,16 @@ def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
     except (ValueError, TypeError):
         return default
     return max(lo, min(hi, n))
+
+
+def _learner_state_block(learner_state: str) -> str:
+    # ``learner_state`` arrives already gathered, bounded, and fenced by
+    # learner_memory.build_learner_state_block; the only job here is the
+    # separating newline, so an absent learner keeps the prompt unchanged.
+    text = str(learner_state or "").strip()
+    if not text:
+        return ""
+    return f"\n{text}"
 
 
 def _base36(value: int) -> str:
@@ -450,6 +461,8 @@ class InterviewGenerator:
     def _question_prompt(
         session: dict[str, Any],
         turns: list[dict[str, Any]],
+        *,
+        learner_state: str = "",
     ) -> str:
         asked = session.get("asked_questions") or []
         memory_summary = str(session.get("memory_summary", "")).strip()
@@ -540,7 +553,7 @@ Session configuration:
 - resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
 - session_memory_summary: {memory_block}
 {company_pack_block}
-{star_story_block}{interview_skill_section}
+{star_story_block}{interview_skill_section}{_learner_state_block(learner_state)}
 
 Recent turns:
 {InterviewGenerator._format_recent_turns(turns)}
@@ -592,7 +605,7 @@ Session configuration:
 - resume_summary_text: {(session.get('resume_summary_text') or '')[:2500]}
 - session_memory_summary: {memory_block}
 {company_pack_block}
-{star_story_block}{interview_skill_section}
+{star_story_block}{interview_skill_section}{_learner_state_block(learner_state)}
 
 Recent turns:
 {InterviewGenerator._format_recent_turns(turns)}
@@ -1080,7 +1093,13 @@ Candidate answer:
         user_identity: Optional[dict] = None,
     ) -> dict[str, Any]:
         self._enrich_session_context(session)
-        base_prompt = self._question_prompt(session, turns)
+        learner_state = build_learner_state_block(
+            str((user_identity or {}).get("user", "") or ""),
+            track=str(session.get("track") or "") or None,
+        )
+        base_prompt = self._question_prompt(
+            session, turns, learner_state=learner_state
+        )
         if self.mcp is not None:
             mcp_context = await self.mcp.gather_context(
                 flow="interview",
