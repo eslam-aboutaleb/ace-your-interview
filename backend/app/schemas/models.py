@@ -1912,3 +1912,116 @@ class InterviewSystemDesignRubric(BaseModel):
     scalability: Optional[int] = None
     failure_modes: Optional[int] = None
     communication: Optional[int] = None
+
+
+# ── Readiness per role/company ─────────────────────────────────────────────────
+class ReadinessWeightRow(BaseModel):
+    """One weighted slice of a readiness score.
+
+    ``weight`` is the share of the model this dimension carries,
+    ``score`` the learner's stored evidence for it, ``contribution``
+    the weighted points it adds to the readiness score and
+    ``gap_points`` the weighted points it can still add — so the
+    contributions sum to the readiness score.
+    """
+
+    kind: str
+    id: str
+    label: str
+    weight: float = Field(default=0.0, ge=0.0, le=1.0)
+    score: float = Field(default=0.0, ge=0.0, le=100.0)
+    evidence_count: int = Field(default=0, ge=0)
+    contribution: float = Field(default=0.0, ge=0.0, le=100.0)
+    gap_points: float = Field(default=0.0, ge=0.0, le=100.0)
+
+
+class ReadinessGapEvidence(BaseModel):
+    """One stored-evidence reference behind a readiness gap."""
+
+    kind: str
+    ref: str = ""
+    label: str = ""
+    #: Evidence score where the reference has one (topic mastery,
+    #: competency retention as a percentage); ``None`` for counts.
+    score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    count: int = Field(default=0, ge=0)
+    detail: str = ""
+
+
+class ReadinessGapDimension(BaseModel):
+    """A weighted gap that still holds readiness points back."""
+
+    kind: str
+    id: str
+    label: str
+    weight: float = Field(default=0.0, ge=0.0, le=1.0)
+    score: float = Field(default=0.0, ge=0.0, le=100.0)
+    evidence_count: int = Field(default=0, ge=0)
+    gap_points: float = Field(default=0.0, ge=0.0, le=100.0)
+    evidence: list[ReadinessGapEvidence] = Field(default_factory=list)
+
+
+class RoleReadinessEvidence(BaseModel):
+    """Count of the stored evidence the readiness blend consumed."""
+
+    topic_reviews: int = Field(default=0, ge=0)
+    interview_reports: int = Field(default=0, ge=0)
+    interview_competency_reviews: int = Field(default=0, ge=0)
+    error_patterns: int = Field(default=0, ge=0)
+
+
+class RoleReadiness(BaseModel):
+    """Weighted readiness for the learner's target role."""
+
+    target_role: str = ""
+    role_id: str = ""
+    role_label: str = ""
+    #: ``catalog`` when the target role matched a built-in model,
+    #: ``primary_track_default`` when it fell back to the profile's
+    #: primary track.
+    match_source: str = ""
+    readiness: float = Field(default=0.0, ge=0.0, le=100.0)
+    readiness_label: str = ""
+    track_weights: dict[str, float] = Field(default_factory=dict)
+    competency_weights: dict[str, float] = Field(default_factory=dict)
+    track_breakdown: list[ReadinessWeightRow] = Field(default_factory=list)
+    competency_breakdown: list[ReadinessWeightRow] = Field(default_factory=list)
+    gap_dimensions: list[ReadinessGapDimension] = Field(default_factory=list)
+    evidence: RoleReadinessEvidence = Field(default_factory=RoleReadinessEvidence)
+
+
+class BestFitRole(BaseModel):
+    """One row of the ranked best-fit role list."""
+
+    role_id: str = ""
+    role_label: str = ""
+    readiness: float = Field(default=0.0, ge=0.0, le=100.0)
+    readiness_label: str = ""
+    is_target: bool = False
+
+
+class CompanyReadinessEntry(BaseModel):
+    """Fit verdict for one company in the learner's target list."""
+
+    company: str = ""
+    company_key: str = ""
+    company_label: str = ""
+    #: ``catalog`` for a built-in archetype, ``default`` for the
+    #: role-inherited profile an unknown company gets.
+    match_source: str = ""
+    fit: float = Field(default=0.0, ge=0.0, le=100.0)
+    fit_label: str = ""
+    bar: float = Field(default=0.0, ge=0.0, le=100.0)
+    clears_bar: bool = False
+    track_weights: dict[str, float] = Field(default_factory=dict)
+    competency_weights: dict[str, float] = Field(default_factory=dict)
+    gap_dimensions: list[ReadinessGapDimension] = Field(default_factory=list)
+
+
+class RoleReadinessResponse(BaseModel):
+    generated_at: str
+    profile: LearnerProfile
+    role: RoleReadiness
+    best_fit_roles: list[BestFitRole] = Field(default_factory=list)
+    #: Target companies ranked by fit, best first.
+    companies: list[CompanyReadinessEntry] = Field(default_factory=list)

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -127,6 +128,594 @@ def _streak_adjusted_daily_items(daily_items: int, *, behind: bool) -> int:
     if not behind:
         return daily_items
     return max(1, (int(daily_items) + 1) // 2)
+
+
+# ── Readiness per role/company ─────────────────────────────────
+# The diagnostic blends every track into one number, which cannot
+# answer "ready for *what*": a backend role leans on API and
+# data-modelling track mastery, a platform role on system design,
+# an AI role on the AI stack. The models below re-weight the same
+# stored evidence (track mastery, interview-competency cards, the
+# error-pattern store) per built-in role and company profile.
+# Everything here is deterministic and offline: no LLM, no network,
+# no new data sources.
+
+#: Share of a readiness blend carried by interview-competency
+#: evidence; curriculum track mastery carries the rest. A learner
+#: with no interview evidence is scored on tracks alone instead of
+#: being punished for never having run a mock interview.
+_INTERVIEW_EVIDENCE_SHARE = 0.25
+
+#: Bar a built-in default expects for a company that is not in the
+#: catalog. It is the "On Track" boundary, so a default clears only
+#: with positive interview-grade evidence.
+_DEFAULT_COMPANY_BAR = 70.0
+
+#: Priority bonuses ``build_recommendations`` adds for evidence that
+#: moves the target-role / top-ranked-company readiness.
+_ROLE_PRIORITY_BONUS = 10.0
+_COMPANY_PRIORITY_BONUS = 8.0
+
+#: How many weighted gaps (and pieces of gap evidence) a readiness
+#: payload carries, keeping the endpoint response bounded.
+_GAP_DIMENSION_LIMIT = 5
+_GAP_EVIDENCE_LIMIT = 3
+
+
+def readiness_label(score: float, *, has_evidence: bool = True) -> str:
+    """Band a 0-100 readiness score into the interview report labels.
+
+    The bands mirror the interview report's ``readiness_label``
+    (Strong / On Track / Developing / Needs Work) so one learner
+    never sees two vocabularies for the same scale.
+    """
+    if not has_evidence:
+        return "Not Started"
+    value = float(score)
+    if value >= 85.0:
+        return "Strong"
+    if value >= 70.0:
+        return "On Track"
+    if value >= 50.0:
+        return "Developing"
+    return "Needs Work"
+
+
+#: Built-in role weight models. ``aliases`` are matched as whole-word
+#: tokens against the free-text ``target_role``, so "Back-End
+#: Engineer" matches while "Email Engineer" does not match the AI
+#: alias. Order is the match priority: narrower aliases first.
+_ROLE_CATALOG: tuple[dict[str, Any], ...] = (
+    {
+        "role_id": "fullstack_engineer",
+        "role_label": "Full-Stack Engineer",
+        "aliases": ("fullstack", "full stack"),
+        "track_weights": {
+            "backend": 0.35,
+            "frontend": 0.35,
+            "system_design": 0.20,
+            "ai_stack": 0.10,
+        },
+        "competency_weights": {
+            "technical_accuracy": 0.25,
+            "reasoning_depth": 0.20,
+            "completeness": 0.20,
+            "communication_clarity": 0.20,
+            "confidence_signal": 0.15,
+        },
+    },
+    {
+        "role_id": "ai_engineer",
+        "role_label": "AI / ML Engineer",
+        "aliases": ("ai", "ml", "machine learning", "deep learning", "data scientist", "llm"),
+        "track_weights": {
+            "ai_stack": 0.50,
+            "backend": 0.20,
+            "system_design": 0.20,
+            "frontend": 0.10,
+        },
+        "competency_weights": {
+            "technical_accuracy": 0.30,
+            "reasoning_depth": 0.25,
+            "completeness": 0.15,
+            "communication_clarity": 0.15,
+            "confidence_signal": 0.15,
+        },
+    },
+    {
+        "role_id": "platform_engineer",
+        "role_label": "Platform / Systems Engineer",
+        "aliases": (
+            "platform",
+            "systems",
+            "system design",
+            "infrastructure",
+            "devops",
+            "sre",
+            "distributed",
+            "cloud",
+        ),
+        "track_weights": {
+            "system_design": 0.45,
+            "backend": 0.40,
+            "ai_stack": 0.10,
+            "frontend": 0.05,
+        },
+        "competency_weights": {
+            "technical_accuracy": 0.25,
+            "reasoning_depth": 0.30,
+            "completeness": 0.20,
+            "communication_clarity": 0.15,
+            "confidence_signal": 0.10,
+        },
+    },
+    {
+        "role_id": "frontend_engineer",
+        "role_label": "Frontend Engineer",
+        "aliases": ("frontend", "front end", "ui", "react", "web developer"),
+        "track_weights": {
+            "frontend": 0.55,
+            "backend": 0.20,
+            "system_design": 0.15,
+            "ai_stack": 0.10,
+        },
+        "competency_weights": {
+            "technical_accuracy": 0.25,
+            "reasoning_depth": 0.20,
+            "completeness": 0.20,
+            "communication_clarity": 0.20,
+            "confidence_signal": 0.15,
+        },
+    },
+    {
+        "role_id": "backend_engineer",
+        "role_label": "Backend Engineer",
+        "aliases": ("backend", "back end", "server", "api", "microservices"),
+        "track_weights": {
+            "backend": 0.55,
+            "system_design": 0.25,
+            "ai_stack": 0.10,
+            "frontend": 0.10,
+        },
+        "competency_weights": {
+            "technical_accuracy": 0.30,
+            "reasoning_depth": 0.25,
+            "completeness": 0.20,
+            "communication_clarity": 0.15,
+            "confidence_signal": 0.10,
+        },
+    },
+)
+
+#: Built-in company requirements profiles, per primary track. Each
+#: archetype carries the track/competency weights it screens for and
+#: the bar its "clears it" verdict uses. A target company that is
+#: absent from its track's catalog falls back to the learner's role
+#: model with :data:`_DEFAULT_COMPANY_BAR`.
+_COMPANY_CATALOG: dict[str, tuple[dict[str, Any], ...]] = {
+    "backend": (
+        {
+            "company_key": "google",
+            "company_label": "Google",
+            "track_weights": {
+                "backend": 0.45,
+                "system_design": 0.35,
+                "ai_stack": 0.15,
+                "frontend": 0.05,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.30,
+                "reasoning_depth": 0.30,
+                "completeness": 0.20,
+                "communication_clarity": 0.10,
+                "confidence_signal": 0.10,
+            },
+            "bar": 78,
+        },
+        {
+            "company_key": "amazon",
+            "company_label": "Amazon",
+            "track_weights": {
+                "backend": 0.50,
+                "system_design": 0.30,
+                "ai_stack": 0.10,
+                "frontend": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.25,
+                "reasoning_depth": 0.20,
+                "communication_clarity": 0.25,
+                "completeness": 0.20,
+                "confidence_signal": 0.10,
+            },
+            "bar": 74,
+        },
+        {
+            "company_key": "stripe",
+            "company_label": "Stripe",
+            "track_weights": {
+                "backend": 0.55,
+                "system_design": 0.25,
+                "ai_stack": 0.10,
+                "frontend": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.35,
+                "reasoning_depth": 0.20,
+                "completeness": 0.20,
+                "communication_clarity": 0.15,
+                "confidence_signal": 0.10,
+            },
+            "bar": 76,
+        },
+    ),
+    "frontend": (
+        {
+            "company_key": "meta",
+            "company_label": "Meta",
+            "track_weights": {
+                "frontend": 0.45,
+                "backend": 0.20,
+                "system_design": 0.25,
+                "ai_stack": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.30,
+                "reasoning_depth": 0.25,
+                "completeness": 0.20,
+                "communication_clarity": 0.15,
+                "confidence_signal": 0.10,
+            },
+            "bar": 76,
+        },
+        {
+            "company_key": "airbnb",
+            "company_label": "Airbnb",
+            "track_weights": {
+                "frontend": 0.50,
+                "backend": 0.20,
+                "system_design": 0.20,
+                "ai_stack": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.20,
+                "reasoning_depth": 0.20,
+                "completeness": 0.25,
+                "communication_clarity": 0.20,
+                "confidence_signal": 0.15,
+            },
+            "bar": 74,
+        },
+        {
+            "company_key": "shopify",
+            "company_label": "Shopify",
+            "track_weights": {
+                "frontend": 0.50,
+                "backend": 0.25,
+                "system_design": 0.15,
+                "ai_stack": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.30,
+                "reasoning_depth": 0.20,
+                "completeness": 0.20,
+                "communication_clarity": 0.20,
+                "confidence_signal": 0.10,
+            },
+            "bar": 72,
+        },
+    ),
+    "system_design": (
+        {
+            "company_key": "cloudflare",
+            "company_label": "Cloudflare",
+            "track_weights": {
+                "system_design": 0.50,
+                "backend": 0.35,
+                "ai_stack": 0.10,
+                "frontend": 0.05,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.25,
+                "reasoning_depth": 0.30,
+                "completeness": 0.25,
+                "communication_clarity": 0.10,
+                "confidence_signal": 0.10,
+            },
+            "bar": 78,
+        },
+        {
+            "company_key": "uber",
+            "company_label": "Uber",
+            "track_weights": {
+                "system_design": 0.45,
+                "backend": 0.35,
+                "ai_stack": 0.10,
+                "frontend": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.25,
+                "reasoning_depth": 0.30,
+                "completeness": 0.20,
+                "communication_clarity": 0.15,
+                "confidence_signal": 0.10,
+            },
+            "bar": 74,
+        },
+        {
+            "company_key": "netflix",
+            "company_label": "Netflix",
+            "track_weights": {
+                "system_design": 0.50,
+                "backend": 0.30,
+                "ai_stack": 0.15,
+                "frontend": 0.05,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.20,
+                "reasoning_depth": 0.30,
+                "completeness": 0.25,
+                "communication_clarity": 0.15,
+                "confidence_signal": 0.10,
+            },
+            "bar": 80,
+        },
+    ),
+    "ai_stack": (
+        {
+            "company_key": "openai",
+            "company_label": "OpenAI",
+            "track_weights": {
+                "ai_stack": 0.55,
+                "backend": 0.20,
+                "system_design": 0.15,
+                "frontend": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.30,
+                "reasoning_depth": 0.25,
+                "completeness": 0.20,
+                "communication_clarity": 0.15,
+                "confidence_signal": 0.10,
+            },
+            "bar": 80,
+        },
+        {
+            "company_key": "anthropic",
+            "company_label": "Anthropic",
+            "track_weights": {
+                "ai_stack": 0.55,
+                "backend": 0.20,
+                "system_design": 0.15,
+                "frontend": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.30,
+                "reasoning_depth": 0.30,
+                "completeness": 0.20,
+                "communication_clarity": 0.10,
+                "confidence_signal": 0.10,
+            },
+            "bar": 80,
+        },
+        {
+            "company_key": "huggingface",
+            "company_label": "Hugging Face",
+            "track_weights": {
+                "ai_stack": 0.50,
+                "backend": 0.25,
+                "system_design": 0.15,
+                "frontend": 0.10,
+            },
+            "competency_weights": {
+                "technical_accuracy": 0.30,
+                "reasoning_depth": 0.20,
+                "completeness": 0.20,
+                "communication_clarity": 0.20,
+                "confidence_signal": 0.10,
+            },
+            "bar": 74,
+        },
+    ),
+}
+
+
+def _alias_tokens(value: Any) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", str(value or "").lower()))
+
+
+def _company_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _normalise_weights(raw: dict[str, Any]) -> dict[str, float]:
+    """Scale a weight map to sum to 1.0 (even weights when it is empty).
+
+    A role or company model that lists an unknown track, or a total
+    of zero, degrades to an even split instead of producing a
+    readiness of zero — the model is a prior, never a penalty.
+    """
+    weights = {
+        str(key): max(0.0, float(value or 0.0))
+        for key, value in (raw or {}).items()
+    }
+    total = sum(weights.values())
+    if total <= 0.0:
+        even = 1.0 / len(_TRACKS) if _TRACKS else 0.0
+        return {track: even for track in _TRACKS}
+    return {key: value / total for key, value in weights.items()}
+
+
+def _default_role_model(primary_track: str) -> dict[str, Any]:
+    """Role model for a target role that matches no catalog alias."""
+    track = primary_track if primary_track in _TRACKS else "backend"
+    weight = 0.55
+    rest = (1.0 - weight) / max(1, len(_TRACKS) - 1)
+    weights = {name: weight if name == track else rest for name in _TRACKS}
+    return {
+        "role_id": f"{track}_focus",
+        "role_label": f"{track.replace('_', ' ').title()} Focus",
+        "match_source": "primary_track_default",
+        "track_weights": _normalise_weights(weights),
+        "competency_weights": _normalise_weights(
+            {key: 1.0 for key, _ in _INTERVIEW_DIMENSIONS}
+        ),
+    }
+
+
+def resolve_role_model(profile: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic weight model for the learner's target role.
+
+    The free-text ``target_role`` is matched against the built-in
+    catalog by whole-word alias tokens, so "Senior Backend Engineer"
+    and "Back-End Dev" both land on the backend model while
+    "Email Engineer" does not match the "ai" alias. Anything
+    unmatched falls back to the profile's primary track, which keeps
+    the model grounded in stored evidence instead of generic.
+    """
+    tokens = _alias_tokens(profile.get("target_role"))
+    if tokens:
+        for role in _ROLE_CATALOG:
+            for alias in role["aliases"]:
+                alias_tokens = _alias_tokens(alias)
+                if alias_tokens and alias_tokens <= tokens:
+                    return {
+                        "role_id": role["role_id"],
+                        "role_label": role["role_label"],
+                        "match_source": "catalog",
+                        "track_weights": _normalise_weights(role["track_weights"]),
+                        "competency_weights": _normalise_weights(
+                            role["competency_weights"]
+                        ),
+                    }
+    return _default_role_model(str(profile.get("primary_track") or "backend"))
+
+
+def resolve_company_model(
+    *, profile: dict[str, Any], role_model: dict[str, Any], company: str
+) -> dict[str, Any]:
+    """Deterministic requirements profile for one target company.
+
+    The company is matched against the built-in catalog for the
+    learner's primary track. A company that is not in the catalog
+    (or a learner on no recognized track) inherits the target role's
+    weights with the default bar, so an unknown employer still gets a
+    specific, ranked verdict instead of a null fit.
+    """
+    key = _company_key(company)
+    track = str(profile.get("primary_track") or "backend")
+    if track not in _TRACKS:
+        track = "backend"
+    for entry in _COMPANY_CATALOG.get(track, ()):
+        entry_key = _company_key(entry["company_key"])
+        if key and (key == entry_key or (len(entry_key) >= 4 and entry_key in key)):
+            return {
+                "company_key": entry["company_key"],
+                "company_label": entry["company_label"],
+                "match_source": "catalog",
+                "track_weights": _normalise_weights(entry["track_weights"]),
+                "competency_weights": _normalise_weights(entry["competency_weights"]),
+                "bar": float(entry["bar"]),
+            }
+    name = str(company or "").strip()[:120]
+    return {
+        "company_key": key or name,
+        "company_label": name or key,
+        "match_source": "default",
+        "track_weights": dict(role_model["track_weights"]),
+        "competency_weights": dict(role_model["competency_weights"]),
+        "bar": _DEFAULT_COMPANY_BAR,
+    }
+
+
+def _readiness_blend(
+    *,
+    track_weights: dict[str, float],
+    competency_weights: dict[str, float],
+    track_scores: dict[str, float],
+    interview_scores: dict[str, float],
+) -> float:
+    """Weighted readiness for one role/company weight model.
+
+    With interview evidence the blend is
+    ``(1 - _INTERVIEW_EVIDENCE_SHARE) * Σ(track_weight * track_score)``
+    plus ``_INTERVIEW_EVIDENCE_SHARE * Σ(competency_weight * dimension_score)``;
+    without it the track component alone carries the score, so a
+    learner is never marked down for evidence they have not been
+    asked for yet.
+    """
+    track_component = sum(
+        float(track_scores.get(track, 0.0)) * weight
+        for track, weight in track_weights.items()
+    )
+    if not interview_scores:
+        return round(track_component, 2)
+    competency_component = sum(
+        float(interview_scores.get(key, 0.0)) * weight
+        for key, weight in competency_weights.items()
+    )
+    blended = (
+        track_component * (1.0 - _INTERVIEW_EVIDENCE_SHARE)
+        + competency_component * _INTERVIEW_EVIDENCE_SHARE
+    )
+    return round(blended, 2)
+
+
+def _readiness_breakdown(
+    *,
+    track_weights: dict[str, float],
+    competency_weights: dict[str, float],
+    track_scores: dict[str, float],
+    track_evidence: dict[str, int],
+    interview_scores: dict[str, float],
+    interview_evidence: dict[str, int],
+    track_share: float,
+) -> list[dict[str, Any]]:
+    """Per-track and per-competency rows that explain a readiness score.
+
+    ``contribution`` is the weighted points this row adds to the
+    readiness score and ``gap_points`` the weighted points it can
+    still add, so the contributions sum to the score and the gaps sum
+    to what is missing from 100.
+    """
+    rows: list[dict[str, Any]] = []
+    for track in _TRACKS:
+        weight = float(track_weights.get(track, 0.0))
+        score = float(track_scores.get(track, 0.0))
+        rows.append(
+            {
+                "kind": "track",
+                "id": track,
+                "label": track.replace("_", " ").title(),
+                "weight": round(weight, 4),
+                "score": round(score, 2),
+                "evidence_count": int(track_evidence.get(track, 0) or 0),
+                "contribution": round(weight * score * track_share, 2),
+                "gap_points": round(
+                    weight * max(0.0, 100.0 - score) * track_share, 2
+                ),
+            }
+        )
+    for key, label in _INTERVIEW_DIMENSIONS:
+        weight = float(competency_weights.get(key, 0.0))
+        score = float(interview_scores.get(key, 0.0))
+        rows.append(
+            {
+                "kind": "interview_competency",
+                "id": key,
+                "label": label,
+                "weight": round(weight, 4),
+                "score": round(score, 2),
+                "evidence_count": int(interview_evidence.get(key, 0) or 0),
+                "contribution": round(
+                    weight * score * (1.0 - track_share), 2
+                ),
+                "gap_points": round(
+                    weight * max(0.0, 100.0 - score) * (1.0 - track_share), 2
+                ),
+            }
+        )
+    return rows
 
 
 class LearningPlannerStore:
@@ -879,6 +1468,431 @@ class LearningPlannerStore:
             "competencies": self.list_competencies(user_id=user_id, limit=50),
         }
 
+    # ── Readiness per role/company ──────────────────────────────
+    def _interview_competency_cards(
+        self, *, user_id: str
+    ) -> dict[str, dict[str, Any]]:
+        """Interview competency cards keyed by their dimension.
+
+        Mirrors ``LearningStore.get_interview_competencies`` from the
+        planner side: the planner shares the database file but holds
+        no store reference, so it reads the ``fsrs_cards`` rows with
+        ``source_type = 'interview'`` directly. Only the aggregate
+        evidence is kept (reps, lapses, mean retention) — it cites
+        where a competency stands, it never re-scores it.
+        """
+        if not self._table_exists("fsrs_cards"):
+            return {}
+        rows = self._conn.execute(
+            """
+            SELECT card_id, stability, last_review_at, due_at,
+                   reps, lapses, suspended
+            FROM fsrs_cards
+            WHERE user_id = ? AND source_type = 'interview'
+            ORDER BY card_id ASC
+            """,
+            (user_id,),
+        ).fetchall()
+        now_iso = _to_iso(_utc_now())
+        prefix = "interview-competency:"
+        cards: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            card_id = str(row["card_id"])
+            competency = card_id[len(prefix):] if card_id.startswith(prefix) else card_id
+            if not competency:
+                continue
+            entry = cards.setdefault(
+                competency, {"reps": 0, "lapses": 0, "retention": [], "due": 0}
+            )
+            entry["reps"] += int(row["reps"] or 0)
+            entry["lapses"] += int(row["lapses"] or 0)
+            entry["retention"].append(
+                fsrs_scheduler.retention_estimate(
+                    {
+                        "stability": (
+                            float(row["stability"])
+                            if row["stability"] is not None
+                            else None
+                        ),
+                        "last_review_at": (
+                            str(row["last_review_at"])
+                            if row["last_review_at"] is not None
+                            else None
+                        ),
+                    }
+                )
+            )
+            if (
+                int(row["suspended"] or 0) == 0
+                and str(row["due_at"] or "") <= now_iso
+            ):
+                entry["due"] += 1
+        for entry in cards.values():
+            retention = entry.pop("retention")
+            entry["retention"] = (
+                round(sum(retention) / len(retention), 4) if retention else 0.0
+            )
+        return cards
+
+    def _error_pattern_evidence(
+        self, *, user_id: str, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Ranked error patterns, tagged with the track they belong to.
+
+        Read from the error-pattern store the misconception service
+        writes. The interview pseudo-topic is tagged with an empty
+        track: its patterns are cited against interview competencies,
+        never against a curriculum track.
+        """
+        if not self._table_exists("error_patterns"):
+            return []
+        rows = self._conn.execute(
+            """
+            SELECT topic_id, objective, error_type, count, last_seen
+            FROM error_patterns
+            WHERE user_id = ?
+            ORDER BY count DESC, last_seen DESC, id ASC
+            LIMIT ?
+            """,
+            (user_id, max(1, min(int(limit), 200))),
+        ).fetchall()
+        evidence: list[dict[str, Any]] = []
+        for row in rows:
+            topic_id = str(row["topic_id"] or "")
+            evidence.append(
+                {
+                    "topic_id": topic_id,
+                    "track": (
+                        ""
+                        if topic_id == "interview-competency"
+                        else self._topic_track(topic_id)
+                    ),
+                    "objective": str(row["objective"] or ""),
+                    "error_type": str(row["error_type"] or ""),
+                    "count": int(row["count"] or 0),
+                }
+            )
+        return evidence
+
+    def _gap_dimensions(
+        self,
+        *,
+        breakdown: list[dict[str, Any]],
+        topic_entries: list[dict[str, Any]],
+        interview_cards: dict[str, dict[str, Any]],
+        error_patterns: list[dict[str, Any]],
+        limit: int = _GAP_DIMENSION_LIMIT,
+    ) -> list[dict[str, Any]]:
+        """Weighted gaps, ranked by the readiness points they can return.
+
+        Each gap carries the evidence that explains it: the weakest
+        topics in a lagging track, the interview-competency card
+        behind a weak dimension, and the recurring error patterns in
+        either — so a gap always names something the learner can act
+        on tomorrow.
+        """
+        topics_by_track: dict[str, list[dict[str, Any]]] = {}
+        for entry in topic_entries:
+            topics_by_track.setdefault(str(entry.get("track") or ""), []).append(entry)
+        patterns_by_track: dict[str, list[dict[str, Any]]] = {}
+        for pattern in error_patterns:
+            patterns_by_track.setdefault(str(pattern.get("track") or ""), []).append(pattern)
+
+        def _pattern_evidence(pattern: dict[str, Any]) -> dict[str, Any]:
+            error_type = str(pattern.get("error_type") or "").replace("_", " ")
+            return {
+                "kind": "error_pattern",
+                "ref": str(pattern.get("error_type") or ""),
+                "label": (
+                    f"{error_type.title()} in "
+                    f"{self._topic_label(str(pattern.get('topic_id') or ''))}"
+                ),
+                "count": int(pattern.get("count") or 0),
+                "detail": str(pattern.get("objective") or ""),
+            }
+
+        gaps: list[dict[str, Any]] = []
+        for item in breakdown:
+            gap_points = float(item.get("gap_points") or 0.0)
+            if gap_points <= 0.0:
+                continue
+            evidence: list[dict[str, Any]] = []
+            if item["kind"] == "track":
+                weakest_topics = sorted(
+                    topics_by_track.get(str(item["id"]), []),
+                    key=lambda row: (
+                        float(row.get("score") or 0.0),
+                        -int(row.get("evidence_count") or 0),
+                        str(row.get("label") or ""),
+                    ),
+                )
+                for entry in weakest_topics[:_GAP_EVIDENCE_LIMIT]:
+                    meta = entry.get("metadata") or {}
+                    evidence.append(
+                        {
+                            "kind": "topic",
+                            "ref": str(
+                                meta.get("topic_id") or entry.get("competency_id") or ""
+                            ),
+                            "label": str(entry.get("label") or ""),
+                            "score": round(float(entry.get("score") or 0.0), 2),
+                            "detail": (
+                                f"{int(entry.get('evidence_count') or 0)} review(s), "
+                                f"{int(meta.get('due_count') or 0)} due"
+                            ),
+                        }
+                    )
+                for pattern in patterns_by_track.get(str(item["id"]), [])[
+                    :_GAP_EVIDENCE_LIMIT
+                ]:
+                    evidence.append(_pattern_evidence(pattern))
+            else:
+                card = interview_cards.get(str(item["id"]))
+                if card:
+                    evidence.append(
+                        {
+                            "kind": "interview_competency",
+                            "ref": str(item["id"]),
+                            "label": str(item["label"]),
+                            "score": round(float(card.get("retention") or 0.0) * 100.0, 2),
+                            "detail": (
+                                f"{int(card.get('reps') or 0)} review(s), "
+                                f"{int(card.get('lapses') or 0)} lapse(s)"
+                            ),
+                        }
+                    )
+                for pattern in patterns_by_track.get("", [])[:_GAP_EVIDENCE_LIMIT]:
+                    evidence.append(_pattern_evidence(pattern))
+            gaps.append({**item, "evidence": evidence})
+        gaps.sort(
+            key=lambda row: (
+                -float(row.get("gap_points") or 0.0),
+                str(row.get("kind") or ""),
+                str(row.get("id") or ""),
+            )
+        )
+        return gaps[: max(1, int(limit))]
+
+    def build_readiness(
+        self, *, user_id: str, diagnostic: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Role- and company-aware readiness over stored evidence only.
+
+        The diagnostic's single blended score answers "how ready am I
+        overall"; this answers "ready for *what*": the weighted
+        readiness for the learner's target role (with the per-track /
+        per-competency breakdown that moves the number), the ranked
+        best-fit roles across the built-in catalog, and a ranked fit
+        verdict for every company in ``target_companies`` against the
+        built-in requirements profiles.
+
+        Deterministic and offline: only track mastery, interview
+        competencies and the error-pattern store are read — no LLM
+        call, no network, no new dependencies. ``diagnostic`` may be
+        handed in by a caller that already ran one, so a plan build
+        does not recompute it.
+        """
+        profile = self.get_profile(user_id=user_id)
+        if diagnostic is None:
+            diagnostic = self.run_diagnostic(user_id=user_id)
+        competencies = list(diagnostic.get("competencies") or [])
+        track_rows = [
+            item for item in competencies if item.get("competency_type") == "track"
+        ]
+        interview_rows = [
+            item
+            for item in competencies
+            if item.get("competency_type") == "interview_dimension"
+        ]
+        topic_rows = [
+            item for item in competencies if item.get("competency_type") == "topic"
+        ]
+
+        track_scores: dict[str, float] = {}
+        track_evidence: dict[str, int] = {}
+        for row in track_rows:
+            track = str(row.get("track") or "")
+            track_scores[track] = float(row.get("score") or 0.0)
+            track_evidence[track] = int(row.get("evidence_count") or 0)
+
+        interview_scores: dict[str, float] = {}
+        interview_evidence: dict[str, int] = {}
+        for row in interview_rows:
+            key = str(row.get("competency_id") or "").split(":", 1)[-1]
+            interview_scores[key] = float(row.get("score") or 0.0)
+            interview_evidence[key] = int(row.get("evidence_count") or 0)
+
+        interview_cards = self._interview_competency_cards(user_id=user_id)
+        error_patterns = self._error_pattern_evidence(user_id=user_id)
+        reports = self._latest_interview_reports(user_id=user_id)
+        has_evidence = (
+            any(count > 0 for count in track_evidence.values())
+            or bool(interview_scores)
+            or bool(interview_cards)
+        )
+        track_share = (
+            (1.0 - _INTERVIEW_EVIDENCE_SHARE) if interview_scores else 1.0
+        )
+
+        def _readiness_block(
+            model: dict[str, Any],
+            *,
+            entity_key: str,
+            entity_label: str,
+            match_source: str,
+            bar: float | None = None,
+        ) -> dict[str, Any]:
+            score = _readiness_blend(
+                track_weights=model["track_weights"],
+                competency_weights=model["competency_weights"],
+                track_scores=track_scores,
+                interview_scores=interview_scores,
+            )
+            breakdown = _readiness_breakdown(
+                track_weights=model["track_weights"],
+                competency_weights=model["competency_weights"],
+                track_scores=track_scores,
+                track_evidence=track_evidence,
+                interview_scores=interview_scores,
+                interview_evidence=interview_evidence,
+                track_share=track_share,
+            )
+            gaps = self._gap_dimensions(
+                breakdown=breakdown,
+                topic_entries=topic_rows,
+                interview_cards=interview_cards,
+                error_patterns=error_patterns,
+            )
+            block = {
+                "key": entity_key,
+                "label": entity_label,
+                "match_source": match_source,
+                "readiness": score,
+                "readiness_label": readiness_label(score, has_evidence=has_evidence),
+                "track_weights": {
+                    track: round(float(weight), 4)
+                    for track, weight in model["track_weights"].items()
+                },
+                "competency_weights": {
+                    key: round(float(weight), 4)
+                    for key, weight in model["competency_weights"].items()
+                },
+                "track_breakdown": [
+                    row for row in breakdown if row["kind"] == "track"
+                ],
+                "competency_breakdown": [
+                    row for row in breakdown if row["kind"] == "interview_competency"
+                ],
+                "gap_dimensions": gaps,
+            }
+            if bar is not None:
+                block["bar"] = round(float(bar), 2)
+                block["clears_bar"] = bool(score >= float(bar))
+            return block
+
+        role_model = resolve_role_model(profile)
+        role_block = _readiness_block(
+            role_model,
+            entity_key=role_model["role_id"],
+            entity_label=role_model["role_label"],
+            match_source=role_model["match_source"],
+        )
+        role = {
+            "target_role": str(profile.get("target_role") or ""),
+            "role_id": role_model["role_id"],
+            "role_label": role_model["role_label"],
+            "match_source": role_model["match_source"],
+            "readiness": role_block["readiness"],
+            "readiness_label": role_block["readiness_label"],
+            "track_weights": role_block["track_weights"],
+            "competency_weights": role_block["competency_weights"],
+            "track_breakdown": role_block["track_breakdown"],
+            "competency_breakdown": role_block["competency_breakdown"],
+            "gap_dimensions": role_block["gap_dimensions"],
+            "evidence": {
+                "topic_reviews": sum(
+                    int(item.get("evidence_count") or 0) for item in topic_rows
+                ),
+                "interview_reports": len(reports),
+                "interview_competency_reviews": sum(
+                    int(card.get("reps") or 0)
+                    for card in interview_cards.values()
+                ),
+                "error_patterns": len(error_patterns),
+            },
+        }
+
+        best_fit: list[dict[str, Any]] = []
+        for entry in _ROLE_CATALOG:
+            model = {
+                "role_id": entry["role_id"],
+                "track_weights": _normalise_weights(entry["track_weights"]),
+                "competency_weights": _normalise_weights(entry["competency_weights"]),
+            }
+            score = _readiness_blend(
+                track_weights=model["track_weights"],
+                competency_weights=model["competency_weights"],
+                track_scores=track_scores,
+                interview_scores=interview_scores,
+            )
+            best_fit.append(
+                {
+                    "role_id": entry["role_id"],
+                    "role_label": entry["role_label"],
+                    "readiness": score,
+                    "readiness_label": readiness_label(
+                        score, has_evidence=has_evidence
+                    ),
+                    "is_target": (
+                        role_model["match_source"] == "catalog"
+                        and entry["role_id"] == role_model["role_id"]
+                    ),
+                }
+            )
+        best_fit.sort(
+            key=lambda item: (-float(item["readiness"]), str(item["role_id"]))
+        )
+
+        companies: list[dict[str, Any]] = []
+        for company in profile.get("target_companies") or []:
+            name = str(company or "").strip()
+            if not name:
+                continue
+            model = resolve_company_model(
+                profile=profile, role_model=role_model, company=name
+            )
+            block = _readiness_block(
+                model,
+                entity_key=model["company_key"],
+                entity_label=model["company_label"],
+                match_source=model["match_source"],
+                bar=model["bar"],
+            )
+            companies.append(
+                {
+                    "company": name,
+                    "company_key": model["company_key"],
+                    "company_label": model["company_label"],
+                    "match_source": model["match_source"],
+                    "fit": block["readiness"],
+                    "fit_label": block["readiness_label"],
+                    "bar": block["bar"],
+                    "clears_bar": block["clears_bar"],
+                    "track_weights": block["track_weights"],
+                    "competency_weights": block["competency_weights"],
+                    "gap_dimensions": block["gap_dimensions"],
+                }
+            )
+        companies.sort(key=lambda item: (-float(item["fit"]), str(item["company"])))
+
+        return {
+            "generated_at": _to_iso(_utc_now()),
+            "profile": profile,
+            "role": role,
+            "best_fit_roles": best_fit,
+            "companies": companies,
+        }
+
     def _build_cold_start_items(self, *, profile: dict[str, Any]) -> list[dict[str, Any]]:
         topics = _COLD_START_TOPICS.get(profile["primary_track"], _COLD_START_TOPICS["backend"])
         items: list[dict[str, Any]] = []
@@ -925,6 +1939,24 @@ class LearningPlannerStore:
         deadline_urgent = days_until_target is not None and days_until_target <= 14
         focus_ids = {str(topic_id) for topic_id in profile["focus_topic_ids"]}
         modalities = set(profile["preferred_modalities"])
+        # Role/company-aware shaping: the same stored evidence the
+        # readiness endpoint re-weights decides which gaps outrank the
+        # rest of the queue. It reuses the diagnostic just computed,
+        # so this costs reads, never a second scoring pass.
+        readiness = self.build_readiness(user_id=user_id, diagnostic=diagnostic)
+        role = readiness.get("role") or {}
+        role_track_weights = {
+            str(track): float(weight)
+            for track, weight in (role.get("track_weights") or {}).items()
+        }
+        companies = list(readiness.get("companies") or [])
+        top_company = companies[0] if companies else None
+        company_track_weights = {
+            str(track): float(weight)
+            for track, weight in (
+                (top_company or {}).get("track_weights") or {}
+            ).items()
+        }
 
         items: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
@@ -947,7 +1979,43 @@ class LearningPlannerStore:
             primary_bonus = 8.0 if entry["track"] == profile["primary_track"] else 0.0
             focus_bonus = 10.0 if topic_id in focus_ids else 0.0
             deadline_bonus = 12.0 if deadline_urgent else (6.0 if deadline_soon else 0.0)
-            total_priority = min(100.0, round(priority + primary_bonus + focus_bonus + deadline_bonus, 2))
+            # A weak topic in a track the target role weights heavily
+            # is worth more readiness points than the same topic in a
+            # track the role barely screens for.
+            role_weight = float(role_track_weights.get(entry["track"], 0.0))
+            company_weight = float(company_track_weights.get(entry["track"], 0.0))
+            role_bonus = round(
+                min(
+                    _ROLE_PRIORITY_BONUS,
+                    _ROLE_PRIORITY_BONUS * role_weight * (100.0 - score) / 100.0,
+                ),
+                2,
+            )
+            company_bonus = round(
+                min(
+                    _COMPANY_PRIORITY_BONUS,
+                    _COMPANY_PRIORITY_BONUS
+                    * company_weight
+                    * (100.0 - score)
+                    / 100.0,
+                ),
+                2,
+            )
+            gap_codes = (
+                ["role_priority"] if role_bonus > 0.0 else []
+            ) + (["company_fit"] if company_bonus > 0.0 else [])
+            total_priority = min(
+                100.0,
+                round(
+                    priority
+                    + primary_bonus
+                    + focus_bonus
+                    + deadline_bonus
+                    + role_bonus
+                    + company_bonus,
+                    2,
+                ),
+            )
             label = str(entry["label"])
 
             if due_count > 0:
@@ -977,7 +2045,7 @@ class LearningPlannerStore:
                         "estimated_minutes": int(profile["preferred_session_minutes"]),
                         "cta_route": f"/topics/{topic_id}",
                         "priority": total_priority,
-                        "reason_codes": ["low_mastery", "targeted_study"],
+                        "reason_codes": ["low_mastery", "targeted_study", *gap_codes],
                         "track": entry["track"],
                     }
                 )
@@ -992,7 +2060,7 @@ class LearningPlannerStore:
                         "estimated_minutes": 15,
                         "cta_route": f"/quiz/{topic_id}",
                         "priority": max(1.0, total_priority - 6.0),
-                        "reason_codes": ["retention_check"],
+                        "reason_codes": ["retention_check", *gap_codes],
                         "track": entry["track"],
                     }
                 )
@@ -1041,7 +2109,12 @@ class LearningPlannerStore:
         happens on every load) recognises previously completed work
         instead of resurrecting identical unchecked items. The per-day
         item count is shaped by the learner's streak via
-        :meth:`_commitment_context`.
+        :meth:`_commitment_context`, and the day's tasks are drawn from
+        the recommendations queue — which prioritises the gaps that
+        move the learner's target-role and top-target-company
+        readiness (see :meth:`build_recommendations`). The commitment
+        contract itself is untouched: streak shaping, persistence and
+        task-key stability are exactly as they were.
         """
         target_days = max(1, min(int(days), 31))
         requested_daily_items = max(1, min(int(daily_items), 10))
