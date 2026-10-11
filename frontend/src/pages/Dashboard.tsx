@@ -93,7 +93,9 @@ export default function Dashboard() {
   const totalProgress = useProgressStore((s) => s.totalProgress);
   const getTopicProgress = useProgressStore((s) => s.getTopicProgress);
   const setTopicCount = useProgressStore((s) => s.setTopicCount);
-  const setMastery = useProgressStore((s) => s.setMastery);
+  const hydrateMasteryFromServer = useProgressStore(
+    (s) => s.hydrateMasteryFromServer,
+  );
   const curriculumNoticePending = useProgressStore(
     (s) => s.curriculumNoticePending,
   );
@@ -118,9 +120,7 @@ export default function Dashboard() {
   useEffect(() => {
     loadTopics();
     fetchTopicMastery()
-      .then((res) => {
-        res.topics.forEach((t) => setMastery(t.topic_id, t.mastery_score));
-      })
+      .then(hydrateMasteryFromServer)
       .catch(() => {
         // ignore mastery bootstrap failures
       });
@@ -154,7 +154,7 @@ export default function Dashboard() {
       .catch(() => {
         setGamification(null);
       });
-  }, [isAuthenticated, loadTopics, setMastery]);
+  }, [isAuthenticated, loadTopics, hydrateMasteryFromServer]);
 
   const handleCreateCustomTopic = () => {
     const topic = customTopic.trim();
