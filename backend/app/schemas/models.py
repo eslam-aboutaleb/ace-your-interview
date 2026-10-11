@@ -1636,3 +1636,84 @@ class ErrorPatternListResponse(BaseModel):
 
     items: list[ErrorPatternRead] = Field(default_factory=list)
     total: int = 0
+
+
+# ── Placement onboarding (adaptive cold-start) ─────────────────────────────
+class PlacementQuestion(BaseModel):
+    """One placement question, sent without its answer key."""
+
+    question_id: str
+    question: str
+    options: list[str] = Field(default_factory=list)
+    level: LevelEnum = LevelEnum.MID
+    topic_id: str = ""
+    topic_title: str = ""
+    concept: str = ""
+    source: str = ""
+
+
+class PlacementStartRequest(BaseModel):
+    track: TrackEnum = TrackEnum.BACKEND
+    target_role: str = Field(default="", max_length=200)
+    daily_goal: int = Field(default=3, ge=1, le=50)
+
+
+class PlacementStartResponse(BaseModel):
+    session_id: str
+    track: TrackEnum
+    status: str = "active"
+    level: LevelEnum = LevelEnum.MID
+    step_index: int = 0
+    max_steps: int = 12
+    question: Optional[PlacementQuestion] = None
+
+
+class PlacementAnswerRequest(BaseModel):
+    session_id: str = Field(..., min_length=8, max_length=200)
+    question_id: str = Field(..., min_length=2, max_length=400)
+    selected_answer: str = Field(..., max_length=8000)
+    response_time_ms: int = Field(default=0, ge=0, le=3_600_000)
+
+
+class PlacementAnswerResponse(BaseModel):
+    session_id: str
+    status: str = "active"
+    level: LevelEnum = LevelEnum.MID
+    step_index: int = 0
+    max_steps: int = 12
+    is_correct: bool = False
+    correct_answer: str = ""
+    explanation: str = ""
+    complete: bool = False
+    question: Optional[PlacementQuestion] = None
+
+
+class PlacementFinishRequest(BaseModel):
+    session_id: str = Field(..., min_length=8, max_length=200)
+
+
+class PlacementWeakObjective(BaseModel):
+    topic_id: str = ""
+    topic_title: str = ""
+    objective: str = ""
+    level: LevelEnum = LevelEnum.MID
+
+
+class PlacementFinishResponse(BaseModel):
+    session_id: str
+    track: TrackEnum
+    derived_level: LevelEnum
+    per_track_levels: dict[str, str] = Field(default_factory=dict)
+    steps_taken: int = 0
+    weak_objectives: list[PlacementWeakObjective] = Field(default_factory=list)
+    level_path: list[str] = Field(default_factory=list)
+    level_stats: dict[str, dict[str, int]] = Field(default_factory=dict)
+    profile: Optional[LearnerProfile] = None
+
+
+class PlacementStatusResponse(BaseModel):
+    completed: bool = False
+    completed_at: str = ""
+    track: str = ""
+    derived_level: str = ""
+    steps_taken: int = 0

@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import {
   BookOpen,
   Clock,
+  Compass,
   TrendingUp,
   Sparkles,
   ChevronRight,
@@ -21,6 +22,7 @@ import {
 } from "@/utils/animations";
 import {
   fetchLearnerProfile,
+  fetchPlacementStatus,
   fetchRecommendations,
   fetchInterviewStats,
   fetchTopicMastery,
@@ -81,6 +83,7 @@ export default function Dashboard() {
   const [customError, setCustomError] = useState("");
   const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
   const [profile, setProfile] = useState<LearnerProfile | null>(null);
+  const [placementCompleted, setPlacementCompleted] = useState(false);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [gamification, setGamification] =
     useState<GamificationSummaryResponse | null>(null);
@@ -136,9 +139,16 @@ export default function Dashboard() {
       });
     if (!isAuthenticated) {
       setProfile(null);
+      setPlacementCompleted(false);
       setRecommendations([]);
       return;
     }
+    fetchPlacementStatus()
+      .then((status) => setPlacementCompleted(Boolean(status.completed)))
+      .catch(() => {
+        // Placement may be disabled; treat it as "not diagnosed yet".
+        setPlacementCompleted(false);
+      });
     fetchLearnerProfile()
       .then(setProfile)
       .catch(() => {
@@ -457,6 +467,28 @@ export default function Dashboard() {
                   label="Deadline"
                   value={profile?.target_date || "Unset"}
                 />
+              </div>
+            )}
+
+            {isAuthenticated && !placementCompleted && (
+              <div className="mt-4 rounded-lg border border-udemy-purple/30 bg-udemy-purple/5 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    <Compass className="w-4 h-4 text-udemy-purple" />
+                    Start placement onboarding
+                  </p>
+                  <p className="text-xs text-udemy-text-muted mt-1">
+                    Answer 8–12 adaptive questions to replace the default
+                    profile with a measured starting level.
+                  </p>
+                </div>
+                <Link
+                  to="/onboarding"
+                  className="btn-primary text-sm inline-flex items-center gap-2"
+                >
+                  Start onboarding
+                  <ChevronRight className="w-4 h-4" />
+                </Link>
               </div>
             )}
           </div>

@@ -25,6 +25,7 @@ from app.routers import (
     interview_sessions,
     learning,
     llm_settings,
+    placement,
     progress,
     questions,
     star_stories,
@@ -249,6 +250,13 @@ async def lifespan(application: FastAPI):
         learning_store=_learning_store,
     )
     learning.init(_learning_store, _learning_planner, parser, _llm_client)
+    placement.init(
+        _learning_planner,
+        parser,
+        question_generator,
+        gamification_service,
+        _learning_store,
+    )
     cards.init(
         card_store=card_store,
         learning_store=_learning_store,
@@ -362,6 +370,7 @@ def create_app() -> FastAPI:
     application.include_router(chat.router, dependencies=auth_dep)
     application.include_router(documents.router, dependencies=auth_dep)
     application.include_router(learning.router)
+    application.include_router(placement.router)
     application.include_router(cards.decks_router)
     application.include_router(cards.cards_router)
     application.include_router(progress.router, dependencies=auth_dep)
