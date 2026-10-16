@@ -1,7 +1,7 @@
 # Ace Your Interview
 
 [![Backend CI](https://github.com/eslam-aboutaleb/ace-your-interview/actions/workflows/backend.yml/badge.svg)](https://github.com/eslam-aboutaleb/ace-your-interview/actions/workflows/backend.yml)
-[![Frontend CI](https://github.com/eslam-aboutaleb/ace-your-interview/actions/workflows/ci.yml)](https://github.com/eslam-aboutaleb/ace-your-interview/actions/workflows/ci.yml/badge.svg)
+[![Frontend CI](https://github.com/eslam-aboutaleb/ace-your-interview/actions/workflows/ci.yml/badge.svg)](https://github.com/eslam-aboutaleb/ace-your-interview/actions/workflows/ci.yml)
 
 Adaptive, LLM-powered interview preparation platform. Level-aware question and quiz generation, FSRS-4.5 spaced repetition, citation-grounded RAG chat, flashcard decks with Anki interop, and full mock-interview sessions with rubric feedback — across Backend, Frontend, System Design (including infrastructure/cloud), and AI Stack tracks.
 
