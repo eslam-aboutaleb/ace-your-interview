@@ -80,7 +80,7 @@ ace-your-interview/
 │   ├── docs/owner-handbook/  # generated curriculum handbook
 │   ├── evals/                # golden fixtures + prompt snapshots
 │   ├── scripts/              # eval harness, handbook generator, company-pack seeder
-│   ├── tests/                # pytest suite (coverage gate ≥ 90%, currently ~98%)
+│   ├── tests/                # pytest suite (coverage gate ≥ 90%, currently 93.56%)
 │   └── pyproject.toml
 ├── frontend/               # React 18 + Vite + TypeScript + Tailwind
 ├── .github/workflows/      # backend.yml · ci.yml · eval-live.yml
@@ -315,7 +315,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 
 ## Quality & evals
 
-- **Backend CI** (`.github/workflows/backend.yml`, every push): pytest with coverage (gate: ≥90% statement+branch, currently ~98%), `ruff` lint, and the deterministic eval harness — production-validator agreement, prompt contracts, untrusted-input containment, golden prompt digests, and duplicate/grounding/repair/degraded budgets.
+- **Backend CI** (`.github/workflows/backend.yml`, every push): pytest with coverage (gate: ≥90% statement+branch, currently 93.56%), `ruff` lint, and the deterministic eval harness — production-validator agreement, prompt contracts, untrusted-input containment, golden prompt digests, and duplicate/grounding/repair/degraded budgets.
 - **Frontend CI** (`.github/workflows/ci.yml`, main): `npm ci` + build + `vitest`.
 - **Live eval** (`.github/workflows/eval-live.yml`, weekly cron + manual): regenerates golden fixtures against real providers and reports a reviewable drift diff; deliberately not on push (nondeterministic, costs tokens).
 
