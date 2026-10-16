@@ -333,6 +333,6 @@ PYTHONPATH=. python -m unittest -q tests.test_doc_parser tests.test_owner_handbo
 - **Frontend**: Vercel (`frontend/vercel.json`) — set `STUDY_CORS_ORIGINS` and `STUDY_FRONTEND_URL` to the deployed origin.
 - **Docker**: `docker-compose.yml` (production-ish) and `docker-compose.dev.yml` (dev mounts); `start.sh` checks optional gRPC backends (ports 50051/50052) before launching.
 
-## License
+## Licensing
 
-MIT — see [LICENSE](LICENSE).
+All rights reserved. No license is currently granted for reuse, redistribution, or modification of this source code.
