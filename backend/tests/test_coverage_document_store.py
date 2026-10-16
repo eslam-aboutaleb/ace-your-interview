@@ -1,20 +1,10 @@
 """Coverage for app/services/document_store.py.
 
-Complements ``tests/test_document_store.py`` (recall, ranking, user isolation,
-dimension rebuild under the pure-Python cosine fallback) with the not-found and
-replace paths, the stale-dimension exclusion, the feature-event cap boundary,
-and the ``sqlite-vec`` code paths.
-
-``sqlite-vec`` is an optional native extension: when it is not installed the
-store probes once, records ``vector_index_status() == "fallback"`` and serves
-search from the pure-Python cosine scan. That probe leaves the vec0 branches
-unreachable in this environment, so the vec branches here run against a *stand-in*
-index: a plain table with the same ``(chunk_id, embedding)`` shape the vec0
-virtual table exposes. That exercises this module's own logic (the metadata
-bookkeeping, the delete+insert replace, the mirror sync, the LEFT JOIN that
-finds chunks with no vector) without the native extension. The one branch a
-stand-in cannot serve is ``_search_vec``'s vec0-only
-``WHERE embedding MATCH ? AND k = ?`` SQL, which is reported rather than faked.
+The shared fixture explicitly forces pure-Python fallback semantics so tests are
+stable whether or not the optional sqlite-vec extension is installed. Tests of
+vec-specific bookkeeping opt in to the native-index path and use a plain-table
+stand-in, exercising metadata, mirroring, deletion, and missing-vector behavior
+without faking vec0's MATCH search syntax.
 """
 
 import json
@@ -32,13 +22,15 @@ from app.services.document_store import (
 )
 
 
-def _vec_mirror(store):
-    """Stand in for the vec0 index: same columns, plain table."""
+def _vec_mirror(store, dimension=2):
+    """Stand in for vec0 with deterministic dimension metadata."""
     with store._conn:
         store._conn.execute(
             "CREATE TABLE IF NOT EXISTS vec_chunks ("
             "chunk_id INTEGER PRIMARY KEY, embedding TEXT)"
         )
+        store._vec_meta_set("dimension", str(dimension))
+        store._vec_meta_set("index_ready", "1")
 
 
 class StoreFixture(unittest.TestCase):
@@ -47,6 +39,9 @@ class StoreFixture(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.db_path = os.path.join(self._tmp.name, "docs.db")
         self.store = DocumentStore(self.db_path)
+        # Test fallback semantics explicitly, regardless of installed native
+        # extensions. Vec-specific tests opt in and install a table double.
+        self.store._vec_available = False
         self.addCleanup(self.store._executor.shutdown, wait=False)
 
     def _doc(self, user="u1", title="t", name="a.txt", mime="text/plain"):
@@ -511,46 +506,64 @@ class VecMetaTests(StoreFixture):
     def test_an_unchanged_dimension_is_a_noop_even_with_the_index_available(self):
         self.store._vec_available = True
         self.addCleanup(setattr, self.store, "_vec_available", False)
-        self.store._vec_meta_set("dimension", "8")
-        self.store._vec_meta_set("index_ready", "1")
-        # index_ready == "1" and the dimension matches: nothing to rebuild.
+        _vec_mirror(self.store, dimension=8)
+
+        # A ready index is a no-op only while its table still exists.
         self.assertFalse(self.store.ensure_vec_index(8))
-        self.assertFalse(self.store._vec_table_exists())
+        self.assertTrue(self.store._vec_table_exists())
 
     def test_a_dimension_change_drops_the_index_before_recreating_it(self):
         self.store._vec_available = True
         self.addCleanup(setattr, self.store, "_vec_available", False)
-        with self.store._conn:
-            self.store._vec_meta_set("dimension", "8")
-            self.store._vec_meta_set("index_ready", "1")
-        _vec_mirror(self.store)
-        # A dimension change triggers a rebuild, which drops and recreates the
-        # table. With no vec0 module in this environment the CREATE fails.
-        with self.assertRaises(sqlite3.OperationalError):
+        _vec_mirror(self.store, dimension=8)
+
+        def fail_create(dimension):
+            raise sqlite3.OperationalError("simulated vec0 CREATE failure")
+
+        self.store._create_vec_table = fail_create
+        with self.assertRaisesRegex(sqlite3.OperationalError, "simulated"):
             self.store.ensure_vec_index(16)
-        # The DROP is not rolled back with the failed CREATE (sqlite runs DDL
-        # outside the implicit transaction), so the index is left missing while
-        # vec_meta still advertises it as ready -- and ensure_vec_index does not
-        # consult _vec_table_exists(), so a later same-dimension call is a no-op.
+
+        # A failed rebuild must not leave stale metadata claiming readiness.
         self.assertFalse(self.store._vec_table_exists())
+        self.assertEqual(self.store._vec_meta_get("index_ready"), "0")
+
+        created = []
+
+        def create_standin(dimension):
+            created.append(dimension)
+            self.store._conn.execute(
+                "CREATE TABLE vec_chunks (chunk_id INTEGER PRIMARY KEY, embedding TEXT)"
+            )
+            self.store._vec_meta_set("dimension", str(dimension))
+            self.store._vec_meta_set("index_ready", "1")
+
+        self.store._create_vec_table = create_standin
+        self.assertTrue(self.store.ensure_vec_index(8))
+        self.assertEqual(created, [8])
+        self.assertTrue(self.store._vec_table_exists())
+        self.assertEqual(self.store._vec_meta_get("dimension"), "8")
         self.assertEqual(self.store._vec_meta_get("index_ready"), "1")
-        self.assertFalse(self.store.ensure_vec_index(8))
-        self.assertFalse(self.store._vec_table_exists())
 
     def test_a_rebuild_reports_true_so_the_caller_re_embeds(self):
         self.store._vec_available = True
         self.addCleanup(setattr, self.store, "_vec_available", False)
-        _vec_mirror(self.store)
+        _vec_mirror(self.store, dimension=2)
         created: list[int] = []
-        # The vec0 CREATE is the only part that needs the native extension; the
-        # rebuild contract around it is what is under test.
-        self.store._create_vec_table = lambda dimension: created.append(dimension)
+
+        def create_standin(dimension):
+            created.append(dimension)
+            self.store._conn.execute(
+                "CREATE TABLE vec_chunks (chunk_id INTEGER PRIMARY KEY, embedding TEXT)"
+            )
+            self.store._vec_meta_set("dimension", str(dimension))
+            self.store._vec_meta_set("index_ready", "1")
+
+        self.store._create_vec_table = create_standin
         self.assertTrue(self.store.ensure_vec_index(8))
         self.assertEqual(created, [8])
-        # A rebuild drops the table first, so the index has to be rebuilt again
-        # even at the same dimension.
-        self.assertTrue(self.store.ensure_vec_index(8))
-        self.assertEqual(created, [8, 8])
+        self.assertFalse(self.store.ensure_vec_index(8))
+        self.assertEqual(created, [8])
 
     def test_an_unavailable_extension_reports_no_rebuild(self):
         self.assertFalse(self.store.ensure_vec_index(8))
@@ -618,6 +631,22 @@ class VecMirrorTests(StoreFixture):
             self.store._conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0],
             0,
         )
+
+    def test_stale_dimensions_are_stored_but_not_mirrored_into_vec0(self):
+        self.store.persist_chunks(
+            "u1", "d1", ["current", "stale"], [[1.0, 0.0], [1.0, 0.0, 0.0]]
+        )
+
+        stored = self.store._conn.execute(
+            "SELECT COUNT(*) FROM chunk_embeddings"
+        ).fetchone()[0]
+        mirrored = self.store._conn.execute(
+            "SELECT COUNT(*) FROM vec_chunks"
+        ).fetchone()[0]
+        self.assertEqual(stored, 2)
+        self.assertEqual(mirrored, 1)
+        missing = self.store.chunks_missing_vectors(2)
+        self.assertEqual([item["content"] for item in missing], ["stale"])
 
     def test_missing_vectors_are_found_by_joining_the_index(self):
         self.store.persist_chunks("u1", "d1", ["indexed"], [[1.0, 0.0]])

@@ -212,39 +212,95 @@ Keep-alive lets one TCP connection carry many requests.
         self.assertIn(questions_seen[0]["question"]["question"], asked)
 
     def test_pending_summary_triggers_a_non_blocking_repair(self):
+        import asyncio
+
+        import httpx
+
         from app.routers import progress as progress_router
         from app.services.progress_summarizer import ProgressSummarizer
+
+        class GatedRepairLLM(FakeLLM):
+            """Hold the summary response to prove generation does not await it."""
+
+            def __init__(self):
+                super().__init__()
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def completion(
+                self, prompt, llm_config=None, user_identity=None, task=None, **kwargs
+            ):
+                self.started.set()
+                await self.release.wait()
+                return await super().completion(
+                    prompt, llm_config, user_identity, task, **kwargs
+                )
 
         self.progress_store.mark_summary_pending(
             user_id="alice", topic_id="01-http"
         )
-        repair_llm = FakeLLM()
-        prev_summarizer = progress_router._summarizer
+        previous = (
+            progress_router._store,
+            progress_router._summarizer,
+            progress_router._llm_client,
+        )
         progress_router._summary_inflight.clear()
         progress_router._background_tasks.clear()
-        progress_router.init(self.progress_store, ProgressSummarizer(repair_llm), repair_llm)
-        try:
-            response = self.client.post(
-                "/api/questions/generate-v2",
-                json={"topic_id": "01-http", "count": 1, "level": "mid"},
-            )
-            self.assertEqual(response.status_code, 200)
-            import asyncio
 
-            asyncio.run(
-                asyncio.wait_for(
+        async def exercise():
+            repair_llm = GatedRepairLLM()
+            progress_router.init(
+                self.progress_store, ProgressSummarizer(repair_llm), repair_llm
+            )
+            try:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=self.app),
+                    base_url="http://test",
+                ) as client:
+                    response = await asyncio.wait_for(
+                        client.post(
+                            "/api/questions/generate-v2",
+                            json={"topic_id": "01-http", "count": 1, "level": "mid"},
+                        ),
+                        timeout=3,
+                    )
+                self.assertEqual(response.status_code, 200)
+
+                # The route returned while the repair LLM is still blocked.
+                await asyncio.wait_for(repair_llm.started.wait(), timeout=3)
+                document = self.progress_store.get_progress(
+                    user_id="alice", topic_id="01-http"
+                )
+                self.assertEqual(document["summary_status"], "pending")
+
+                repair_llm.release.set()
+                await asyncio.wait_for(
                     _drain(progress_router._background_tasks), timeout=5
                 )
-            )
-            document = self.progress_store.get_progress(
-                user_id="alice", topic_id="01-http"
-            )
-            self.assertEqual(document["summary_status"], "ready")
-            self.assertIn("Stored history question number", document["summary_text"])
-        finally:
-            progress_router._summarizer = prev_summarizer
-            progress_router._summary_inflight.clear()
-            progress_router._background_tasks.clear()
+                document = self.progress_store.get_progress(
+                    user_id="alice", topic_id="01-http"
+                )
+                self.assertEqual(document["summary_status"], "ready")
+                self.assertIn(
+                    "Stored history question number", document["summary_text"]
+                )
+            finally:
+                repair_llm.release.set()
+                try:
+                    await asyncio.wait_for(
+                        _drain(progress_router._background_tasks), timeout=5
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                (
+                    progress_router._store,
+                    progress_router._summarizer,
+                    progress_router._llm_client,
+                ) = previous
+                progress_router._summary_inflight.clear()
+                progress_router._background_tasks.clear()
+
+        asyncio.run(exercise())
 
     def test_progress_store_failure_does_not_break_generation(self):
         class BrokenStore(ProgressStore):

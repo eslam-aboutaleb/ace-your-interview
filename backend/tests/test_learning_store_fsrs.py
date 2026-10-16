@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import UTC, datetime, timedelta
 
 from app.services.learning_store import LearningStore
@@ -208,12 +209,16 @@ class ForecastTests(unittest.TestCase):
         self.store._conn.commit()
 
     def test_forecast_buckets_by_day(self):
-        now = _now()
-        self._schedule("q1", now + timedelta(days=1))
-        self._schedule("q2", now + timedelta(days=1, hours=2))
-        self._schedule("q3", now + timedelta(days=3))
-        self._schedule("q4", now + timedelta(days=10))  # beyond 7d
-        forecast = self.store.get_forecast(user_id="alice", days=7)
+        # Noon UTC prevents "one day plus two hours" from straddling an extra
+        # calendar boundary only when CI happens to run late in the day.
+        now = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
+        with patch("app.services.learning_store._utc_now", return_value=now):
+            self._schedule("q1", now + timedelta(days=1))
+            self._schedule("q2", now + timedelta(days=1, hours=2))
+            self._schedule("q3", now + timedelta(days=3))
+            self._schedule("q4", now + timedelta(days=10))  # beyond 7d
+            forecast = self.store.get_forecast(user_id="alice", days=7)
+
         self.assertEqual(forecast["total_due"], 3)
         by_date = {d["date"]: d["count"] for d in forecast["due_counts"]}
         self.assertEqual(len(forecast["due_counts"]), 7)

@@ -201,24 +201,39 @@ class DocumentStore:
         )
 
     def ensure_vec_index(self, dimension: int) -> bool:
-        """Create the vec0 index; rebuild when the dimension changed.
+        """Create the vec0 index; rebuild when its dimension changes or it is missing.
 
-        Returns ``True`` when the index was (re)built, meaning stored
-        vectors were wiped and chunks must be re-embedded.
+        Returns True when the index was (re)built, meaning stored vectors
+        must be re-embedded.
         """
         if not self._vec_available:
             return False
-        stored_dimension = self._vec_meta_get("dimension")
-        index_ready = self._vec_meta_get("index_ready")
-        if index_ready == "1" and stored_dimension == str(dimension):
-            return False
+
         with self._lock:
+            stored_dimension = self._vec_meta_get("dimension")
+            index_ready = self._vec_meta_get("index_ready")
+            if (
+                index_ready == "1"
+                and stored_dimension == str(dimension)
+                and self._vec_table_exists()
+            ):
+                return False
+
+            # Persist the unready state before DDL. SQLite virtual-table DDL can
+            # survive a failed CREATE, so metadata must never claim a missing
+            # index is ready.
             with self._conn:
+                self._vec_meta_set("index_ready", "0")
                 self._conn.execute("DROP TABLE IF EXISTS vec_chunks")
-                self._create_vec_table(int(dimension))
-        logger.info(
-            "Vector index (re)built with dimension=%s", int(dimension)
-        )
+            try:
+                with self._conn:
+                    self._create_vec_table(int(dimension))
+            except Exception:
+                with self._conn:
+                    self._vec_meta_set("index_ready", "0")
+                raise
+
+        logger.info("Vector index (re)built with dimension=%s", int(dimension))
         return True
 
     def _vec_table_exists(self) -> bool:
@@ -242,6 +257,47 @@ class DocumentStore:
         if not self._vec_available or self._vec_table_exists():
             return
         self._create_vec_table(int(dimension))
+
+    def _mirror_vec_embedding_locked(
+        self, chunk_id: int, embedding: list[float]
+    ) -> None:
+        """Mirror only embeddings compatible with the fixed vec0 dimension.
+
+        The JSON copy remains authoritative for re-embedding. When an old or
+        mixed-dimension vector arrives, keep it in JSON but omit it from vec0;
+        the chunk then appears unindexed and cannot poison native search.
+        Caller holds the store lock and a connection transaction.
+        """
+        dimension = len(embedding)
+        self._ensure_vec_table_locked(dimension)
+        self._conn.execute(
+            "DELETE FROM vec_chunks WHERE chunk_id = ?", (chunk_id,)
+        )
+
+        indexed_dimension = self._vec_meta_get("dimension")
+        if indexed_dimension and indexed_dimension != str(dimension):
+            logger.debug(
+                "Skipping stale-dimensional vector for chunk %s: index=%s vector=%s",
+                chunk_id,
+                indexed_dimension,
+                dimension,
+            )
+            return
+
+        try:
+            self._conn.execute(
+                "INSERT INTO vec_chunks(chunk_id, embedding) VALUES (?, ?)",
+                (chunk_id, json.dumps(embedding)),
+            )
+        except sqlite3.OperationalError as exc:
+            # Older index metadata may be absent. Ignore only sqlite-vec's
+            # dimension mismatch; unrelated database errors must still surface.
+            if "dimension mismatch" not in str(exc).casefold():
+                raise
+            logger.debug(
+                "Skipping vector with incompatible vec0 dimension for chunk %s",
+                chunk_id,
+            )
 
     def chunks_missing_vectors(self, dimension: int) -> list[dict]:
         """Chunks whose stored embedding is absent or stale-dimensional."""
@@ -287,18 +343,7 @@ class DocumentStore:
                     (chunk_id, json.dumps(embedding)),
                 )
                 if self._vec_available:
-                    self._ensure_vec_table_locked(len(embedding))
-                    # vec0 virtual tables do not support
-                    # UPSERT — replace via delete + insert.
-                    self._conn.execute(
-                        "DELETE FROM vec_chunks WHERE chunk_id = ?",
-                        (chunk_id,),
-                    )
-                    self._conn.execute(
-                        "INSERT INTO vec_chunks(chunk_id, embedding) "
-                        "VALUES (?, ?)",
-                        (chunk_id, json.dumps(embedding)),
-                    )
+                    self._mirror_vec_embedding_locked(chunk_id, embedding)
 
     # ── Document status machine ───────────────────────────
     def create_document(
@@ -469,12 +514,7 @@ class DocumentStore:
                         (chunk_id, json.dumps(embedding)),
                     )
                     if self._vec_available:
-                        self._ensure_vec_table_locked(len(embedding))
-                        self._conn.execute(
-                            "INSERT INTO vec_chunks(chunk_id, embedding) "
-                            "VALUES (?, ?)",
-                            (chunk_id, json.dumps(embedding)),
-                        )
+                        self._mirror_vec_embedding_locked(chunk_id, embedding)
         return len(chunks)
 
     def get_chunk(
