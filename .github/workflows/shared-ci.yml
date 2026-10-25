@@ -1,0 +1,14 @@
+name: Shared CI workflow validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-lint:
+    name: Validate GitHub Actions workflows
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/workflow-lint.yml@9dd9f26536a6644bca1f03a492d6bb5d9acfc0a6
