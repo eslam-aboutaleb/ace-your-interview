@@ -154,5 +154,45 @@ class GptOssKwargsTests(_ClientTest):
         self.assertNotIn("reasoning_effort", transport.kwargs)
 
 
+class JsonValidateFailedTests(_ClientTest):
+    """Groq rejects an in-JSON-mode truncated generation with a 400
+    ``json_validate_failed`` instead of finish_reason="length". That must
+    surface as the terminal truncation code, not a retryable transport
+    failure, or every caller's retry loop storms the provider (one eval
+    case burned 57 calls before this mapping)."""
+
+    def test_json_validate_failed_maps_to_terminal_truncation(self):
+        transport = _ScriptedTransport(
+            [
+                Exception(
+                    'litellm.BadRequestError: GroqException - {"error":'
+                    '{"message":"Failed to generate JSON. Please adjust your'
+                    ' prompt.","code":"json_validate_failed"}}'
+                )
+            ]
+        )
+        client = LLMClient()
+        with (
+            patch("app.services.llm_client.get_settings", return_value=_settings()),
+            patch("app.services.llm_client.litellm.acompletion", new=transport),
+        ):
+            result = asyncio.run(client.completion("hi"))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "llm_truncated")
+        self.assertEqual(result["finish_reason"], "length")
+        self.assertEqual(transport.calls, 1)
+
+    def test_other_provider_errors_stay_retryable_call_failed(self):
+        transport = _ScriptedTransport([Exception("500 internal server error")])
+        client = LLMClient()
+        with (
+            patch("app.services.llm_client.get_settings", return_value=_settings()),
+            patch("app.services.llm_client.litellm.acompletion", new=transport),
+        ):
+            result = asyncio.run(client.completion("hi"))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "llm_call_failed")
+
+
 if __name__ == "__main__":
     unittest.main()

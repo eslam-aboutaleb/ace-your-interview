@@ -686,13 +686,25 @@ class LLMClient:
                     (time.monotonic() - started) * 1000, 1
                 )
                 logger.error("LiteLLM completion error (%s): %s", resolved_model, e)
+                # Groq's server-side JSON mode rejects an incomplete generation
+                # with a 400 ``json_validate_failed`` instead of returning
+                # finish_reason="length". That is a max_tokens truncation in
+                # disguise: re-sending the same prompt at the same cap cannot
+                # help, so surface the terminal truncation code rather than a
+                # retryable transport failure (a retry storm burned 57 calls
+                # on one eval case before this mapping existed).
+                error_code = (
+                    TRUNCATED_CODE
+                    if "json_validate_failed" in str(e)
+                    else CALL_FAILED_CODE
+                )
                 return {
                     "success": False,
                     "analysis": "",
                     "metadata": dict(base_metadata),
                     "error": str(e),
-                    "error_code": CALL_FAILED_CODE,
-                    "finish_reason": "",
+                    "error_code": error_code,
+                    "finish_reason": "length" if error_code == TRUNCATED_CODE else "",
                     "usage": {},
                 }
             base_metadata["latency_ms"] = round(
