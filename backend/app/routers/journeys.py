@@ -17,16 +17,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.config import get_settings
 from app.dependencies import require_auth
 from app.schemas.journeys import (
+    AttemptCreateRequest,
     BatchCreateRequest,
     BatchCreateResponse,
     BatchListResponse,
     CheckpointResponse,
     CheckpointUpdateRequest,
+    CompletionUpdateRequest,
     JourneyCreateRequest,
     JourneyCreateResponse,
     JourneyDetail,
     JourneyListResponse,
+    JourneyProgressSummary,
     JourneyRefreshResponse,
+    QuestionProgressResponse,
     ReaderStateResponse,
 )
 from app.services.doc_parser import DocParser
@@ -373,3 +377,57 @@ async def update_checkpoint(
     except Exception as exc:
         raise _map_store_error(exc) from exc
     return {"checkpoint": checkpoint}
+
+
+@router.get("/{journey_id}/progress", response_model=JourneyProgressSummary)
+async def get_journey_progress(journey_id: str, user: dict = Depends(require_auth)):
+    _ensure_enabled()
+    store = _ensure_store()
+    try:
+        return await store.run_async(
+            store.get_journey_progress, user_id=str(user["user"]), journey_id=journey_id
+        )
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
+
+
+@router.put("/{journey_id}/questions/{slot_id}/completion", response_model=QuestionProgressResponse)
+async def set_question_completion(
+    journey_id: str, slot_id: str, body: CompletionUpdateRequest, user: dict = Depends(require_auth)
+):
+    """Explicit complete/uncomplete; idempotent per mutation_id (issue #5)."""
+    _ensure_enabled()
+    store = _ensure_store()
+    try:
+        return await store.run_async(
+            store.set_question_completion,
+            user_id=str(user["user"]),
+            journey_id=journey_id,
+            slot_id=slot_id,
+            completed=body.completed,
+            mutation_id=body.mutation_id,
+        )
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
+
+
+@router.post("/{journey_id}/questions/{slot_id}/attempts", response_model=QuestionProgressResponse)
+async def record_question_attempt(
+    journey_id: str, slot_id: str, body: AttemptCreateRequest, user: dict = Depends(require_auth)
+):
+    """Record a practice attempt; idempotent per mutation_id (issue #5)."""
+    _ensure_enabled()
+    store = _ensure_store()
+    try:
+        return await store.run_async(
+            store.record_question_attempt,
+            user_id=str(user["user"]),
+            journey_id=journey_id,
+            slot_id=slot_id,
+            outcome=body.outcome.value,
+            confidence=body.confidence,
+            response_time_ms=body.response_time_ms,
+            mutation_id=body.mutation_id,
+        )
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
