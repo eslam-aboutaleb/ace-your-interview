@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # question batches and reader checkpoints (rollout flag, default off
     # while the remaining learning-journey stages land).
     enable_journeys_v1: bool = False
+    # Repository- and document-grounded journey sources (issue #14),
+    # default off until ingestion lands end to end.
+    enable_journey_sources_v1: bool = False
     # Timed exam mode with auto-grading and remark
     # re-grade (rollout flag, default on).
     enable_exams_v1: bool = True
