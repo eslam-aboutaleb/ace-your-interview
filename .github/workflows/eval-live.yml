@@ -63,6 +63,12 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EVAL_FLOWS: ${{ inputs.flows }}
+          # Groq's on-demand tier caps gpt-oss-120b at 8K tokens/min, and its
+          # reasoning traces burn that budget in seconds under parallel
+          # retries. The weekly drift detector runs the smaller recommended
+          # model serially instead; the model used is recorded in the report.
+          STUDY_DEFAULT_MODEL: openai/gpt-oss-20b
+          STUDY_LLM_USER_MAX_CONCURRENCY: "1"
         run: |
           set +e
           if [ -n "${EVAL_FLOWS}" ]; then
