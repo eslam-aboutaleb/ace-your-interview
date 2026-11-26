@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     enable_adaptive_learning: bool = True
     enable_fsrs_v1: bool = True
     enable_flashcards_v1: bool = True
+    # Durable learning journeys (issue #4): versioned plans, immutable
+    # question batches and reader checkpoints (rollout flag, default off
+    # while the remaining learning-journey stages land).
+    enable_journeys_v1: bool = False
     # Timed exam mode with auto-grading and remark
     # re-grade (rollout flag, default on).
     enable_exams_v1: bool = True
