@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Default LLM settings
     default_provider: str = "groq"      # Free tier friendly default
-    default_model: str = "llama-3.3-70b-versatile"
+    default_model: str = "openai/gpt-oss-120b"
     default_temperature: float = 0.7
     llm_task_routing_enabled: bool = False
     llm_task_route_map_json: str = ""

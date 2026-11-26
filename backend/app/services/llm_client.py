@@ -35,7 +35,7 @@ _PROVIDER_PREFIX: dict[str, str] = {
     "openai": "",              # e.g. "gpt-4o-mini"
     "anthropic": "anthropic/", # e.g. "anthropic/claude-3-5-sonnet-20241022"
     "google": "gemini/",       # e.g. "gemini/gemini-1.5-pro"
-    "groq": "groq/",           # e.g. "groq/llama-3.3-70b-versatile"
+    "groq": "groq/",           # e.g. "groq/openai/gpt-oss-120b"
     "ollama": "ollama/",       # e.g. "ollama/llama3.2"
     "github": "github/",       # e.g. "github/gpt-4o-mini"
 }

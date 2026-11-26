@@ -92,7 +92,7 @@ MODEL_SUGGESTIONS: dict[str, list[str]] = {
         "gemini-1.5-flash",
         "gemini-pro",
     ],
-    "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+    "groq": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "ollama": ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
     "github": ["gpt-4o-mini", "gpt-4o"],
 }
