@@ -196,3 +196,48 @@ class JsonValidateFailedTests(_ClientTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfigurableMaxWaitTests(_ClientTest):
+    def test_settings_raise_the_wait_cap(self):
+        # A 55s provider hint exceeds the 30s default cap; the eval raises it
+        # past Groq's 60s TPM window so the retry actually lands.
+        transport = _ScriptedTransport(
+            [Exception("Rate limit reached. Please try again in 55s."), _response()]
+        )
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        client = LLMClient()
+        with (
+            patch(
+                "app.services.llm_client.get_settings",
+                return_value=_settings(llm_rate_limit_max_wait_seconds=65.0),
+            ),
+            patch("app.services.llm_client.litellm.acompletion", new=transport),
+            patch("app.services.llm_client.asyncio.sleep", new=fake_sleep),
+        ):
+            result = asyncio.run(client.completion("give me json"))
+        self.assertTrue(result["success"])
+        self.assertEqual(len(sleeps), 1)
+        self.assertAlmostEqual(sleeps[0], 55.5, places=3)
+
+    def test_default_cap_still_applies(self):
+        transport = _ScriptedTransport(
+            [Exception("Rate limit reached. Please try again in 55s."), _response()]
+        )
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        client = LLMClient()
+        with (
+            patch("app.services.llm_client.get_settings", return_value=_settings()),
+            patch("app.services.llm_client.litellm.acompletion", new=transport),
+            patch("app.services.llm_client.asyncio.sleep", new=fake_sleep),
+        ):
+            asyncio.run(client.completion("give me json"))
+        self.assertAlmostEqual(sleeps[0], 30.0, places=3)

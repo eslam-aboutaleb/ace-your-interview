@@ -99,12 +99,14 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "rate limit" in str(exc).lower() or "rate_limit" in str(exc).lower()
 
 
-def _rate_limit_wait_seconds(exc: Exception) -> float:
+def _rate_limit_wait_seconds(
+    exc: Exception, max_wait: float = RATE_LIMIT_MAX_WAIT_SECONDS
+) -> float:
     """Seconds to wait before retrying a 429, honouring the provider hint."""
     match = _RATE_LIMIT_WAIT_RE.search(str(exc))
     if match:
         try:
-            return min(float(match.group(1)) + 0.5, RATE_LIMIT_MAX_WAIT_SECONDS)
+            return min(float(match.group(1)) + 0.5, float(max_wait))
         except ValueError:
             pass
     return RATE_LIMIT_DEFAULT_WAIT_SECONDS
@@ -673,7 +675,13 @@ class LLMClient:
                         or attempt_number == RATE_LIMIT_MAX_ATTEMPTS - 1
                     ):
                         break
-                    wait = _rate_limit_wait_seconds(exc)
+                    wait = _rate_limit_wait_seconds(
+                        exc,
+                        float(
+                            getattr(settings, "llm_rate_limit_max_wait_seconds", 0)
+                            or RATE_LIMIT_MAX_WAIT_SECONDS
+                        ),
+                    )
                     logger.warning(
                         "LLM rate limited (%s); retrying in %.1fs",
                         resolved_model,
