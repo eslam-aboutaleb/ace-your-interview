@@ -24,6 +24,7 @@ from app.schemas.models import (
     QuizQuestionType,
     QuizQuestionV2,
 )
+from app.services.answer_schema import repair_rich_answer
 from app.services.llm_client import (
     TERMINAL_ERROR_CODES,
     LLMClient,
@@ -3155,6 +3156,23 @@ def _validate_question_item(
         )
         if not valid_grounding:
             return False, issue
+    # Typed rich answer sections (issue #3): only fully valid structured
+    # content may be published. Unrepairable payloads fall back to the
+    # legacy flat answer instead of failing the whole item.
+    sections_payload = item.get("sections")
+    if sections_payload is not None:
+        repair = repair_rich_answer(
+            {
+                "answer_schema_version": str(item.get("answer_schema_version", "") or ""),
+                "sections": sections_payload,
+            }
+        )
+        if repair.answer is None:
+            item.pop("sections", None)
+            item["answer_schema_version"] = ""
+        else:
+            item["sections"] = [section.model_dump(mode="json") for section in repair.answer.sections]
+            item["answer_schema_version"] = repair.answer.answer_schema_version
     return True, ""
 
 
@@ -3689,6 +3707,8 @@ class QuestionGenerator:
             source_section=item["source_section"].strip(),
             source_quote=item["source_quote"].strip(),
             reasoning_summary=item["reasoning_summary"].strip(),
+            answer_schema_version=str(item.get("answer_schema_version", "") or ""),
+            sections=item.get("sections") or [],
         )
 
     @staticmethod

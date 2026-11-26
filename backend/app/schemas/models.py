@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.answers import AnswerSection  # noqa: F401  (used by QuestionAnswerV2)
+
 
 # ── LLM Provider Enum ───────────────────────────────────────
 class LLMProviderEnum(str, Enum):
@@ -154,6 +156,11 @@ class QuestionAnswerV2(BaseModel):
     source_section: str = ""
     source_quote: str = ""
     reasoning_summary: str = ""
+    #: Typed rich answer (issue #3). Present alongside the legacy ``answer``
+    #: markdown during migration; only fully validated sections are ever
+    #: attached, so every published structured payload validates.
+    answer_schema_version: str = ""
+    sections: list["AnswerSection"] = Field(default_factory=list)
 
 
 class GenerateQuestionsV2Response(BaseModel):
