@@ -441,7 +441,7 @@ describe("ReadinessPage", () => {
 
     await screen.findByText("Role Readiness");
     const button = screen.getByRole("button", { name: /Refresh/i });
-    expect(button).toBeEnabled();
+    await waitFor(() => expect(button).toBeEnabled());
 
     const second = readiness({
       generated_at: "2026-10-11T10:00:00Z",
