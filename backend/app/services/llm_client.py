@@ -81,6 +81,33 @@ FREE_FORM_TEMPERATURE_FLOOR = 0.7
 
 # ── Terminal / retryable outcome codes ──────────────────────
 BUDGET_EXCEEDED_CODE = "llm_budget_exceeded"
+
+#: Provider rate limits (429) are transient: Groq's on-demand tier caps
+#: tokens per minute and tells the caller exactly when to retry. Honour
+#: that hint inside the client so every flow's retry loop does not storm
+#: the provider and exhaust the app's own call budget.
+RATE_LIMIT_MAX_ATTEMPTS = 3
+RATE_LIMIT_DEFAULT_WAIT_SECONDS = 5.0
+RATE_LIMIT_MAX_WAIT_SECONDS = 30.0
+
+_RATE_LIMIT_WAIT_RE = re.compile(r"try again in ([\d.]+)\s*s", re.IGNORECASE)
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    if isinstance(exc, litellm.RateLimitError):
+        return True
+    return "rate limit" in str(exc).lower() or "rate_limit" in str(exc).lower()
+
+
+def _rate_limit_wait_seconds(exc: Exception) -> float:
+    """Seconds to wait before retrying a 429, honouring the provider hint."""
+    match = _RATE_LIMIT_WAIT_RE.search(str(exc))
+    if match:
+        try:
+            return min(float(match.group(1)) + 0.5, RATE_LIMIT_MAX_WAIT_SECONDS)
+        except ValueError:
+            pass
+    return RATE_LIMIT_DEFAULT_WAIT_SECONDS
 TRUNCATED_CODE = "llm_truncated"
 CALL_FAILED_CODE = "llm_call_failed"
 #: Codes a retry loop must not spin on: retrying cannot change the outcome.
@@ -569,6 +596,12 @@ class LLMClient:
             max_tokens=max_tokens,
             timeout=120,
         )
+        if "gpt-oss" in resolved_model:
+            # gpt-oss models spend part of the output budget on hidden
+            # reasoning; "low" keeps structured JSON generation inside the
+            # per-flow max_tokens caps that were tuned for non-reasoning
+            # models, and cuts token-per-minute pressure on free tiers.
+            completion_kwargs["reasoning_effort"] = "low"
         if tools:
             completion_kwargs["tools"] = tools
             if tool_choice is not None:
@@ -626,9 +659,29 @@ class LLMClient:
         semaphore = await self._semaphore_for(identity_key)
         async with semaphore:
             started = time.monotonic()
-            try:
-                response = await litellm.acompletion(**completion_kwargs)
-            except Exception as e:
+            response = None
+            rate_limit_exc: Exception | None = None
+            for attempt_number in range(RATE_LIMIT_MAX_ATTEMPTS):
+                try:
+                    response = await litellm.acompletion(**completion_kwargs)
+                    rate_limit_exc = None
+                    break
+                except Exception as exc:  # noqa: BLE001 - classified below
+                    rate_limit_exc = exc
+                    if (
+                        not _is_rate_limit_error(exc)
+                        or attempt_number == RATE_LIMIT_MAX_ATTEMPTS - 1
+                    ):
+                        break
+                    wait = _rate_limit_wait_seconds(exc)
+                    logger.warning(
+                        "LLM rate limited (%s); retrying in %.1fs",
+                        resolved_model,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+            if rate_limit_exc is not None:
+                e = rate_limit_exc
                 base_metadata["latency_ms"] = round(
                     (time.monotonic() - started) * 1000, 1
                 )
