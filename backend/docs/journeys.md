@@ -60,6 +60,9 @@ Base path `/api/journeys`, auth required (session cookie), JSON.
 | `GET /api/journeys/{id}/batches` | Batches in order. |
 | `GET /api/journeys/{id}/reader-state` | Checkpoint + latest batch with ordered slots. |
 | `PATCH /api/journeys/{id}/checkpoints` | Optimistic write: `expected_revision` + `mutation_id`; omitted fields keep their values. 409 with `{message, current}` on a stale revision; replaying a `mutation_id` returns current state unchanged. Referenced batch/question IDs must belong to the journey (422). |
+| `PUT /api/journeys/{id}/questions/{slot_id}/completion` | Explicit complete/uncomplete (#5). `mutation_id` makes retries and double-taps safe: a replay returns the recorded state unchanged. |
+| `POST /api/journeys/{id}/questions/{slot_id}/attempts` | Record one practice attempt (`outcome` correct/incorrect/skipped, optional `confidence` 0-5 and `response_time_ms`, `mutation_id`). |
+| `GET /api/journeys/{id}/progress` | Summary over DISTINCT active question slots (never event counts) plus per-slot states. |
 
 Error shape: FastAPI `{"detail": ...}`; conflicts use 409, unknown journeys
 404 (existence is never leaked across users), invalid references 422.
@@ -78,19 +81,42 @@ Journey writes reuse the standard request logging. Batch creation returns
 generation stages can report reservation outcomes per batch without schema
 changes.
 
+## Progress semantics (#5)
+
+Per-slot states live in `journey_question_states`; every practice event is
+appended to `journey_question_attempts`.
+
+* `viewed` is set on any interaction; `studied` on completion; `practiced`
+  on any attempt. Each is a distinct ladder state with its own timestamp.
+* Completion is an explicit learner action (complete/uncomplete), never an
+  inferred counter.
+* `mastered` requires completion AND at least two correct attempts AND the
+  latest attempt correct. A fresh incorrect attempt clears it; `skipped`
+  attempts never clear it.
+* Summary percentages count DISTINCT completed slots among active
+  (non-retired) objectives, so retries, replays and duplicate submits
+  cannot inflate progress. A replan that retires an objective removes its
+  slots from the denominator but keeps the recorded states per-slot.
+* Retention scheduling stays with the existing FSRS store; this surface
+  does not build a second scheduler.
+* Both writes are idempotent per `mutation_id` (replayed through
+  `journey_mutations`), matching the checkpoint contract.
+
 ## Legacy progress
 
 Existing `question_progress` rows are untouched. Journey objectives link
-back to curriculum sections via `source_section`; the progress-semantics
-stage (#5) reconciles legacy per-topic progress with journey objectives.
-Nothing is migrated destructively: disabling the flag leaves all prior data
-exactly as it was.
+back to curriculum sections via `source_section`. The legacy wiring is
+deliberately deferred: joining `TopicStudy` progress to journey slots now
+would be throwaway work before the reader slice (#7+) defines how slots
+surface content. Disabling the flag leaves all prior data exactly as it
+was.
 
 ## Verification
 
 ```
 cd backend
 python -m pytest tests/test_journey_store.py tests/test_journeys_router.py -q
+python -m pytest tests/test_journey_progress.py tests/test_journey_progress_router.py -q
 python -m pytest tests/ --cov   # full suite, coverage gate 90%
 python -m ruff check .
 ```
