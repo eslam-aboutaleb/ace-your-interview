@@ -79,14 +79,15 @@ _SKILL_CONTEXT_LABEL = (
     "Skill context (apply these when writing questions, explanations, and expected signals)"
 )
 # Per-flow output ceiling. A caller/config/preference value may lower it but
-# never raise it (enforced by ``LLMClient``). The budget was recalibrated for
-# the gpt-oss reasoning models (the default since the llama retirement):
-# their structured markdown answers with code blocks are longer than
-# llama-3.3's, and hidden reasoning also draws from the same budget, so the
-# old 140/question floor truncated single-question generations mid-JSON.
-_MIN_QUESTIONS_MAX_TOKENS_CAP = 1200
+# never raise it (enforced by ``LLMClient``). The budget matches the checked-in
+# golden outputs: real generations run ~1000 tokens per question (structured
+# markdown answers with code blocks; see backend/evals/golden/questions.jsonl,
+# up to ~5.8K tokens for a very_detailed count6 case). gpt-oss reasoning also
+# draws from the same budget, so the per-question value carries headroom for
+# it. The old 140/question floor truncated ordinary generations mid-JSON.
+_MIN_QUESTIONS_MAX_TOKENS_CAP = 1600
 _MAX_QUESTIONS_MAX_TOKENS_CAP = 8000
-_TOKENS_PER_QUESTION = 400
+_TOKENS_PER_QUESTION = 1300
 
 
 def _questions_max_tokens_cap(count: int) -> int:
