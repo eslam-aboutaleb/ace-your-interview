@@ -18,6 +18,8 @@ from app.config import get_settings
 from app.dependencies import require_auth
 from app.schemas.journeys import (
     BatchCreateRequest,
+    PlanPreviewRequest,
+    PlanPreviewResponse,
     BatchCreateResponse,
     BatchListResponse,
     CheckpointResponse,
@@ -38,6 +40,13 @@ from app.services.journey_store import (
     RevisionConflictError,
 )
 from app.services.learning_store import LearningStore
+from app.services.plan_preview import (
+    PlanValidationError,
+    mark_review_obligations,
+    plan_stats,
+    shape_plan_for_depth,
+    validate_edited_plan,
+)
 
 router = APIRouter(prefix="/api/journeys", tags=["journeys"])
 
@@ -236,6 +245,20 @@ async def create_journey(
         source_topic_id=body.source_topic_id,
     )
     level = body.level or resolved["level"]
+    plan = resolved["plan"]
+    provenance = dict(resolved["provenance"])
+    if body.plan is not None:
+        try:
+            plan = validate_edited_plan(body.plan)
+        except PlanValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        provenance["edited_plan"] = True
+    if body.plan_provenance:
+        provenance["inputs"] = {
+            key: str(value)[:500]
+            for key, value in body.plan_provenance.items()
+            if isinstance(key, str) and isinstance(value, (str, int, float, bool))
+        }
     try:
         detail = await store.run_async(
             store.create_journey,
@@ -246,8 +269,8 @@ async def create_journey(
             source_topic_id=body.source_topic_id,
             track=resolved["track"],
             level=level,
-            plan=resolved["plan"],
-            provenance=resolved["provenance"],
+            plan=plan,
+            provenance=provenance,
         )
     except Exception as exc:
         raise _map_store_error(exc) from exc
@@ -373,3 +396,58 @@ async def update_checkpoint(
     except Exception as exc:
         raise _map_store_error(exc) from exc
     return {"checkpoint": checkpoint}
+
+
+@router.post("/plan-preview", response_model=PlanPreviewResponse)
+async def plan_preview(body: PlanPreviewRequest, user: dict = Depends(require_auth)):
+    """Editable syllabus preview before commitment (issue #6).
+
+    Resolves the source, shapes the baseline plan by depth, marks review
+    obligations from the topic's active FSRS cards, estimates pacing from
+    weekly hours, and echoes the inputs as provenance for the eventual
+    ``POST /api/journeys`` commit. Persists nothing.
+    """
+    _ensure_enabled()
+    _ensure_store()
+    resolved = _resolve_source(
+        user=user,
+        source_type=body.source_type.value,
+        source_topic_id=body.source_topic_id,
+    )
+    try:
+        plan = shape_plan_for_depth(resolved["plan"], body.depth.value)
+    except PlanValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    has_active_cards = False
+    if _learning_store is not None and body.source_type.value == "static_topic":
+        try:
+            has_active_cards = await _ensure_store().run_async(
+                _learning_store.count_active_topic_cards,
+                user_id=str(user["user"]),
+                topic_id=body.source_topic_id,
+            ) > 0
+        except Exception:  # review hints are best-effort, never block a preview
+            has_active_cards = False
+    plan, review_count = mark_review_obligations(plan, has_active_cards=has_active_cards)
+
+    stats = plan_stats(plan, available_hours_per_week=body.available_hours_per_week)
+    stats["review_objective_count"] = review_count
+    level = body.target_level or resolved["level"]
+    provenance = {
+        **resolved["provenance"],
+        "inputs": {
+            "goal": body.goal,
+            "target_level": body.target_level,
+            "available_hours_per_week": body.available_hours_per_week,
+            "depth": body.depth.value,
+        },
+    }
+    return {
+        "title": resolved["title"],
+        "track": resolved["track"],
+        "level": level,
+        "plan": plan,
+        "provenance": provenance,
+        "stats": stats,
+    }

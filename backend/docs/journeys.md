@@ -53,7 +53,8 @@ Base path `/api/journeys`, auth required (session cookie), JSON.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/journeys` | List the caller's journeys (newest first). |
-| `POST /api/journeys` | Create from `static_topic` or `custom_topic`; the plan is derived server-side from the source's sections (one module per section, one objective per bullet, capped at 8 per section). 201 with the full detail. |
+| `POST /api/journeys` | Create from `static_topic` or `custom_topic`; the plan is derived server-side from the source's sections (one module per section, one objective per bullet, capped at 8 per section). Accepts an optional client-edited `plan` (from a preview) plus `plan_provenance` echo (#6); the store re-stamps stable IDs on commit. 201 with the full detail. |
+| `POST /api/journeys/plan-preview` | Goal-driven syllabus preview (#6): goal + target level + weekly hours + depth (`survey`/`standard`/`deep`) + source. Shapes the baseline plan by depth caps, marks review obligations from the topic's active FSRS cards, estimates pacing. Persists nothing; echoes inputs as `provenance.inputs` for the commit call. |
 | `GET /api/journeys/{id}` | Full detail with phases/modules/objectives. |
 | `POST /api/journeys/{id}/refresh` | Replan from current source content. Bumps `plan_version` only on change; retires removed objectives, revives returning ones, never deletes. |
 | `POST /api/journeys/{id}/batches` | Reserve the next batch (`idempotency_key`, `slot_count` 1-50, default 10). Transactional numbering; replaying a key returns the original batch with `created=false`. 409 when no pending objectives remain. |
@@ -78,6 +79,20 @@ Journey writes reuse the standard request logging. Batch creation returns
 generation stages can report reservation outcomes per batch without schema
 changes.
 
+## Plan preview and onboarding (#6)
+
+`POST /api/journeys/plan-preview` is the commitment-free first half of
+onboarding: it returns the shaped syllabus, pacing estimate and provenance
+echo; the learner edits the tree client-side and commits through
+`POST /api/journeys` with `plan` + `plan_provenance`. Edited plans are
+validated server-side (structure, bounds, kinds) and re-stamped with
+stable content-hash IDs, so replans still preserve progress. Review
+obligations are topic-granular: any active FSRS card on the source topic
+marks every objective `review_suggested` (FSRS has no per-section linkage
+yet). Natural-language goal decomposition into a full syllabus is a
+deliberate follow-up; the preview/commit contract already carries the
+goal through provenance.
+
 ## Legacy progress
 
 Existing `question_progress` rows are untouched. Journey objectives link
@@ -91,6 +106,7 @@ exactly as it was.
 ```
 cd backend
 python -m pytest tests/test_journey_store.py tests/test_journeys_router.py -q
+python -m pytest tests/test_plan_preview.py tests/test_plan_preview_router.py -q
 python -m pytest tests/ --cov   # full suite, coverage gate 90%
 python -m ruff check .
 ```
