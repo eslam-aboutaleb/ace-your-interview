@@ -2191,3 +2191,57 @@ export interface CheckpointResponse {
   api_version: string;
   checkpoint: ReaderCheckpoint;
 }
+
+// ---------------------------------------------------------------------------
+// READER MODE + JOURNEY PROGRESS TYPES (issue #13, mirrors backend
+// app/schemas/journeys.py from the journey progress work)
+// ---------------------------------------------------------------------------
+
+export type ReaderMode = "study" | "practice" | "review" | "interview";
+
+export type AttemptOutcome = "correct" | "incorrect" | "skipped";
+
+export interface QuestionState {
+  slot_id: string;
+  viewed: boolean;
+  studied: boolean;
+  practiced: boolean;
+  mastered: boolean;
+  completed: boolean;
+  viewed_at: string;
+  studied_at: string;
+  practiced_at: string;
+  mastered_at: string;
+  completed_at: string;
+  revision: number;
+  updated_at: string;
+}
+
+export interface JourneyProgressSummary {
+  journey_id: string;
+  total_questions: number;
+  completed: number;
+  studied: number;
+  practiced: number;
+  mastered: number;
+  percent_complete: number;
+  states: QuestionState[];
+}
+
+export interface QuestionProgressResponse {
+  api_version: string;
+  state: QuestionState;
+  summary: JourneyProgressSummary;
+}
+
+export interface CompletionUpdateRequestBody {
+  completed: boolean;
+  mutation_id: string;
+}
+
+export interface AttemptCreateRequestBody {
+  outcome: AttemptOutcome;
+  confidence?: number;
+  response_time_ms?: number;
+  mutation_id: string;
+}

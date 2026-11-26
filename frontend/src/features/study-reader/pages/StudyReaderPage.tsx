@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import {
   AlertTriangle,
@@ -12,10 +12,16 @@ import {
   MoveHorizontal,
   Plus,
 } from "lucide-react";
-import { patchJourneyCheckpoint } from "@/services/api";
+import {
+  fetchJourneyProgress,
+  patchJourneyCheckpoint,
+  recordQuestionAttempt,
+  setQuestionCompletion,
+} from "@/services/api";
 import { useApi } from "@/hooks/useApi";
 import { useAuthStore } from "@/store/authStore";
 import type {
+  AttemptOutcome,
   JourneyDetail,
   JourneyModule,
   JourneyObjective,
@@ -33,6 +39,8 @@ import {
   type CheckpointSaver,
   type CheckpointSaveStatus,
 } from "../checkpointSaver";
+import AttemptPanel from "../components/AttemptPanel";
+import { MODE_POLICIES, parseReaderMode, READER_MODES } from "../questionModes";
 import { nextFontScale, useReaderUiStore } from "../store/readerUiStore";
 import CurriculumRail from "../components/CurriculumRail";
 import ReaderBreadcrumbs from "../components/ReaderBreadcrumbs";
@@ -45,6 +53,13 @@ interface ObjectiveLocation {
   objective: JourneyObjective;
   module: JourneyModule;
   phase: JourneyPhase;
+}
+
+function newMutationId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `mutation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function findObjective(journey: JourneyDetail, objectiveId: string): ObjectiveLocation | null {
@@ -92,6 +107,13 @@ export default function StudyReaderPage() {
 
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<CheckpointSaveStatus>("idle");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mode = parseReaderMode(searchParams.get("mode"));
+  const policy = MODE_POLICIES[mode];
+  const [progressSubmitting, setProgressSubmitting] = useState(false);
+  const [progressError, setProgressError] = useState<string | null>(null);
+  // Reveal state is per slot+mode so answers never leak across questions.
+  const [revealedByKey, setRevealedByKey] = useState<Record<string, boolean>>({});
   const saverRef = useRef<CheckpointSaver | null>(null);
   const revisionRef = useRef(0);
 
@@ -117,6 +139,19 @@ export default function StudyReaderPage() {
 
   const journey = data?.journey ?? null;
   const readerState = data?.readerState ?? null;
+
+  const progressFetcher = useCallback(
+    (signal: AbortSignal) => {
+      if (!journeyId) return Promise.reject(new Error("No journey selected."));
+      return fetchJourneyProgress(journeyId, signal);
+    },
+    [journeyId],
+  );
+  const { data: progress, setData: setProgress } = useApi(progressFetcher, {
+    deps: [journeyId],
+    immediate: Boolean(journeyId),
+    errorMessage: "Progress could not be loaded.",
+  });
 
   const slots = useMemo<JourneyQuestionSlot[]>(() => {
     if (!readerState) return [];
@@ -237,6 +272,66 @@ export default function StudyReaderPage() {
     });
   }, [journey, readerState, activeSlot]);
 
+  const setMode = (next: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "study") {
+      params.delete("mode");
+    } else {
+      params.set("mode", next);
+    }
+    setSearchParams(params, { replace: true });
+  };
+
+  const activeState = activeSlot
+    ? progress?.states.find((state) => state.slot_id === activeSlot.id) ?? null
+    : null;
+
+  const handleCompletionToggle = async (completed: boolean) => {
+    if (!journey || !activeSlot || progressSubmitting) return;
+    setProgressSubmitting(true);
+    setProgressError(null);
+    try {
+      const response = await setQuestionCompletion(journey.id, activeSlot.id, {
+        completed,
+        mutation_id: newMutationId(),
+      });
+      setProgress(response.summary);
+    } catch {
+      setProgressError("The completion update did not save. Try again.");
+    } finally {
+      setProgressSubmitting(false);
+    }
+  };
+
+  const handleGrade = async (
+    outcome: AttemptOutcome,
+    confidence: number,
+    responseTimeMs: number,
+  ): Promise<boolean> => {
+    if (!journey || !activeSlot || progressSubmitting) return false;
+    setProgressSubmitting(true);
+    setProgressError(null);
+    try {
+      const response = await recordQuestionAttempt(journey.id, activeSlot.id, {
+        outcome,
+        confidence,
+        response_time_ms: responseTimeMs,
+        mutation_id: newMutationId(),
+      });
+      setProgress(response.summary);
+      return true;
+    } catch {
+      setProgressError("The attempt did not save. Try again.");
+      return false;
+    } finally {
+      setProgressSubmitting(false);
+    }
+  };
+
+  const revealKey = activeSlot ? `${mode}:${activeSlot.id}` : "";
+  const contentVisible =
+    policy.showContentImmediately || (revealKey !== "" && revealedByKey[revealKey] === true);
+
   const announcement = activeSlot
     ? `Question ${slots.findIndex((s) => s.id === activeSlot.id) + 1} of ${slots.length}: ${activeSlot.objective_title}`
     : "";
@@ -290,6 +385,23 @@ export default function StudyReaderPage() {
             onPrev={() => goToSlot(slots[activeIndex - 1])}
             onNext={() => goToSlot(slots[activeIndex + 1])}
           >
+            <div role="group" aria-label="Reader mode" className="flex items-center gap-1">
+              {READER_MODES.map((readerMode) => (
+                <button
+                  key={readerMode}
+                  type="button"
+                  onClick={() => setMode(readerMode)}
+                  aria-pressed={mode === readerMode}
+                  className={`rounded-md px-2 py-1 text-xs font-medium ${
+                    mode === readerMode
+                      ? "bg-udemy-purple text-white"
+                      : "text-udemy-text-muted hover:bg-udemy-bg"
+                  }`}
+                >
+                  {MODE_POLICIES[readerMode].label}
+                </button>
+              ))}
+            </div>
             <span
               role="status"
               aria-label="Save status"
@@ -418,7 +530,9 @@ export default function StudyReaderPage() {
             <div className="rounded-lg border border-udemy-border p-3">
               <dt className="text-xs uppercase text-udemy-text-muted">Source section</dt>
               <dd className="mt-1 text-sm font-medium text-udemy-text">
-                {location.objective.source_section || "Custom"}
+                {contentVisible
+                  ? location.objective.source_section || "Custom"
+                  : "Hidden until you reveal"}
               </dd>
             </div>
             <div className="rounded-lg border border-udemy-border p-3">
@@ -428,6 +542,18 @@ export default function StudyReaderPage() {
               </dd>
             </div>
           </dl>
+          <AttemptPanel
+            key={`${mode}:${activeSlot.id}`}
+            policy={policy}
+            completed={activeState?.completed ?? false}
+            submitting={progressSubmitting}
+            submitError={progressError}
+            onCompletionToggle={(completed) => void handleCompletionToggle(completed)}
+            onGrade={handleGrade}
+            onRevealChange={(revealed) => {
+              if (revealed) setRevealedByKey((current) => ({ ...current, [revealKey]: true }));
+            }}
+          />
         </article>
       ) : null}
     </ReaderShell>

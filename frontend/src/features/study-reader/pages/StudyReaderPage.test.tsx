@@ -11,8 +11,11 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchJourney,
+  fetchJourneyProgress,
   fetchReaderState,
   patchJourneyCheckpoint,
+  recordQuestionAttempt,
+  setQuestionCompletion,
 } from "@/services/api";
 import type {
   JourneyDetail,
@@ -28,6 +31,9 @@ vi.mock("@/services/api", () => ({
   fetchJourney: vi.fn(),
   fetchReaderState: vi.fn(),
   patchJourneyCheckpoint: vi.fn(),
+  fetchJourneyProgress: vi.fn(),
+  setQuestionCompletion: vi.fn(),
+  recordQuestionAttempt: vi.fn(),
 }));
 
 function journeyDetail(): JourneyDetail {
@@ -140,8 +146,24 @@ function readerState(overrides: Partial<ReaderStateResponse> = {}): ReaderStateR
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location">{location.pathname}</div>;
+  return (
+    <div data-testid="location">
+      {location.pathname}
+      {location.search}
+    </div>
+  );
 }
+
+const emptySummary = {
+  journey_id: "j1",
+  total_questions: 2,
+  completed: 0,
+  studied: 0,
+  practiced: 0,
+  mastered: 0,
+  percent_complete: 0,
+  states: [],
+};
 
 function renderPage(initialEntry: string) {
   return render(
@@ -165,6 +187,17 @@ describe("StudyReaderPage", () => {
     useReaderUiStore.setState({ prefsByUser: {} });
     vi.mocked(fetchJourney).mockResolvedValue(journeyDetail());
     vi.mocked(fetchReaderState).mockResolvedValue(readerState());
+    vi.mocked(fetchJourneyProgress).mockResolvedValue(emptySummary);
+    vi.mocked(setQuestionCompletion).mockResolvedValue({
+      api_version: "v1",
+      state: { ...emptySummary, slot_id: "q1", completed: true } as never,
+      summary: { ...emptySummary, completed: 1 },
+    });
+    vi.mocked(recordQuestionAttempt).mockResolvedValue({
+      api_version: "v1",
+      state: { ...emptySummary, slot_id: "q1", practiced: true } as never,
+      summary: { ...emptySummary, practiced: 1 },
+    });
     vi.mocked(patchJourneyCheckpoint).mockResolvedValue({
       api_version: "v1",
       checkpoint: checkpoint({ revision: 4, last_question_id: "q2" }),
@@ -409,6 +442,104 @@ describe("StudyReaderPage", () => {
       },
       { timeout: 3000 },
     );
+  });
+
+  it("switches modes through the URL query param", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    expect(screen.getByRole("button", { name: "Study" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Practice" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("mode=practice");
+    });
+    expect(screen.getByRole("button", { name: "Practice" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("practice mode masks the source section until attempt + reveal, then grades", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1?mode=practice");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    expect(screen.getByText("Hidden until you reveal")).toBeInTheDocument();
+
+    const reveal = screen.getByRole("button", { name: "Reveal answer" });
+    expect(reveal).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Your attempt"), {
+      target: { value: "My attempt" },
+    });
+    expect(reveal).toBeEnabled();
+    fireEvent.click(reveal);
+    expect(screen.getByText("Section A")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "I got it" }));
+    await waitFor(() => {
+      expect(recordQuestionAttempt).toHaveBeenCalledWith("j1", "q1", {
+        outcome: "correct",
+        confidence: 4,
+        response_time_ms: expect.any(Number),
+        mutation_id: expect.any(String),
+      });
+    });
+    expect(await screen.findByText("Attempt recorded.")).toBeInTheDocument();
+  });
+
+  it("review mode offers the four FSRS-style grades after reveal", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1?mode=review");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    fireEvent.change(screen.getByLabelText("Your attempt"), {
+      target: { value: "Recall attempt" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }));
+    for (const label of ["Again", "Hard", "Good", "Easy"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Again" }));
+    await waitFor(() => {
+      expect(recordQuestionAttempt).toHaveBeenCalledWith("j1", "q1", {
+        outcome: "incorrect",
+        confidence: 1,
+        response_time_ms: expect.any(Number),
+        mutation_id: expect.any(String),
+      });
+    });
+  });
+
+  it("interview mode requires a submitted response before reveal", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1?mode=interview");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    expect(screen.queryByRole("button", { name: "Reveal answer" })).not.toBeInTheDocument();
+
+    const submit = screen.getByRole("button", { name: "Submit response" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Your response"), {
+      target: { value: "My interview answer" },
+    });
+    fireEvent.click(submit);
+    fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }));
+    expect(screen.getByText("Section A")).toBeInTheDocument();
+  });
+
+  it("study mode toggles explicit completion", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    fireEvent.click(screen.getByRole("button", { name: "Mark as complete" }));
+    await waitFor(() => {
+      expect(setQuestionCompletion).toHaveBeenCalledWith("j1", "q1", {
+        completed: true,
+        mutation_id: expect.any(String),
+      });
+    });
+  });
+
+  it("never inflates progress from navigation alone", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    await screen.findByRole("heading", { level: 1, name: "Objective Two" });
+    expect(recordQuestionAttempt).not.toHaveBeenCalled();
+    expect(setQuestionCompletion).not.toHaveBeenCalled();
   });
 
   it("only navigates to accepted slots", async () => {
