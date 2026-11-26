@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import { Maximize2, Minimize2, Minus, MoveHorizontal, Plus } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  CloudOff,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Minus,
+  MoveHorizontal,
+  Plus,
+} from "lucide-react";
 import { patchJourneyCheckpoint } from "@/services/api";
 import { useApi } from "@/hooks/useApi";
 import { useAuthStore } from "@/store/authStore";
@@ -18,6 +28,11 @@ import {
   updateCachedCheckpoint,
   type ReaderData,
 } from "../readerData";
+import {
+  createCheckpointSaver,
+  type CheckpointSaver,
+  type CheckpointSaveStatus,
+} from "../checkpointSaver";
 import { nextFontScale, useReaderUiStore } from "../store/readerUiStore";
 import CurriculumRail from "../components/CurriculumRail";
 import ReaderBreadcrumbs from "../components/ReaderBreadcrumbs";
@@ -40,13 +55,6 @@ function findObjective(journey: JourneyDetail, objectiveId: string): ObjectiveLo
     }
   }
   return null;
-}
-
-function newMutationId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `mutation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
@@ -83,7 +91,9 @@ export default function StudyReaderPage() {
   const setReaderPrefs = useReaderUiStore((s) => s.setReaderPrefs);
 
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const lastPatchedQuestion = useRef<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<CheckpointSaveStatus>("idle");
+  const saverRef = useRef<CheckpointSaver | null>(null);
+  const revisionRef = useRef(0);
 
   const fetcher = useCallback(
     async (signal: AbortSignal): Promise<ReaderData> => {
@@ -119,6 +129,50 @@ export default function StudyReaderPage() {
     () => slots.find((slot) => slot.id === questionId) ?? null,
     [slots, questionId],
   );
+
+  // Track the server revision for optimistic concurrency.
+  useEffect(() => {
+    if (readerState) revisionRef.current = readerState.checkpoint.revision;
+  }, [readerState]);
+
+  // Checkpoint saver lifecycle (issue #12): debounced position autosave,
+  // durable offline queue, 409 reconcile, pagehide best-effort beacon.
+  useEffect(() => {
+    if (!journeyId) return;
+    const saver = createCheckpointSaver({
+      journeyId,
+      userKey,
+      getRevision: () => revisionRef.current,
+      patch: patchJourneyCheckpoint,
+      fetchState: async () => {
+        invalidateReaderData(journeyId);
+        const fresh = await getReaderData(journeyId, userKey);
+        return fresh.readerState;
+      },
+      onCheckpoint: (checkpoint) => {
+        updateCachedCheckpoint(journeyId, checkpoint);
+        revisionRef.current = checkpoint.revision;
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                readerState: { ...current.readerState, checkpoint },
+              }
+            : current,
+        );
+      },
+      onStatus: setSaveStatus,
+      debounceMs: 1500,
+    });
+    saverRef.current = saver;
+    const onPageHide = () => saver.flushBestEffort();
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      saver.destroy();
+      saverRef.current = null;
+    };
+  }, [journeyId, userKey, setData]);
 
   // URL owns position: when it is missing or stale, restore from the
   // checkpoint (or fall back to the first accepted slot) and replace.
@@ -171,45 +225,17 @@ export default function StudyReaderPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [navigate, journey?.id]);
 
-  // Persist the checkpoint when the active question changes (optimistic
-  // concurrency: the server rejects stale revisions with 409, in which
-  // case we invalidate the cache and re-sync rather than clobbering).
+  // Schedule a checkpoint autosave when the active question changes;
+  // the saver debounces, queues offline and reconciles 409s (#12).
   useEffect(() => {
     if (!journey || !readerState || !activeSlot) return;
     if (readerState.checkpoint.last_question_id === activeSlot.id) return;
-    if (lastPatchedQuestion.current === activeSlot.id) return;
-    lastPatchedQuestion.current = activeSlot.id;
-    const revision = readerState.checkpoint.revision;
-    void (async () => {
-      try {
-        const response = await patchJourneyCheckpoint(journey.id, {
-          expected_revision: revision,
-          mutation_id: newMutationId(),
-          last_batch_id: activeSlot.batch_id,
-          last_question_id: activeSlot.id,
-        });
-        updateCachedCheckpoint(journey.id, response.checkpoint);
-        setData((current) =>
-          current
-            ? {
-                ...current,
-                readerState: { ...current.readerState, checkpoint: response.checkpoint },
-              }
-            : current,
-        );
-      } catch (err) {
-        if (axios.isAxiosError(err) && err.response?.status === 409) {
-          invalidateReaderData(journey.id);
-          try {
-            const fresh = await getReaderData(journey.id, userKey);
-            setData(fresh);
-          } catch {
-            // leave the current state; the next navigation retries
-          }
-        }
-      }
-    })();
-  }, [journey, readerState, activeSlot, userKey, setData]);
+    saverRef.current?.position({
+      last_batch_id: activeSlot.batch_id,
+      last_question_id: activeSlot.id,
+      scroll_offset: 0,
+    });
+  }, [journey, readerState, activeSlot]);
 
   const announcement = activeSlot
     ? `Question ${slots.findIndex((s) => s.id === activeSlot.id) + 1} of ${slots.length}: ${activeSlot.objective_title}`
@@ -264,6 +290,37 @@ export default function StudyReaderPage() {
             onPrev={() => goToSlot(slots[activeIndex - 1])}
             onNext={() => goToSlot(slots[activeIndex + 1])}
           >
+            <span
+              role="status"
+              aria-label="Save status"
+              aria-live="polite"
+              className="flex items-center gap-1 text-xs text-udemy-text-muted"
+            >
+              {(saveStatus === "pending" || saveStatus === "saving") && (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
+                  Saving…
+                </>
+              )}
+              {saveStatus === "saved" && (
+                <>
+                  <Check className="w-3.5 h-3.5 text-udemy-success" aria-hidden="true" />
+                  Saved
+                </>
+              )}
+              {saveStatus === "offline" && (
+                <>
+                  <CloudOff className="w-3.5 h-3.5" aria-hidden="true" />
+                  Offline — will retry
+                </>
+              )}
+              {saveStatus === "error" && (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 text-udemy-warning" aria-hidden="true" />
+                  Save failed — will retry
+                </>
+              )}
+            </span>
             <button
               type="button"
               onClick={() =>
@@ -317,8 +374,17 @@ export default function StudyReaderPage() {
       onToggleRail={() => setReaderPrefs(userKey, { sidebarOpen: !sidebarOpen })}
       mobileRailOpen={mobileRailOpen}
       onToggleMobileRail={() => setMobileRailOpen((open) => !open)}
+      onScroll={(event) => {
+        if (activeSlot) {
+          saverRef.current?.position({
+            last_batch_id: activeSlot.batch_id,
+            last_question_id: activeSlot.id,
+            scroll_offset: Math.round(event.currentTarget.scrollTop),
+          });
+        }
+      }}
     >
-      <div aria-live="polite" role="status" className="sr-only">
+      <div aria-live="polite" role="status" aria-label="Current question" className="sr-only">
         {announcement}
       </div>
       {slots.length === 0 ? (
