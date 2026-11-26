@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     # Interview personalization: resume/JD parsing, hints, STAR bank,
     # company packs (rollout flag, default on).
     enable_interview_plus_v1: bool = True
+    # Durable generation job orchestration (issue #16), default off.
+    enable_generation_jobs_v1: bool = False
     # Voice-to-voice mock interviews (rollout flag, default off until the
     # null-provider E2E passes).
     enable_voice_interview_v1: bool = False

@@ -44,6 +44,7 @@ from app.services.llm_policy import (
     PersonalCredentialRequiredError,
     StudyAppLLMNotAssignedError,
     policy_error_detail,
+    raise_if_policy_blocked_result,
 )
 from app.services.llm_service_access import LLMServiceAccess
 from app.services.hint_service import HintService
