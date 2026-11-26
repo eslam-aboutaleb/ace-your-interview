@@ -125,6 +125,10 @@ class JourneyRefreshResponse(BaseModel):
 class BatchCreateRequest(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=128)
     slot_count: int = Field(default=10, ge=1, le=50)
+    # Optional intentionally distinct follow-up perspectives; slots cycle
+    # through them and the novelty funnel treats same-concept questions
+    # under different perspectives as legitimate deepening (issue #2).
+    perspectives: list[str] = Field(default_factory=list, max_length=8)
 
 
 class JourneyBatch(BaseModel):
@@ -194,3 +198,40 @@ class CheckpointUpdateRequest(BaseModel):
 class CheckpointResponse(BaseModel):
     api_version: str = JOURNEY_API_VERSION
     checkpoint: CheckpointState
+
+
+class GenerateBatchRequest(BaseModel):
+    prompt_version: str = Field(default="", max_length=128)
+    model_version: str = Field(default="", max_length=128)
+    schema_version: str = Field(default="", max_length=128)
+
+
+class GenerationJob(BaseModel):
+    id: str
+    journey_id: str
+    batch_id: str
+    status: str
+    prompt_version: str = ""
+    model_version: str = ""
+    schema_version: str = ""
+    rounds: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
+    error: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class SlotGenerationResult(BaseModel):
+    slot_id: str
+    outcome: str
+    reason: str
+    rounds: int = 0
+    score: float = 0.0
+
+
+class GenerateBatchResponse(BaseModel):
+    api_version: str = JOURNEY_API_VERSION
+    job: GenerationJob
+    batch: JourneyBatch
+    results: list[SlotGenerationResult] = Field(default_factory=list)

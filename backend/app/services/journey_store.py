@@ -248,6 +248,63 @@ class JourneyStore:
                 )
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS journey_question_fingerprints (
+                    user_id TEXT NOT NULL,
+                    journey_id TEXT NOT NULL,
+                    slot_id TEXT NOT NULL,
+                    objective_id TEXT NOT NULL DEFAULT '',
+                    fingerprint TEXT NOT NULL,
+                    signature_json TEXT NOT NULL DEFAULT '[]',
+                    embedding_json TEXT NOT NULL DEFAULT '',
+                    perspective TEXT NOT NULL DEFAULT '',
+                    question_text TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (journey_id, fingerprint),
+                    UNIQUE (slot_id)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS journey_generation_jobs (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    journey_id TEXT NOT NULL,
+                    batch_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'running',
+                    prompt_version TEXT NOT NULL DEFAULT '',
+                    model_version TEXT NOT NULL DEFAULT '',
+                    schema_version TEXT NOT NULL DEFAULT '',
+                    rounds INTEGER NOT NULL DEFAULT 0,
+                    accepted_count INTEGER NOT NULL DEFAULT 0,
+                    rejected_count INTEGER NOT NULL DEFAULT 0,
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_journey_generation_jobs_batch
+                ON journey_generation_jobs(journey_id, batch_id)
+                """
+            )
+            # Column migrations for databases created before issue #2:
+            # ADD COLUMN is idempotent-guarded via PRAGMA table_info.
+            existing = {
+                row["name"]
+                for row in self._conn.execute("PRAGMA table_info(journey_questions)").fetchall()
+            }
+            for column, ddl in (
+                ("perspective", "ALTER TABLE journey_questions ADD COLUMN perspective TEXT NOT NULL DEFAULT ''"),
+                ("question_json", "ALTER TABLE journey_questions ADD COLUMN question_json TEXT NOT NULL DEFAULT ''"),
+                ("rejection_reason", "ALTER TABLE journey_questions ADD COLUMN rejection_reason TEXT NOT NULL DEFAULT ''"),
+            ):
+                if column not in existing:
+                    self._conn.execute(ddl)
 
     # ------------------------------------------------------------------
     # row mapping
@@ -300,6 +357,8 @@ class JourneyStore:
             "objective_title": row["objective_title"] or "",
             "question_ref": row["question_ref"],
             "status": row["status"],
+            "perspective": row["perspective"] if "perspective" in row.keys() else "",
+            "rejection_reason": row["rejection_reason"] if "rejection_reason" in row.keys() else "",
         }
 
     @staticmethod
@@ -710,6 +769,7 @@ class JourneyStore:
         prompt_version: str = "",
         model_version: str = "",
         schema_version: str = "",
+        perspectives: list[str] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Reserve the next immutable batch of question slots.
 
@@ -783,12 +843,20 @@ class JourneyStore:
                     now_iso,
                 ),
             )
+            clean_perspectives = [
+                (p or "").strip().lower() for p in (perspectives or []) if (p or "").strip()
+            ]
             for position, objective in enumerate(objectives):
+                slot_perspective = (
+                    clean_perspectives[position % len(clean_perspectives)]
+                    if clean_perspectives
+                    else ""
+                )
                 self._conn.execute(
                     """
                     INSERT INTO journey_questions
-                        (id, journey_id, batch_id, position, objective_id, question_ref, status, created_at)
-                    VALUES (?,?,?,?,?,?, 'reserved', ?)
+                        (id, journey_id, batch_id, position, objective_id, question_ref, status, perspective, created_at)
+                    VALUES (?,?,?,?,?,?, 'reserved', ?, ?)
                     """,
                     (
                         f"slot_{uuid.uuid4().hex[:24]}",
@@ -797,6 +865,7 @@ class JourneyStore:
                         position,
                         objective["id"],
                         "",
+                        slot_perspective,
                         now_iso,
                     ),
                 )
@@ -976,3 +1045,276 @@ class JourneyStore:
                 "revision": new_revision,
                 "updated_at": now_iso,
             }
+
+    # ------------------------------------------------------------------
+    # novelty fingerprints and generation jobs (issue #2)
+    # ------------------------------------------------------------------
+    def fingerprints_for_journey(self, *, user_id: str, journey_id: str) -> list[dict[str, Any]]:
+        """Every accepted question's novelty record for this journey.
+
+        Powers the generation dedup funnel: exact hash, concept signature,
+        optional embedding, perspective and the source text for the
+        character-level stage.
+        """
+        import json
+
+        self._require_journey_row(user_id=user_id, journey_id=journey_id)
+        rows = self._conn.execute(
+            """
+            SELECT * FROM journey_question_fingerprints
+            WHERE journey_id = ? AND user_id = ?
+            ORDER BY created_at, rowid
+            """,
+            (journey_id, user_id),
+        ).fetchall()
+        records = []
+        for row in rows:
+            embedding_raw = row["embedding_json"]
+            records.append(
+                {
+                    "slot_id": row["slot_id"],
+                    "objective_id": row["objective_id"],
+                    "fingerprint": row["fingerprint"],
+                    "signature": frozenset(json.loads(row["signature_json"] or "[]")),
+                    "embedding": tuple(json.loads(embedding_raw)) if embedding_raw else None,
+                    "perspective": row["perspective"],
+                    "question_text": row["question_text"],
+                    "created_at": row["created_at"],
+                }
+            )
+        return records
+
+    def create_generation_job(
+        self,
+        *,
+        user_id: str,
+        journey_id: str,
+        batch_id: str,
+        prompt_version: str = "",
+        model_version: str = "",
+        schema_version: str = "",
+    ) -> dict[str, Any]:
+        self._require_journey_row(user_id=user_id, journey_id=journey_id)
+        job_id = f"gen_{uuid.uuid4().hex[:24]}"
+        now_iso = _to_iso(_utc_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO journey_generation_jobs
+                    (id, user_id, journey_id, batch_id, status, prompt_version,
+                     model_version, schema_version, created_at, updated_at)
+                VALUES (?,?,?,?, 'running', ?,?,?, ?, ?)
+                """,
+                (
+                    job_id, user_id, journey_id, batch_id,
+                    prompt_version, model_version, schema_version,
+                    now_iso, now_iso,
+                ),
+            )
+            row = self._conn.execute(
+                "SELECT * FROM journey_generation_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        return self._job_row_to_dict(row)
+
+    @staticmethod
+    def _job_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "journey_id": row["journey_id"],
+            "batch_id": row["batch_id"],
+            "status": row["status"],
+            "prompt_version": row["prompt_version"],
+            "model_version": row["model_version"],
+            "schema_version": row["schema_version"],
+            "rounds": row["rounds"],
+            "accepted_count": row["accepted_count"],
+            "rejected_count": row["rejected_count"],
+            "error": row["error"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def get_generation_job(self, *, user_id: str, journey_id: str, job_id: str) -> dict[str, Any]:
+        self._require_journey_row(user_id=user_id, journey_id=journey_id)
+        row = self._conn.execute(
+            "SELECT * FROM journey_generation_jobs WHERE id = ? AND journey_id = ?",
+            (job_id, journey_id),
+        ).fetchone()
+        if row is None:
+            raise JourneyNotFoundError(f"generation job {job_id!r} not found")
+        return self._job_row_to_dict(row)
+
+    def complete_generation_job(
+        self,
+        *,
+        user_id: str,
+        job_id: str,
+        status: str,
+        rounds: int,
+        accepted_count: int,
+        rejected_count: int,
+        error: str = "",
+    ) -> dict[str, Any]:
+        now_iso = _to_iso(_utc_now())
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT * FROM journey_generation_jobs WHERE id = ? AND user_id = ?",
+                (job_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise JourneyNotFoundError(f"generation job {job_id!r} not found")
+            self._conn.execute(
+                """
+                UPDATE journey_generation_jobs
+                SET status = ?, rounds = ?, accepted_count = ?, rejected_count = ?,
+                    error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, rounds, accepted_count, rejected_count, error, now_iso, job_id),
+            )
+            row = self._conn.execute(
+                "SELECT * FROM journey_generation_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        return self._job_row_to_dict(row)
+
+    def accept_slot(
+        self,
+        *,
+        user_id: str,
+        journey_id: str,
+        slot_id: str,
+        question_ref: str,
+        question_json: str,
+        question_text: str,
+        fingerprint: str,
+        signature: list[str],
+        embedding: list[float] | None,
+        perspective: str = "",
+    ) -> dict[str, Any]:
+        """Mark a reserved slot accepted and persist its novelty record.
+
+        One transaction: the slot flips to ``accepted`` and the fingerprint
+        row lands atomically, so a crash can never leave an accepted slot
+        whose question is invisible to future dedup rounds.
+        """
+        import json
+
+        now_iso = _to_iso(_utc_now())
+        with self._lock, self._conn:
+            slot = self._require_slot_for_update(journey_id=journey_id, slot_id=slot_id)
+            if slot["status"] not in ("reserved", "rejected"):
+                raise JourneyValidationError(
+                    f"slot {slot_id!r} is {slot['status']}, expected reserved"
+                )
+            self._conn.execute(
+                """
+                UPDATE journey_questions
+                SET status = 'accepted', question_ref = ?, question_json = ?,
+                    rejection_reason = ''
+                WHERE id = ?
+                """,
+                (question_ref, question_json, slot_id),
+            )
+            self._conn.execute(
+                """
+                INSERT INTO journey_question_fingerprints
+                    (user_id, journey_id, slot_id, objective_id, fingerprint,
+                     signature_json, embedding_json, perspective, question_text, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(slot_id) DO UPDATE SET
+                    fingerprint = excluded.fingerprint,
+                    signature_json = excluded.signature_json,
+                    embedding_json = excluded.embedding_json,
+                    perspective = excluded.perspective,
+                    question_text = excluded.question_text
+                """,
+                (
+                    user_id,
+                    journey_id,
+                    slot_id,
+                    slot["objective_id"],
+                    fingerprint,
+                    json.dumps(sorted(signature)),
+                    json.dumps(embedding) if embedding else "",
+                    perspective,
+                    question_text,
+                    now_iso,
+                ),
+            )
+            self._conn.execute(
+                "UPDATE journeys SET updated_at = ? WHERE id = ?", (now_iso, journey_id)
+            )
+        row = self._conn.execute(
+            "SELECT q.*, o.title AS objective_title FROM journey_questions q "
+            "LEFT JOIN journey_objectives o ON o.id = q.objective_id WHERE q.id = ?",
+            (slot_id,),
+        ).fetchone()
+        return self._slot_row_to_dict(row)
+
+    def reject_slot(
+        self,
+        *,
+        user_id: str,
+        journey_id: str,
+        slot_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        now_iso = _to_iso(_utc_now())
+        with self._lock, self._conn:
+            slot = self._require_slot_for_update(journey_id=journey_id, slot_id=slot_id)
+            if slot["status"] != "reserved":
+                raise JourneyValidationError(
+                    f"slot {slot_id!r} is {slot['status']}, expected reserved"
+                )
+            self._conn.execute(
+                "UPDATE journey_questions SET status = 'rejected', rejection_reason = ? WHERE id = ?",
+                (reason, slot_id),
+            )
+            self._conn.execute(
+                "UPDATE journeys SET updated_at = ? WHERE id = ?", (now_iso, journey_id)
+            )
+        row = self._conn.execute(
+            "SELECT q.*, o.title AS objective_title FROM journey_questions q "
+            "LEFT JOIN journey_objectives o ON o.id = q.objective_id WHERE q.id = ?",
+            (slot_id,),
+        ).fetchone()
+        return self._slot_row_to_dict(row)
+
+    def _require_slot_for_update(self, *, journey_id: str, slot_id: str) -> sqlite3.Row:
+        row = self._conn.execute(
+            "SELECT * FROM journey_questions WHERE id = ? AND journey_id = ?",
+            (slot_id, journey_id),
+        ).fetchone()
+        if row is None:
+            raise JourneyValidationError(
+                f"question slot {slot_id!r} does not belong to journey {journey_id!r}"
+            )
+        return row
+
+    def set_batch_generation_counts(
+        self,
+        *,
+        user_id: str,
+        journey_id: str,
+        batch_id: str,
+        accepted_count: int,
+        rejected_count: int,
+        status: str = "completed",
+    ) -> dict[str, Any]:
+        self._require_journey_row(user_id=user_id, journey_id=journey_id)
+        now_iso = _to_iso(_utc_now())
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                UPDATE journey_batches
+                SET accepted_count = ?, rejected_count = ?, status = ?, updated_at = ?
+                WHERE id = ? AND journey_id = ?
+                """,
+                (accepted_count, rejected_count, status, now_iso, batch_id, journey_id),
+            )
+            row = self._conn.execute(
+                "SELECT * FROM journey_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+            if row is None:
+                raise JourneyNotFoundError(f"batch {batch_id!r} not found")
+        return self._batch_row_to_dict(row)

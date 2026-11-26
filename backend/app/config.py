@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # question batches and reader checkpoints (rollout flag, default off
     # while the remaining learning-journey stages land).
     enable_journeys_v1: bool = False
+    #: Optional LLM adjudication for the journey-generation embedding
+    #: review band (issue #2). Default off: the band rejects conservatively.
+    enable_journey_generation_adjudication: bool = False
     # Timed exam mode with auto-grading and remark
     # re-grade (rollout flag, default on).
     enable_exams_v1: bool = True
