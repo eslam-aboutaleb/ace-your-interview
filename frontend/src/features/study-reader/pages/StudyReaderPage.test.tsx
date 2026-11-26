@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import axe from "axe-core";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import {
+  createMemoryRouter,
+  MemoryRouter,
+  Route,
+  RouterProvider,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchJourney,
@@ -14,6 +21,8 @@ import type {
   ReaderStateResponse,
 } from "@/types";
 import StudyReaderPage from "./StudyReaderPage";
+import { invalidateReaderData } from "../readerData";
+import { useReaderUiStore } from "../store/readerUiStore";
 
 vi.mock("@/services/api", () => ({
   fetchJourney: vi.fn(),
@@ -152,6 +161,8 @@ function renderPage(initialEntry: string) {
 describe("StudyReaderPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateReaderData();
+    useReaderUiStore.setState({ prefsByUser: {} });
     vi.mocked(fetchJourney).mockResolvedValue(journeyDetail());
     vi.mocked(fetchReaderState).mockResolvedValue(readerState());
     vi.mocked(patchJourneyCheckpoint).mockResolvedValue({
@@ -321,6 +332,63 @@ describe("StudyReaderPage", () => {
       rules: { "color-contrast": { enabled: false } },
     });
     expect(results.violations).toEqual([]);
+  });
+
+  it("serves a param change from the cache without refetching", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    await screen.findByRole("heading", { level: 1, name: "Objective Two" });
+    expect(fetchJourney).toHaveBeenCalledTimes(1);
+    expect(fetchReaderState).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports back and forward navigation via the URL", async () => {
+    const router = createMemoryRouter(
+      [
+        { path: "/journeys/:journeyId", element: <StudyReaderPage /> },
+        {
+          path: "/journeys/:journeyId/batches/:batchId/questions/:questionId",
+          element: <StudyReaderPage />,
+        },
+      ],
+      {
+        initialEntries: [
+          "/journeys/j1/batches/b1/questions/q1",
+          "/journeys/j1/batches/b1/questions/q2",
+        ],
+        initialIndex: 1,
+      },
+    );
+    render(<RouterProvider router={router} />);
+    await screen.findByRole("heading", { level: 1, name: "Objective Two" });
+    await router.navigate(-1);
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    await router.navigate(1);
+    await screen.findByRole("heading", { level: 1, name: "Objective Two" });
+  });
+
+  it("applies UI prefs: focus mode hides the rail, width and font scale persist", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    expect(screen.getByRole("complementary", { name: "Curriculum" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter focus mode" }));
+    expect(screen.queryByRole("complementary", { name: "Curriculum" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Exit focus mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Exit focus mode" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase font size" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle wide layout" }));
+    const prefs = useReaderUiStore.getState().prefsByUser.anonymous;
+    expect(prefs.fontScale).toBe(1.125);
+    expect(prefs.contentWidth).toBe("wide");
+    expect(screen.getByRole("article", { name: "Question overview" }).className).toContain(
+      "max-w-5xl",
+    );
   });
 
   it("only navigates to accepted slots", async () => {
