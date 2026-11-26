@@ -123,6 +123,42 @@ export default function StudyReaderPage() {
     );
   }, [journey, readerState, slots, activeSlot, navigate]);
 
+  // Keyboard-safe prev/next (issue #8): plain arrow keys turn pages, but
+  // never while the user is typing, editing, or selecting text, and never
+  // with modifier keys held.
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+  const activeSlotRef = useRef(activeSlot);
+  activeSlotRef.current = activeSlot;
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), pre, code") ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+      const current = activeSlotRef.current;
+      if (!current) return;
+      const list = slotsRef.current;
+      const index = list.findIndex((slot) => slot.id === current.id);
+      const next = event.key === "ArrowLeft" ? list[index - 1] : list[index + 1];
+      if (!next) return;
+      event.preventDefault();
+      navigate(
+        `/journeys/${journey?.id}/batches/${next.batch_id}/questions/${next.id}`,
+      );
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigate, journey?.id]);
+
   // Persist the checkpoint when the active question changes (optimistic
   // concurrency: the server rejects stale revisions with 409, in which
   // case we re-sync from the server rather than clobbering it).
@@ -156,6 +192,10 @@ export default function StudyReaderPage() {
       }
     })();
   }, [journey, readerState, activeSlot]);
+
+  const announcement = activeSlot
+    ? `Question ${slots.findIndex((s) => s.id === activeSlot.id) + 1} of ${slots.length}: ${activeSlot.objective_title}`
+    : "";
 
   if (loading) {
     return <ReaderSkeleton />;
@@ -212,9 +252,12 @@ export default function StudyReaderPage() {
       mobileRailOpen={mobileRailOpen}
       onToggleMobileRail={() => setMobileRailOpen((open) => !open)}
     >
+      <div aria-live="polite" role="status" className="sr-only">
+        {announcement}
+      </div>
       {slots.length === 0 ? (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-          <p className="text-udemy-text font-medium">No questions generated yet.</p>
+          <h1 className="text-udemy-text font-medium">No questions generated yet.</h1>
           <p className="max-w-md text-sm text-udemy-text-muted">
             This journey has a plan, but its first batch of questions has not
             been generated. Question generation ships behind its own feature

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import axe from "axe-core";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -247,6 +248,79 @@ describe("StudyReaderPage", () => {
     expect(
       await screen.findByText("No questions generated yet."),
     ).toBeInTheDocument();
+  });
+
+  it("turns pages with plain arrow keys and announces the change once", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    expect(screen.getByRole("status")).toHaveTextContent("Question 1 of 2: Objective One");
+
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/journeys/j1/batches/b1/questions/q2",
+      );
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Question 2 of 2: Objective Two");
+
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/journeys/j1/batches/b1/questions/q2",
+    ); // clamped at the last question
+
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/journeys/j1/batches/b1/questions/q1",
+      );
+    });
+  });
+
+  it("ignores arrow keys while typing, editing, or selecting", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q1");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "ArrowRight" });
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/journeys/j1/batches/b1/questions/q1",
+    );
+    input.remove();
+
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    document.body.appendChild(editable);
+    fireEvent.keyDown(editable, { key: "ArrowRight" });
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/journeys/j1/batches/b1/questions/q1",
+    );
+    editable.remove();
+
+    fireEvent.keyDown(document.body, { key: "ArrowRight", ctrlKey: true });
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/journeys/j1/batches/b1/questions/q1",
+    );
+
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(screen.getByRole("heading", { level: 1 }));
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/journeys/j1/batches/b1/questions/q1",
+    );
+    selection?.removeAllRanges();
+  });
+
+  it("has no axe violations on the loaded reader", async () => {
+    const { container } = renderPage("/journeys/j1/batches/b1/questions/q1");
+    await screen.findByRole("heading", { level: 1, name: "Objective One" });
+    const results = await axe.run(container, {
+      rules: { "color-contrast": { enabled: false } },
+    });
+    expect(results.violations).toEqual([]);
   });
 
   it("only navigates to accepted slots", async () => {

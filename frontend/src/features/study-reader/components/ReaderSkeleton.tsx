@@ -5,7 +5,7 @@ export default function ReaderSkeleton() {
       data-testid="reader-skeleton"
       aria-busy="true"
       aria-label="Loading reader"
-      className="flex h-full animate-pulse"
+      className="flex h-full motion-safe:animate-pulse"
     >
       <div className="hidden md:block w-72 border-r border-udemy-border p-4 space-y-3">
         {[0, 1, 2, 3].map((i) => (
