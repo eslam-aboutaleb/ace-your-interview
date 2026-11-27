@@ -55,6 +55,44 @@ class JourneyCreateRequest(BaseModel):
     source_type: JourneySourceTypeEnum
     source_topic_id: str = Field(min_length=1, max_length=200)
     level: str = Field(default="", max_length=50)
+    # Optional client-edited syllabus from a plan preview (#6). When set it
+    # replaces the server-derived baseline plan; the store re-stamps stable
+    # content-hash IDs on commit. ``plan_provenance`` echoes the preview's
+    # inputs (goal, level, hours, depth) for audit.
+    plan: dict | None = None
+    plan_provenance: dict | None = None
+
+
+class PlanDepthEnum(str, Enum):
+    SURVEY = "survey"
+    STANDARD = "standard"
+    DEEP = "deep"
+
+
+class PlanPreviewRequest(BaseModel):
+    goal: str = Field(min_length=1, max_length=2000)
+    source_type: JourneySourceTypeEnum
+    source_topic_id: str = Field(min_length=1, max_length=200)
+    target_level: str = Field(default="", max_length=50)
+    available_hours_per_week: int = Field(default=5, ge=1, le=80)
+    depth: PlanDepthEnum = PlanDepthEnum.STANDARD
+
+
+class PlanStats(BaseModel):
+    module_count: int = 0
+    objective_count: int = 0
+    review_objective_count: int = 0
+    estimated_weeks: int = 0
+
+
+class PlanPreviewResponse(BaseModel):
+    api_version: str = JOURNEY_API_VERSION
+    title: str
+    track: str = ""
+    level: str = ""
+    plan: dict
+    provenance: dict
+    stats: PlanStats
 
 
 class JourneySummary(BaseModel):
