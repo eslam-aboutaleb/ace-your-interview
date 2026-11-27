@@ -55,6 +55,44 @@ class JourneyCreateRequest(BaseModel):
     source_type: JourneySourceTypeEnum
     source_topic_id: str = Field(min_length=1, max_length=200)
     level: str = Field(default="", max_length=50)
+    # Optional client-edited syllabus from a plan preview (#6). When set it
+    # replaces the server-derived baseline plan; the store re-stamps stable
+    # content-hash IDs on commit. ``plan_provenance`` echoes the preview's
+    # inputs (goal, level, hours, depth) for audit.
+    plan: dict | None = None
+    plan_provenance: dict | None = None
+
+
+class PlanDepthEnum(str, Enum):
+    SURVEY = "survey"
+    STANDARD = "standard"
+    DEEP = "deep"
+
+
+class PlanPreviewRequest(BaseModel):
+    goal: str = Field(min_length=1, max_length=2000)
+    source_type: JourneySourceTypeEnum
+    source_topic_id: str = Field(min_length=1, max_length=200)
+    target_level: str = Field(default="", max_length=50)
+    available_hours_per_week: int = Field(default=5, ge=1, le=80)
+    depth: PlanDepthEnum = PlanDepthEnum.STANDARD
+
+
+class PlanStats(BaseModel):
+    module_count: int = 0
+    objective_count: int = 0
+    review_objective_count: int = 0
+    estimated_weeks: int = 0
+
+
+class PlanPreviewResponse(BaseModel):
+    api_version: str = JOURNEY_API_VERSION
+    title: str
+    track: str = ""
+    level: str = ""
+    plan: dict
+    provenance: dict
+    stats: PlanStats
 
 
 class JourneySummary(BaseModel):
@@ -125,6 +163,10 @@ class JourneyRefreshResponse(BaseModel):
 class BatchCreateRequest(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=128)
     slot_count: int = Field(default=10, ge=1, le=50)
+    # Optional intentionally distinct follow-up perspectives; slots cycle
+    # through them and the novelty funnel treats same-concept questions
+    # under different perspectives as legitimate deepening (issue #2).
+    perspectives: list[str] = Field(default_factory=list, max_length=8)
 
 
 class JourneyBatch(BaseModel):
@@ -194,6 +236,88 @@ class CheckpointUpdateRequest(BaseModel):
 class CheckpointResponse(BaseModel):
     api_version: str = JOURNEY_API_VERSION
     checkpoint: CheckpointState
+
+
+# ---------------------------------------------------------------------------
+# Journey sources (issue #14)
+# ---------------------------------------------------------------------------
+
+
+class JourneySourceKind(str, Enum):
+    GITHUB_REPO = "github_repo"
+    UPLOADED_DOC = "uploaded_doc"
+
+
+class JourneySourceAttachRequest(BaseModel):
+    kind: JourneySourceKind
+    locator: str = Field(min_length=1, max_length=1000)
+
+
+class JourneySourceResponse(BaseModel):
+    id: str
+    journey_id: str
+    kind: str
+    locator: str
+    revision_hash: str = ""
+    status: str = "indexed"
+    file_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class JourneySourceDiff(BaseModel):
+    changed: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+
+
+class JourneySourceIngestResponse(BaseModel):
+    api_version: str = JOURNEY_API_VERSION
+    source: JourneySourceResponse
+    diff: JourneySourceDiff
+
+
+class JourneySourceListResponse(BaseModel):
+    api_version: str = JOURNEY_API_VERSION
+    sources: list[JourneySourceResponse] = Field(default_factory=list)
+
+
+
+class GenerateBatchRequest(BaseModel):
+    prompt_version: str = Field(default="", max_length=128)
+    model_version: str = Field(default="", max_length=128)
+    schema_version: str = Field(default="", max_length=128)
+
+
+class GenerationJob(BaseModel):
+    id: str
+    journey_id: str
+    batch_id: str
+    status: str
+    prompt_version: str = ""
+    model_version: str = ""
+    schema_version: str = ""
+    rounds: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
+    error: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class SlotGenerationResult(BaseModel):
+    slot_id: str
+    outcome: str
+    reason: str
+    rounds: int = 0
+    score: float = 0.0
+
+
+class GenerateBatchResponse(BaseModel):
+    api_version: str = JOURNEY_API_VERSION
+    job: GenerationJob
+    batch: JourneyBatch
+    results: list[SlotGenerationResult] = Field(default_factory=list)
 
 
 class AttemptOutcomeEnum(str, Enum):

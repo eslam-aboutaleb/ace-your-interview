@@ -53,12 +53,14 @@ Base path `/api/journeys`, auth required (session cookie), JSON.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/journeys` | List the caller's journeys (newest first). |
-| `POST /api/journeys` | Create from `static_topic` or `custom_topic`; the plan is derived server-side from the source's sections (one module per section, one objective per bullet, capped at 8 per section). 201 with the full detail. |
+| `POST /api/journeys` | Create from `static_topic` or `custom_topic`; the plan is derived server-side from the source's sections (one module per section, one objective per bullet, capped at 8 per section). Accepts an optional client-edited `plan` (from a preview) plus `plan_provenance` echo (#6); the store re-stamps stable IDs on commit. 201 with the full detail. |
+| `POST /api/journeys/plan-preview` | Goal-driven syllabus preview (#6): goal + target level + weekly hours + depth (`survey`/`standard`/`deep`) + source. Shapes the baseline plan by depth caps, marks review obligations from the topic's active FSRS cards, estimates pacing. Persists nothing; echoes inputs as `provenance.inputs` for the commit call. |
 | `GET /api/journeys/{id}` | Full detail with phases/modules/objectives. |
 | `POST /api/journeys/{id}/refresh` | Replan from current source content. Bumps `plan_version` only on change; retires removed objectives, revives returning ones, never deletes. |
 | `POST /api/journeys/{id}/batches` | Reserve the next batch (`idempotency_key`, `slot_count` 1-50, default 10). Transactional numbering; replaying a key returns the original batch with `created=false`. 409 when no pending objectives remain. |
 | `GET /api/journeys/{id}/batches` | Batches in order. |
 | `GET /api/journeys/{id}/reader-state` | Checkpoint + latest batch with ordered slots. |
+| `POST /api/journeys/{id}/batches/{batch_id}/generate` | Fill the batch's reserved slots with novelty-checked questions (#2). Runs the dedup funnel per candidate, regenerates only rejected slots (bounded rounds), persists fingerprints + a generation job with prompt/model/schema versions and accepted/rejected counts. 409 when the batch has no reserved slots left. |
 | `PATCH /api/journeys/{id}/checkpoints` | Optimistic write: `expected_revision` + `mutation_id`; omitted fields keep their values. 409 with `{message, current}` on a stale revision; replaying a `mutation_id` returns current state unchanged. Referenced batch/question IDs must belong to the journey (422). |
 | `PUT /api/journeys/{id}/questions/{slot_id}/completion` | Explicit complete/uncomplete (#5). `mutation_id` makes retries and double-taps safe: a replay returns the recorded state unchanged. |
 | `POST /api/journeys/{id}/questions/{slot_id}/attempts` | Record one practice attempt (`outcome` correct/incorrect/skipped, optional `confidence` 0-5 and `response_time_ms`, `mutation_id`). |
@@ -80,6 +82,53 @@ Journey writes reuse the standard request logging. Batch creation returns
 `accepted_count`/`rejected_count` columns (0 until generation lands) so the
 generation stages can report reservation outcomes per batch without schema
 changes.
+
+## Plan preview and onboarding (#6)
+
+`POST /api/journeys/plan-preview` is the commitment-free first half of
+onboarding: it returns the shaped syllabus, pacing estimate and provenance
+echo; the learner edits the tree client-side and commits through
+`POST /api/journeys` with `plan` + `plan_provenance`. Edited plans are
+validated server-side (structure, bounds, kinds) and re-stamped with
+stable content-hash IDs, so replans still preserve progress. Review
+obligations are topic-granular: any active FSRS card on the source topic
+marks every objective `review_suggested` (FSRS has no per-section linkage
+yet). Natural-language goal decomposition into a full syllabus is a
+deliberate follow-up; the preview/commit contract already carries the
+goal through provenance.
+
+
+## Novelty-aware generation (#2)
+
+`POST .../batches/{id}/generate` fills reserved slots through a four-stage
+dedup funnel (`app/services/novelty.py`), strictest first:
+
+1. exact normalized hash (sha1 over the shared question normaliser);
+2. character near-duplicate (containment + sequence ratio 0.87, mirroring
+   the in-session dedup the generator already ships);
+3. concept equivalence (content-token Jaccard 0.65) - skipped when the
+   candidate and the seen question carry intentionally distinct
+   `perspective` values, so legitimate deepening survives;
+4. calibrated embedding similarity (cosine, default reject >= 0.92) with a
+   review band [0.85, 0.92) for optional LLM adjudication
+   (`STUDY_ENABLE_JOURNEY_GENERATION_ADJUDICATION`, default off; without an
+   adjudicator the band rejects conservatively). Embeddings are
+   best-effort: a provider failure degrades to no-embedding, never fails
+   the batch.
+
+Every accepted question persists a fingerprint row (hash, concept
+signature, optional embedding, perspective, text) in
+`journey_question_fingerprints`, so dedup survives restarts and spans
+batches. Only rejected slots are regenerated (bounded at 3 rounds per
+slot); accepted slots are never re-generated, and re-calling generate on
+a finished batch returns 409. Each run is a `journey_generation_jobs` row
+with prompt/model/schema versions and accepted/rejected counts that roll
+up onto the batch (`completed` when nothing was rejected, else `partial`).
+
+Batches accept an optional `perspectives` list; slots cycle through it and
+the perspective is recorded on the slot, passed to the generator (as a
+section-title suffix) and honored by the funnel.
+
 
 ## Progress semantics (#5)
 
@@ -116,6 +165,12 @@ was.
 ```
 cd backend
 python -m pytest tests/test_journey_store.py tests/test_journeys_router.py -q
+python -m pytest tests/test_plan_preview.py tests/test_plan_preview_router.py -q
+
+
+python -m pytest tests/test_novelty.py tests/test_journey_generation.py tests/test_journey_generation_router.py -q
+
+
 python -m pytest tests/test_journey_progress.py tests/test_journey_progress_router.py -q
 python -m pytest tests/ --cov   # full suite, coverage gate 90%
 python -m ruff check .

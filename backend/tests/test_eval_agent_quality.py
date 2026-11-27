@@ -660,3 +660,74 @@ class InterviewCalibrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LLMCallRecorderTests(unittest.TestCase):
+    """The recorder must await the client and group attempts per case.
+
+    Regression: the first live runs recorded the client's coroutine object,
+    so every telemetry row landed with empty metadata, and they grouped all
+    calls under the run id, so the max-attempts gate could never pass.
+    """
+
+    class _FakeClient:
+        def __init__(self, result: dict[str, Any]):
+            self.result = result
+            self.calls = 0
+
+        async def completion(self, prompt, llm_config=None, user_identity=None, task=None, **kwargs):
+            self.calls += 1
+            return dict(self.result)
+
+    def _result(self) -> dict[str, Any]:
+        return {
+            "success": True,
+            "analysis": "[]",
+            "metadata": {"provider": "groq", "model": "groq/openai/gpt-oss-20b"},
+            "error": "",
+            "error_code": "",
+            "finish_reason": "stop",
+            "usage": {"total_tokens": 42},
+        }
+
+    def test_records_the_awaited_result_not_the_coroutine(self):
+        import asyncio
+
+        sink: list[dict[str, Any]] = []
+        client = self._FakeClient(self._result())
+        recorder = harness.LLMCallRecorder(client, sink, run_id="live-test")
+        result = asyncio.run(recorder.completion("prompt", task="final"))
+        self.assertTrue(result["success"])
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(len(sink), 1)
+        row = sink[0]
+        self.assertEqual(row["finish_reason"], "stop")
+        self.assertEqual(row["provider"], "groq")
+        self.assertEqual(row["model"], "groq/openai/gpt-oss-20b")
+        self.assertEqual(row["usage"], {"total_tokens": 42})
+        self.assertEqual(row["group_id"], "live-test")
+        self.assertEqual(row["sequence"], 1)
+
+    def test_set_group_scopes_attempts_per_case(self):
+        import asyncio
+
+        sink: list[dict[str, Any]] = []
+        recorder = harness.LLMCallRecorder(self._FakeClient(self._result()), sink, run_id="live-test")
+        recorder.set_group("case-a")
+        asyncio.run(recorder.completion("one"))
+        asyncio.run(recorder.completion("two"))
+        recorder.set_group("case-b")
+        asyncio.run(recorder.completion("three"))
+        self.assertEqual(
+            [(row["group_id"], row["sequence"]) for row in sink],
+            [("case-a", 1), ("case-a", 2), ("case-b", 1)],
+        )
+
+    def test_explicit_eval_group_id_wins_over_the_scoped_group(self):
+        import asyncio
+
+        sink: list[dict[str, Any]] = []
+        recorder = harness.LLMCallRecorder(self._FakeClient(self._result()), sink, run_id="live-test")
+        recorder.set_group("case-a")
+        asyncio.run(recorder.completion("one", eval_group_id="explicit"))
+        self.assertEqual(sink[0]["group_id"], "explicit")
