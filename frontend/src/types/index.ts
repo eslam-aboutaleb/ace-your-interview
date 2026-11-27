@@ -2079,3 +2079,115 @@ export interface RoleReadinessResponse {
   /** Target companies ranked by fit, best first. */
   companies: CompanyReadinessEntry[];
 }
+
+// ── Learning journeys (study reader, issue #7) ───────────────
+
+export type JourneyStatus = "active" | "archived" | "completed";
+export type JourneySourceType = "static_topic" | "custom_topic";
+export type JourneyObjectiveStatus = "pending" | "in_progress" | "completed" | "retired";
+export type JourneySlotStatus = "reserved" | "accepted" | "rejected";
+export type JourneyBatchStatus = "planned" | "generating" | "partial" | "completed" | "failed";
+
+export interface JourneySummary {
+  id: string;
+  title: string;
+  goal: string;
+  source_type: JourneySourceType;
+  source_topic_id: string;
+  track: string;
+  level: string;
+  status: JourneyStatus;
+  plan_version: number;
+  objective_count: number;
+  batch_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JourneyObjective {
+  id: string;
+  module_id: string;
+  position: number;
+  title: string;
+  kind: string;
+  source_section: string;
+  status: JourneyObjectiveStatus;
+}
+
+export interface JourneyModule {
+  id: string;
+  phase_id: string;
+  position: number;
+  title: string;
+  description: string;
+  objectives: JourneyObjective[];
+}
+
+export interface JourneyPhase {
+  id: string;
+  position: number;
+  title: string;
+  description: string;
+  modules: JourneyModule[];
+}
+
+export interface JourneyDetail extends JourneySummary {
+  phases: JourneyPhase[];
+}
+
+export interface JourneyBatch {
+  id: string;
+  journey_id: string;
+  batch_number: number;
+  idempotency_key: string;
+  plan_version: number;
+  prompt_version: string;
+  model_version: string;
+  schema_version: string;
+  status: JourneyBatchStatus;
+  accepted_count: number;
+  rejected_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JourneyQuestionSlot {
+  id: string;
+  batch_id: string;
+  position: number;
+  objective_id: string;
+  objective_title: string;
+  question_ref: string;
+  status: JourneySlotStatus;
+}
+
+export interface ReaderCheckpoint {
+  last_batch_id: string;
+  last_question_id: string;
+  last_section_id: string;
+  scroll_offset: number;
+  revision: number;
+  updated_at: string;
+}
+
+export interface ReaderStateResponse {
+  api_version: string;
+  journey_id: string;
+  checkpoint: ReaderCheckpoint;
+  latest_batch: JourneyBatch | null;
+  questions: JourneyQuestionSlot[];
+}
+
+export interface CheckpointUpdateRequest {
+  expected_revision: number;
+  mutation_id: string;
+  last_batch_id?: string;
+  last_question_id?: string;
+  last_section_id?: string;
+  scroll_offset?: number;
+}
+
+export interface CheckpointResponse {
+  api_version: string;
+  checkpoint: ReaderCheckpoint;
+}

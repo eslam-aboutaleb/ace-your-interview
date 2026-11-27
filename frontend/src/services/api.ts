@@ -2115,3 +2115,34 @@ export async function fetchReadiness(): Promise<RoleReadinessResponse> {
 // ES module imports are hoisted, so the trailing block keeps every
 // existing line untouched.
 import type { RoleReadinessResponse } from "@/types";
+
+// ── Learning journeys / study reader (issue #7) ──────────────
+// Types imported here because this file is append-only: ES module imports
+// are hoisted, so the trailing block keeps every existing line untouched.
+import type {
+  CheckpointResponse,
+  CheckpointUpdateRequest,
+  JourneyDetail,
+  ReaderStateResponse,
+} from "@/types";
+
+export async function fetchJourney(journeyId: string): Promise<JourneyDetail> {
+  const { data } = await api.get<JourneyDetail>(`/journeys/${journeyId}`);
+  return data;
+}
+
+export async function fetchReaderState(journeyId: string): Promise<ReaderStateResponse> {
+  const { data } = await api.get<ReaderStateResponse>(`/journeys/${journeyId}/reader-state`);
+  return data;
+}
+
+export async function patchJourneyCheckpoint(
+  journeyId: string,
+  body: CheckpointUpdateRequest,
+): Promise<CheckpointResponse> {
+  const { data } = await api.patch<CheckpointResponse>(
+    `/journeys/${journeyId}/checkpoints`,
+    body,
+  );
+  return data;
+}
