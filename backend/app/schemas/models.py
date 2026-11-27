@@ -2047,3 +2047,53 @@ class RoleReadinessResponse(BaseModel):
     best_fit_roles: list[BestFitRole] = Field(default_factory=list)
     #: Target companies ranked by fit, best first.
     companies: list[CompanyReadinessEntry] = Field(default_factory=list)
+
+
+class TutorAction(str, Enum):
+    SIMPLER = "simpler"
+    DEEPER = "deeper"
+    WHY = "why"
+    COMPARE = "compare"
+    EXAMPLE = "example"
+    FOLLOW_UP = "follow_up"
+
+
+class TutorExplainRequest(BaseModel):
+    action: TutorAction
+    question_text: str = ""
+    answer_context: str = ""
+    source_section: str = ""
+    source_quote: str = ""
+    user_answer: str = ""
+    follow_up_prompt: str = ""
+    compare_to: str = ""
+    llm_config: Optional[LLMConfigRequest] = None
+
+
+class TutorCitation(BaseModel):
+    section: str = ""
+    quote: str = ""
+    line: str = ""
+
+
+class TutorMisconception(BaseModel):
+    error_type: str
+    explanation: str = ""
+    source: str = "rule"
+
+
+class TutorRemediation(BaseModel):
+    objectives: list[str] = Field(default_factory=list)
+    flashcard_suggestion: str = ""
+
+
+class TutorExplainResponse(BaseModel):
+    question_id: str
+    action: str
+    explanation: str
+    refusal: bool = False
+    citations: list[TutorCitation] = Field(default_factory=list)
+    misconception: Optional[TutorMisconception] = None
+    remediation: Optional[TutorRemediation] = None
+    explains_used: int = 0
+    explains_remaining: int = 0

@@ -22,6 +22,7 @@ from app.routers import (
     exams,
     gamification,
     hints,
+    tutor,
     interview_sessions,
     journeys,
     learning,
@@ -49,6 +50,7 @@ from app.services.llm_policy import (
 )
 from app.services.llm_service_access import LLMServiceAccess
 from app.services.hint_service import HintService
+from app.services.tutor_service import TutorService
 from app.services.learning_planner import LearningPlannerStore
 from app.services.learning_store import LearningStore
 from app.services.learner_memory import init as init_learner_memory
@@ -292,6 +294,7 @@ async def lifespan(application: FastAPI):
         interview_store=(_interview_services[0] if _interview_services else None),
     )
     hints.init(HintService(_llm_client, settings.learning_db_path))
+    tutor.init(TutorService(_llm_client, settings.learning_db_path))
     voice.init(_llm_client, _user_settings_store)
     exams.init(exam_store, exam_service)
     gamification.init(gamification_service)
@@ -395,6 +398,7 @@ def create_app() -> FastAPI:
     application.include_router(progress.router, dependencies=auth_dep)
     application.include_router(interview_sessions.router, dependencies=auth_dep)
     application.include_router(hints.router, dependencies=auth_dep)
+    application.include_router(tutor.router, dependencies=auth_dep)
     application.include_router(star_stories.router, dependencies=auth_dep)
     application.include_router(exams.exams_router, dependencies=auth_dep)
     application.include_router(gamification.gamification_router, dependencies=auth_dep)
