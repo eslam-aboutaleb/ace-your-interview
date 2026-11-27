@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 #: ``app.services.llm_client.JSON_MODE_CAPABLE_PROVIDERS``: JSON mode does not
 #: imply tool support, so membership here must be verified independently.
 TOOL_CAPABLE_PROVIDERS: frozenset[str] = frozenset(
-    {"openai", "groq", "google", "github"}
+    {"openai", "groq", "google", "github", "litellm"}
 )
 
 #: Model-name patterns that are known not to support tool calling even on a

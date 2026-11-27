@@ -26,6 +26,8 @@ import StarStoriesPage from "@/pages/StarStoriesPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import ExamPage from "@/pages/ExamPage";
 import { fetchTopicMastery, fetchUserSettings, updateUserPreferences } from "@/services/api";
+import { isStudyReaderEnabled } from "@/features/study-reader/flag";
+import StudyReaderPage from "@/features/study-reader/pages/StudyReaderPage";
 import { useAuthStore } from "@/store/authStore";
 import { useProgressStore } from "@/store/progressStore";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -371,6 +373,26 @@ export default function App() {
                 </ErrorBoundary>
               }
             />
+            {isStudyReaderEnabled() && (
+              <>
+                <Route
+                  path="journeys/:journeyId"
+                  element={
+                    <ErrorBoundary>
+                      <StudyReaderPage />
+                    </ErrorBoundary>
+                  }
+                />
+                <Route
+                  path="journeys/:journeyId/batches/:batchId/questions/:questionId"
+                  element={
+                    <ErrorBoundary>
+                      <StudyReaderPage />
+                    </ErrorBoundary>
+                  }
+                />
+              </>
+            )}
             <Route
               path="settings"
               element={

@@ -21,7 +21,13 @@ class Settings(BaseSettings):
 
     # Default LLM settings
     default_provider: str = "groq"      # Free tier friendly default
-    default_model: str = "llama-3.3-70b-versatile"
+    # OpenAI-compatible LiteLLM gateway (provider "litellm"). The raw
+    # LITELLM_API_BASE / LITELLM_API_KEY env names (the owner's cross-repo
+    # convention) are honoured as fallbacks in the LLM client; these
+    # STUDY_-prefixed settings take precedence when set.
+    litellm_api_base: str = ""
+    litellm_api_key: str = ""
+    default_model: str = "openai/gpt-oss-120b"
     default_temperature: float = 0.7
     llm_task_routing_enabled: bool = False
     llm_task_route_map_json: str = ""
@@ -32,6 +38,17 @@ class Settings(BaseSettings):
     enable_adaptive_learning: bool = True
     enable_fsrs_v1: bool = True
     enable_flashcards_v1: bool = True
+    # Durable learning journeys (issue #4): versioned plans, immutable
+    # question batches and reader checkpoints (rollout flag, default off
+    # while the remaining learning-journey stages land).
+    enable_journeys_v1: bool = False
+    # Repository- and document-grounded journey sources (issue #14),
+    # default off until ingestion lands end to end.
+    enable_journey_sources_v1: bool = False
+
+    #: Optional LLM adjudication for the journey-generation embedding
+    #: review band (issue #2). Default off: the band rejects conservatively.
+    enable_journey_generation_adjudication: bool = False
     # Timed exam mode with auto-grading and remark
     # re-grade (rollout flag, default on).
     enable_exams_v1: bool = True
@@ -42,6 +59,13 @@ class Settings(BaseSettings):
     # Interview personalization: resume/JD parsing, hints, STAR bank,
     # company packs (rollout flag, default on).
     enable_interview_plus_v1: bool = True
+    # Durable generation job orchestration (issue #16), default off.
+    enable_generation_jobs_v1: bool = False
+
+
+    # Contextual tutor explanations scoped to questions (issue #15),
+    # default off until the explain flow lands end to end.
+    enable_tutor_v1: bool = False
     # Voice-to-voice mock interviews (rollout flag, default off until the
     # null-provider E2E passes).
     enable_voice_interview_v1: bool = False
@@ -84,6 +108,11 @@ class Settings(BaseSettings):
     llm_user_call_budget: int = 120
     llm_user_call_budget_window_seconds: int = 60
     llm_user_max_concurrency: int = 4
+    # Cap on how long a 429 retry waits for the provider's retry-after hint.
+    # 30s keeps interactive use snappy; the weekly live eval raises it past
+    # Groq's 60s per-minute window so free-tier TPM saturation resolves
+    # instead of failing the call.
+    llm_rate_limit_max_wait_seconds: float = 30.0
     # Trust X-Forwarded-For only when running behind a known proxy.
     trusted_proxy_enabled: bool = False
 
