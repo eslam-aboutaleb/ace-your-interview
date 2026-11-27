@@ -102,19 +102,29 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "rate limit" in str(exc).lower() or "rate_limit" in str(exc).lower()
 
 
-def _rate_limit_wait_seconds(exc: Exception) -> float:
+def _rate_limit_wait_seconds(
+    exc: Exception, max_wait: float = RATE_LIMIT_MAX_WAIT_SECONDS
+) -> float:
     """Seconds to wait before retrying a 429, honouring the provider hint."""
     match = _RATE_LIMIT_WAIT_RE.search(str(exc))
     if match:
         try:
-            return min(float(match.group(1)) + 0.5, RATE_LIMIT_MAX_WAIT_SECONDS)
+            return min(float(match.group(1)) + 0.5, float(max_wait))
         except ValueError:
             pass
     return RATE_LIMIT_DEFAULT_WAIT_SECONDS
 TRUNCATED_CODE = "llm_truncated"
 CALL_FAILED_CODE = "llm_call_failed"
+RATE_LIMITED_CODE = "llm_rate_limited"
 #: Codes a retry loop must not spin on: retrying cannot change the outcome.
-TERMINAL_ERROR_CODES: frozenset[str] = frozenset({BUDGET_EXCEEDED_CODE, TRUNCATED_CODE})
+#: Rate limiting is terminal at the CALLER level once the client's own
+#: patient retries are exhausted: the provider asked for minutes, and a
+#: generator that re-sends the same prompt anyway storms the daily quota
+#: (an eval case burned 326 retried calls on an exhausted 200K TPD budget
+#: before this code existed).
+TERMINAL_ERROR_CODES: frozenset[str] = frozenset(
+    {BUDGET_EXCEEDED_CODE, TRUNCATED_CODE, RATE_LIMITED_CODE}
+)
 
 _FENCED_JSON = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", flags=re.DOTALL)
 
@@ -701,7 +711,13 @@ class LLMClient:
                         or attempt_number == RATE_LIMIT_MAX_ATTEMPTS - 1
                     ):
                         break
-                    wait = _rate_limit_wait_seconds(exc)
+                    wait = _rate_limit_wait_seconds(
+                        exc,
+                        float(
+                            getattr(settings, "llm_rate_limit_max_wait_seconds", 0)
+                            or RATE_LIMIT_MAX_WAIT_SECONDS
+                        ),
+                    )
                     logger.warning(
                         "LLM rate limited (%s); retrying in %.1fs",
                         resolved_model,
@@ -714,13 +730,27 @@ class LLMClient:
                     (time.monotonic() - started) * 1000, 1
                 )
                 logger.error("LiteLLM completion error (%s): %s", resolved_model, e)
+                # Groq's server-side JSON mode rejects an incomplete generation
+                # with a 400 ``json_validate_failed`` instead of returning
+                # finish_reason="length". That is a max_tokens truncation in
+                # disguise: re-sending the same prompt at the same cap cannot
+                # help, so surface the terminal truncation code rather than a
+                # retryable transport failure (a retry storm burned 57 calls
+                # on one eval case before this mapping existed).
+                error_code = (
+                    TRUNCATED_CODE
+                    if "json_validate_failed" in str(e)
+                    else RATE_LIMITED_CODE
+                    if _is_rate_limit_error(e)
+                    else CALL_FAILED_CODE
+                )
                 return {
                     "success": False,
                     "analysis": "",
                     "metadata": dict(base_metadata),
                     "error": str(e),
-                    "error_code": CALL_FAILED_CODE,
-                    "finish_reason": "",
+                    "error_code": error_code,
+                    "finish_reason": "length" if error_code == TRUNCATED_CODE else "",
                     "usage": {},
                 }
             base_metadata["latency_ms"] = round(

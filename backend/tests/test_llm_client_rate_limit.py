@@ -127,6 +127,12 @@ class RateLimitRetryTests(_ClientTest):
         result = self._run(transport, [])
         self.assertEqual(transport.calls, RATE_LIMIT_MAX_ATTEMPTS)
         self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "llm_rate_limited")
+
+    def test_exhausted_rate_limit_is_terminal_for_caller_retry_loops(self):
+        from app.services.llm_client import RATE_LIMITED_CODE, TERMINAL_ERROR_CODES
+
+        self.assertIn(RATE_LIMITED_CODE, TERMINAL_ERROR_CODES)
 
 
 class GptOssKwargsTests(_ClientTest):
@@ -154,5 +160,90 @@ class GptOssKwargsTests(_ClientTest):
         self.assertNotIn("reasoning_effort", transport.kwargs)
 
 
+class JsonValidateFailedTests(_ClientTest):
+    """Groq rejects an in-JSON-mode truncated generation with a 400
+    ``json_validate_failed`` instead of finish_reason="length". That must
+    surface as the terminal truncation code, not a retryable transport
+    failure, or every caller's retry loop storms the provider (one eval
+    case burned 57 calls before this mapping)."""
+
+    def test_json_validate_failed_maps_to_terminal_truncation(self):
+        transport = _ScriptedTransport(
+            [
+                Exception(
+                    'litellm.BadRequestError: GroqException - {"error":'
+                    '{"message":"Failed to generate JSON. Please adjust your'
+                    ' prompt.","code":"json_validate_failed"}}'
+                )
+            ]
+        )
+        client = LLMClient()
+        with (
+            patch("app.services.llm_client.get_settings", return_value=_settings()),
+            patch("app.services.llm_client.litellm.acompletion", new=transport),
+        ):
+            result = asyncio.run(client.completion("hi"))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "llm_truncated")
+        self.assertEqual(result["finish_reason"], "length")
+        self.assertEqual(transport.calls, 1)
+
+    def test_other_provider_errors_stay_retryable_call_failed(self):
+        transport = _ScriptedTransport([Exception("500 internal server error")])
+        client = LLMClient()
+        with (
+            patch("app.services.llm_client.get_settings", return_value=_settings()),
+            patch("app.services.llm_client.litellm.acompletion", new=transport),
+        ):
+            result = asyncio.run(client.completion("hi"))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "llm_call_failed")
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfigurableMaxWaitTests(_ClientTest):
+    def test_settings_raise_the_wait_cap(self):
+        # A 55s provider hint exceeds the 30s default cap; the eval raises it
+        # past Groq's 60s TPM window so the retry actually lands.
+        transport = _ScriptedTransport(
+            [Exception("Rate limit reached. Please try again in 55s."), _response()]
+        )
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        client = LLMClient()
+        with (
+            patch(
+                "app.services.llm_client.get_settings",
+                return_value=_settings(llm_rate_limit_max_wait_seconds=65.0),
+            ),
+            patch("app.services.llm_client.litellm.acompletion", new=transport),
+            patch("app.services.llm_client.asyncio.sleep", new=fake_sleep),
+        ):
+            result = asyncio.run(client.completion("give me json"))
+        self.assertTrue(result["success"])
+        self.assertEqual(len(sleeps), 1)
+        self.assertAlmostEqual(sleeps[0], 55.5, places=3)
+
+    def test_default_cap_still_applies(self):
+        transport = _ScriptedTransport(
+            [Exception("Rate limit reached. Please try again in 55s."), _response()]
+        )
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        client = LLMClient()
+        with (
+            patch("app.services.llm_client.get_settings", return_value=_settings()),
+            patch("app.services.llm_client.litellm.acompletion", new=transport),
+            patch("app.services.llm_client.asyncio.sleep", new=fake_sleep),
+        ):
+            asyncio.run(client.completion("give me json"))
+        self.assertAlmostEqual(sleeps[0], 30.0, places=3)

@@ -2600,3 +2600,77 @@ class GenerateQuizV2StreamFinalTests(unittest.TestCase):
         self.assertEqual(len(questions), 3)
         self.assertEqual(len(set(questions)), 3)
         self.assertEqual(events[-1]["generated_count"], 3)
+
+
+CONTENT_SNAP = (
+    "A pool bounds concurrent connections and reuses warm ones. "
+    "Cancellation must be honoured and the transaction rolled back."
+)
+
+
+class SnapQuoteToContentTests(unittest.TestCase):
+    def test_a_near_miss_paraphrase_snaps_to_the_verbatim_sentence(self):
+        snapped = qg._snap_quote_to_content(
+            "A pool bounds the concurrent connections and reuses the warm ones.",
+            CONTENT_SNAP,
+        )
+        self.assertEqual(
+            snapped, "A pool bounds concurrent connections and reuses warm ones."
+        )
+
+    def test_a_quote_spanning_two_sentences_snaps_to_the_pair(self):
+        snapped = qg._snap_quote_to_content(
+            "pool bounds concurrent connections and reuses warm ones and "
+            "cancellation must be honoured and the transaction rolled back",
+            CONTENT_SNAP,
+        )
+        self.assertEqual(snapped, CONTENT_SNAP)
+
+    def test_an_unrelated_quote_is_not_snapped(self):
+        self.assertIsNone(
+            qg._snap_quote_to_content("An invented quotation about pooling.", CONTENT_SNAP)
+        )
+
+    def test_a_too_short_quote_is_not_snapped(self):
+        self.assertIsNone(qg._snap_quote_to_content("warm ones", CONTENT_SNAP))
+        self.assertIsNone(qg._snap_quote_to_content("", CONTENT_SNAP))
+
+
+class ValidatorQuoteSalvageTests(unittest.TestCase):
+    def test_question_validator_salvages_a_near_miss_quote_in_place(self):
+        item = _item(
+            "Why does a pool bound concurrent connections?",
+            source_quote="A pool bounds the concurrent connections and reuses the warm ones.",
+        )
+        ok, issue = qg._validate_question_item(
+            item, "topic-a", None, "mid", topic_content=CONTENT_SNAP
+        )
+        self.assertTrue(ok, issue)
+        self.assertEqual(
+            item["source_quote"],
+            "A pool bounds concurrent connections and reuses warm ones.",
+        )
+
+    def test_question_validator_still_rejects_an_unrelated_quote(self):
+        item = _item(
+            "Why does a pool bound concurrent connections?",
+            source_quote="An invented quotation about pooling.",
+        )
+        ok, issue = qg._validate_question_item(
+            item, "topic-a", None, "mid", topic_content=CONTENT_SNAP
+        )
+        self.assertFalse(ok)
+        self.assertEqual(issue, "source_quote_not_in_content")
+
+    def test_quiz_validator_salvages_a_near_miss_quote_in_place(self):
+        item = _quiz_item(
+            source_quote="A pool bounds the concurrent connections and reuses the warm ones."
+        )
+        ok, issue = qg._validate_quiz_item(
+            item, TOPICS, TYPES, None, "mid", topic_content=CONTENT_SNAP
+        )
+        self.assertTrue(ok, issue)
+        self.assertEqual(
+            item["source_quote"],
+            "A pool bounds concurrent connections and reuses warm ones.",
+        )

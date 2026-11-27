@@ -37,7 +37,11 @@ jobs:
   regenerate:
     name: regenerate and diff golden outputs
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A HEALTHY run is slow: ~40 real calls of 2-7K tokens each against a
+    # free-tier 8K TPM budget, pacing itself through 429 retry-after waits.
+    # (The broken runs used to finish in ~12 min precisely because they
+    # failed fast.)
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: backend
@@ -69,6 +73,9 @@ jobs:
           # model serially instead; the model used is recorded in the report.
           STUDY_DEFAULT_MODEL: openai/gpt-oss-20b
           STUDY_LLM_USER_MAX_CONCURRENCY: "1"
+          # Groq's free-tier TPM window is per-minute; let 429 retries wait
+          # out the full window instead of giving up after 30s.
+          STUDY_LLM_RATE_LIMIT_MAX_WAIT_SECONDS: "65"
         run: |
           set +e
           if [ -n "${EVAL_FLOWS}" ]; then
