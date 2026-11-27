@@ -232,7 +232,7 @@ class StaticHelpersTests(_StoreFixture):
     def test_default_preferences_follow_the_configured_provider(self):
         defaults = self.store.default_preferences()
         self.assertEqual(defaults["provider"], "groq")
-        self.assertEqual(defaults["model"], "llama-3.3-70b-versatile")
+        self.assertEqual(defaults["model"], "openai/gpt-oss-120b")
         self.assertEqual(defaults["auth_mode"], "api_key")
         self.assertEqual(defaults["llm_source"], "personal")
         self.assertEqual(defaults["max_tokens"], 0)
