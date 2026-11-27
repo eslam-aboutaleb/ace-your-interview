@@ -2126,13 +2126,21 @@ import type {
   ReaderStateResponse,
 } from "@/types";
 
-export async function fetchJourney(journeyId: string): Promise<JourneyDetail> {
-  const { data } = await api.get<JourneyDetail>(`/journeys/${journeyId}`);
+export async function fetchJourney(
+  journeyId: string,
+  signal?: AbortSignal,
+): Promise<JourneyDetail> {
+  const { data } = await api.get<JourneyDetail>(`/journeys/${journeyId}`, { signal });
   return data;
 }
 
-export async function fetchReaderState(journeyId: string): Promise<ReaderStateResponse> {
-  const { data } = await api.get<ReaderStateResponse>(`/journeys/${journeyId}/reader-state`);
+export async function fetchReaderState(
+  journeyId: string,
+  signal?: AbortSignal,
+): Promise<ReaderStateResponse> {
+  const { data } = await api.get<ReaderStateResponse>(`/journeys/${journeyId}/reader-state`, {
+    signal,
+  });
   return data;
 }
 

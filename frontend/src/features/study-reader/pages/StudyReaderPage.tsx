@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import {
-  fetchJourney,
-  fetchReaderState,
-  patchJourneyCheckpoint,
-} from "@/services/api";
+import { Maximize2, Minimize2, Minus, MoveHorizontal, Plus } from "lucide-react";
+import { patchJourneyCheckpoint } from "@/services/api";
+import { useApi } from "@/hooks/useApi";
+import { useAuthStore } from "@/store/authStore";
 import type {
   JourneyDetail,
   JourneyModule,
   JourneyObjective,
   JourneyPhase,
   JourneyQuestionSlot,
-  ReaderStateResponse,
 } from "@/types";
+import {
+  getReaderData,
+  invalidateReaderData,
+  updateCachedCheckpoint,
+  type ReaderData,
+} from "../readerData";
+import { nextFontScale, useReaderUiStore } from "../store/readerUiStore";
 import CurriculumRail from "../components/CurriculumRail";
 import ReaderBreadcrumbs from "../components/ReaderBreadcrumbs";
 import ReaderErrorState from "../components/ReaderErrorState";
@@ -45,13 +50,14 @@ function newMutationId(): string {
 }
 
 /**
- * Study reader page (issue #7). The URL owns position:
- * /journeys/:journeyId/batches/:batchId/questions/:questionId. On entry
- * without a question id, the checkpoint restores the last position.
+ * Study reader page (issues #7, #8, #11).
  *
- * Scope note: this slice ships the shell, navigation, and checkpoint
- * restore. Question content rendering lands with #9/#10, so the center
- * pane surfaces the objective's plan data, not a placeholder.
+ * State ownership contract: the URL owns the selected
+ * journey/batch/question; the reader-data cache (per-user scoped,
+ * TTL-bound, abort-aware via useApi) owns server payloads; Zustand
+ * holds only harmless UI preferences (sidebar, focus mode, font
+ * scale, content width). No question payload is mirrored into a
+ * global store.
  */
 export default function StudyReaderPage() {
   const { journeyId, questionId } = useParams<{
@@ -60,43 +66,47 @@ export default function StudyReaderPage() {
     questionId: string;
   }>();
   const navigate = useNavigate();
+  const userKey = useAuthStore((s) => s.user?.user ?? "anonymous");
 
-  const [journey, setJourney] = useState<JourneyDetail | null>(null);
-  const [readerState, setReaderState] = useState<ReaderStateResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [railOpen, setRailOpen] = useState(true);
+  const sidebarOpen = useReaderUiStore(
+    (s) => s.prefsByUser[userKey]?.sidebarOpen ?? true,
+  );
+  const focusMode = useReaderUiStore(
+    (s) => s.prefsByUser[userKey]?.focusMode ?? false,
+  );
+  const fontScale = useReaderUiStore(
+    (s) => s.prefsByUser[userKey]?.fontScale ?? 1,
+  );
+  const contentWidth = useReaderUiStore(
+    (s) => s.prefsByUser[userKey]?.contentWidth ?? "normal",
+  );
+  const setReaderPrefs = useReaderUiStore((s) => s.setReaderPrefs);
+
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const lastPatchedQuestion = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!journeyId) {
-      setError("No journey was selected.");
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [journeyData, stateData] = await Promise.all([
-        fetchJourney(journeyId),
-        fetchReaderState(journeyId),
-      ]);
-      setJourney(journeyData);
-      setReaderState(stateData);
-    } catch (err) {
-      const message = axios.isAxiosError(err) && err.response?.status === 404
-        ? "This journey could not be found."
-        : "Check your connection and try again.";
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [journeyId]);
+  const fetcher = useCallback(
+    async (signal: AbortSignal): Promise<ReaderData> => {
+      if (!journeyId) throw new Error("No journey was selected.");
+      try {
+        return await getReaderData(journeyId, userKey, signal);
+      } catch (err) {
+        if (axios.isAxiosError(err) && err.response?.status === 404) {
+          throw new Error("This journey could not be found.");
+        }
+        throw err;
+      }
+    },
+    [journeyId, userKey],
+  );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { data, error, loading, retry, setData } = useApi<ReaderData>(fetcher, {
+    deps: [journeyId, userKey],
+    errorMessage: "Check your connection and try again.",
+  });
+
+  const journey = data?.journey ?? null;
+  const readerState = data?.readerState ?? null;
 
   const slots = useMemo<JourneyQuestionSlot[]>(() => {
     if (!readerState) return [];
@@ -137,7 +147,9 @@ export default function StudyReaderPage() {
       const target = event.target as HTMLElement | null;
       if (
         target &&
-        (target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), pre, code") ||
+        (target.closest(
+          "input, textarea, select, [contenteditable]:not([contenteditable=false]), pre, code",
+        ) ||
           target.isContentEditable)
       ) {
         return;
@@ -161,7 +173,7 @@ export default function StudyReaderPage() {
 
   // Persist the checkpoint when the active question changes (optimistic
   // concurrency: the server rejects stale revisions with 409, in which
-  // case we re-sync from the server rather than clobbering it).
+  // case we invalidate the cache and re-sync rather than clobbering).
   useEffect(() => {
     if (!journey || !readerState || !activeSlot) return;
     if (readerState.checkpoint.last_question_id === activeSlot.id) return;
@@ -176,22 +188,28 @@ export default function StudyReaderPage() {
           last_batch_id: activeSlot.batch_id,
           last_question_id: activeSlot.id,
         });
-        setReaderState((current) =>
-          current ? { ...current, checkpoint: response.checkpoint } : current,
+        updateCachedCheckpoint(journey.id, response.checkpoint);
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                readerState: { ...current.readerState, checkpoint: response.checkpoint },
+              }
+            : current,
         );
       } catch (err) {
         if (axios.isAxiosError(err) && err.response?.status === 409) {
-          // Another client moved first; re-sync instead of clobbering.
+          invalidateReaderData(journey.id);
           try {
-            const fresh = await fetchReaderState(journey.id);
-            setReaderState(fresh);
+            const fresh = await getReaderData(journey.id, userKey);
+            setData(fresh);
           } catch {
             // leave the current state; the next navigation retries
           }
         }
       }
     })();
-  }, [journey, readerState, activeSlot]);
+  }, [journey, readerState, activeSlot, userKey, setData]);
 
   const announcement = activeSlot
     ? `Question ${slots.findIndex((s) => s.id === activeSlot.id) + 1} of ${slots.length}: ${activeSlot.objective_title}`
@@ -203,8 +221,8 @@ export default function StudyReaderPage() {
   if (error || !journey || !readerState) {
     return (
       <ReaderErrorState
-        message={error ?? "The reader could not load."}
-        onRetry={() => void load()}
+        message={error || "The reader could not load."}
+        onRetry={() => void retry()}
       />
     );
   }
@@ -217,6 +235,7 @@ export default function StudyReaderPage() {
 
   const batch = readerState.latest_batch;
   const location = activeSlot ? findObjective(journey, activeSlot.objective_id) : null;
+  const railVisible = sidebarOpen && !focusMode;
 
   return (
     <ReaderShell
@@ -244,11 +263,58 @@ export default function StudyReaderPage() {
             hasNext={activeIndex >= 0 && activeIndex < slots.length - 1}
             onPrev={() => goToSlot(slots[activeIndex - 1])}
             onNext={() => goToSlot(slots[activeIndex + 1])}
-          />
+          >
+            <button
+              type="button"
+              onClick={() =>
+                setReaderPrefs(userKey, { fontScale: nextFontScale(fontScale, -1) })
+              }
+              aria-label="Decrease font size"
+              className="p-2 rounded-md hover:bg-udemy-bg"
+            >
+              <Minus className="w-4 h-4" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setReaderPrefs(userKey, { fontScale: nextFontScale(fontScale, 1) })
+              }
+              aria-label="Increase font size"
+              className="p-2 rounded-md hover:bg-udemy-bg"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setReaderPrefs(userKey, {
+                  contentWidth: contentWidth === "normal" ? "wide" : "normal",
+                })
+              }
+              aria-label="Toggle wide layout"
+              aria-pressed={contentWidth === "wide"}
+              className="p-2 rounded-md hover:bg-udemy-bg"
+            >
+              <MoveHorizontal className="w-4 h-4" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setReaderPrefs(userKey, { focusMode: !focusMode })}
+              aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
+              aria-pressed={focusMode}
+              className="p-2 rounded-md hover:bg-udemy-bg"
+            >
+              {focusMode ? (
+                <Minimize2 className="w-4 h-4" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="w-4 h-4" aria-hidden="true" />
+              )}
+            </button>
+          </ReaderToolbar>
         ) : undefined
       }
-      railOpen={railOpen}
-      onToggleRail={() => setRailOpen((open) => !open)}
+      railOpen={railVisible}
+      onToggleRail={() => setReaderPrefs(userKey, { sidebarOpen: !sidebarOpen })}
       mobileRailOpen={mobileRailOpen}
       onToggleMobileRail={() => setMobileRailOpen((open) => !open)}
     >
@@ -265,7 +331,11 @@ export default function StudyReaderPage() {
           </p>
         </div>
       ) : activeSlot && location ? (
-        <article aria-label="Question overview" className="mx-auto max-w-3xl p-6">
+        <article
+          aria-label="Question overview"
+          style={{ zoom: fontScale }}
+          className={`mx-auto p-6 ${contentWidth === "wide" ? "max-w-5xl" : "max-w-3xl"}`}
+        >
           <p className="text-xs font-semibold uppercase tracking-wide text-udemy-text-muted">
             {location.phase.title} / {location.module.title}
           </p>
