@@ -2154,3 +2154,44 @@ export async function patchJourneyCheckpoint(
   );
   return data;
 }
+
+import type {
+  AttemptCreateRequestBody,
+  CompletionUpdateRequestBody,
+  JourneyProgressSummary,
+  QuestionProgressResponse,
+} from "@/types";
+
+export async function fetchJourneyProgress(
+  journeyId: string,
+  signal?: AbortSignal,
+): Promise<JourneyProgressSummary> {
+  const { data } = await api.get<JourneyProgressSummary>(`/journeys/${journeyId}/progress`, {
+    signal,
+  });
+  return data;
+}
+
+export async function setQuestionCompletion(
+  journeyId: string,
+  slotId: string,
+  body: CompletionUpdateRequestBody,
+): Promise<QuestionProgressResponse> {
+  const { data } = await api.put<QuestionProgressResponse>(
+    `/journeys/${journeyId}/questions/${slotId}/completion`,
+    body,
+  );
+  return data;
+}
+
+export async function recordQuestionAttempt(
+  journeyId: string,
+  slotId: string,
+  body: AttemptCreateRequestBody,
+): Promise<QuestionProgressResponse> {
+  const { data } = await api.post<QuestionProgressResponse>(
+    `/journeys/${journeyId}/questions/${slotId}/attempts`,
+    body,
+  );
+  return data;
+}
