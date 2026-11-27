@@ -234,7 +234,7 @@ class ListAssignmentsTests(_AssignmentsFixture):
 class ProviderModelsTests(_AssignmentsFixture):
     def test_every_whitelisted_provider_gets_its_catalogue(self):
         models = self.store.provider_models()
-        self.assertEqual(set(models), {"google", "openai", "anthropic", "groq"})
+        self.assertEqual(set(models), {"google", "openai", "anthropic", "groq", "litellm"})
         self.assertIn("gpt-4o-mini", models["openai"])
         self.assertIn("gemini-2.5-pro", models["google"])
 
