@@ -346,11 +346,11 @@ class QuestionStructuredOutputTests(unittest.TestCase):
             self.assertEqual(options["task"], "final")
 
     def test_max_tokens_cap_scales_with_count(self):
-        self.assertEqual(qg._questions_max_tokens_cap(1), 600)
-        self.assertEqual(qg._questions_max_tokens_cap(4), 600)
-        self.assertEqual(qg._questions_max_tokens_cap(10), 1400)
+        self.assertEqual(qg._questions_max_tokens_cap(1), 1600)
+        self.assertEqual(qg._questions_max_tokens_cap(4), 5200)
+        self.assertEqual(qg._questions_max_tokens_cap(10), 8000)
         self.assertEqual(qg._questions_max_tokens_cap(500), 8000)
-        self.assertEqual(qg._questions_max_tokens_cap(0), 600)
+        self.assertEqual(qg._questions_max_tokens_cap(0), 1600)
 
     def test_batch_cap_reflects_the_requested_count(self):
         llm = CapturingLLM(
