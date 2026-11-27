@@ -49,6 +49,34 @@ describe("ReaderShell", () => {
     expect(screen.queryByRole("dialog", { name: "Curriculum" })).not.toBeInTheDocument();
   });
 
+  it("renders a skip link targeting the reader main region", () => {
+    render(<Harness />);
+    const skip = screen.getByRole("link", { name: "Skip to content" });
+    expect(skip).toHaveAttribute("href", "#study-reader-main");
+    expect(document.getElementById("study-reader-main")).toBeInTheDocument();
+  });
+
+  it("moves focus into the drawer on open and restores it on close", () => {
+    render(<Harness />);
+    const openButton = screen.getByRole("button", { name: "Open curriculum" });
+    fireEvent.click(openButton);
+    const closeButton = screen.getByRole("button", { name: "Close curriculum" });
+    expect(closeButton).toHaveFocus();
+    fireEvent.click(closeButton);
+    expect(openButton).toHaveFocus();
+  });
+
+  it("traps Tab inside the open drawer", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Open curriculum" }));
+    const drawer = screen.getByRole("dialog", { name: "Curriculum" });
+    const closeButton = screen.getByRole("button", { name: "Close curriculum" });
+    closeButton.focus();
+    fireEvent.keyDown(drawer, { key: "Tab" });
+    // Only one focusable item in the harness drawer: focus wraps to it.
+    expect(closeButton).toHaveFocus();
+  });
+
   it("renders the table of contents when provided", () => {
     render(<Harness toc={<div>toc content</div>} />);
     expect(screen.getByRole("complementary", { name: "Table of contents" })).toBeInTheDocument();

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import type { KeyboardEvent } from "react";
 import type { JourneyDetail, JourneyQuestionSlot } from "@/types";
 
 interface CurriculumRailProps {
@@ -32,16 +33,32 @@ export default function CurriculumRail({
     }
   }
 
+  // ArrowUp/ArrowDown move focus between objective links (roving focus
+  // pattern without remapping Tab, so the rail stays one Tab stop group).
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const nav = event.currentTarget;
+    const links = Array.from(nav.querySelectorAll<HTMLElement>("a[href]"));
+    const index = links.indexOf(document.activeElement as HTMLElement);
+    if (index === -1) return;
+    event.preventDefault();
+    const next =
+      event.key === "ArrowDown"
+        ? links[Math.min(index + 1, links.length - 1)]
+        : links[Math.max(index - 1, 0)];
+    next.focus();
+  };
+
   return (
-    <nav aria-label="Journey curriculum" className="p-3">
+    <nav aria-label="Journey curriculum" className="p-3" onKeyDown={onKeyDown}>
       {journey.phases.map((phase) => (
         <section key={phase.id} className="mb-4">
-          <h3 className="px-2 text-xs font-semibold uppercase tracking-wide text-udemy-text-muted">
+          <h2 className="px-2 text-xs font-semibold uppercase tracking-wide text-udemy-text-muted">
             {phase.title}
-          </h3>
+          </h2>
           {phase.modules.map((module) => (
             <div key={module.id} className="mt-1">
-              <p className="px-2 py-1 text-sm font-medium text-udemy-text">{module.title}</p>
+              <h3 className="px-2 py-1 text-sm font-medium text-udemy-text">{module.title}</h3>
               <ul>
                 {module.objectives.map((objective) => {
                   const slot = slotByObjective.get(objective.id);

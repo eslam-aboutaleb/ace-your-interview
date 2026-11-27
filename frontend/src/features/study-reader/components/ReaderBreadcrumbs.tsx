@@ -17,7 +17,7 @@ export default function ReaderBreadcrumbs({ items }: { items: BreadcrumbItem[] }
             <li key={`${item.label}-${index}`} className="flex items-center gap-1">
               {index > 0 && <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />}
               {item.to && !isLast ? (
-                <Link className="hover:text-udemy-purple transition-colors" to={item.to}>
+                <Link className="hover:text-udemy-purple motion-safe:transition-colors" to={item.to}>
                   {item.label}
                 </Link>
               ) : (
