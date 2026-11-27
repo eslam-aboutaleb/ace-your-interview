@@ -21,6 +21,12 @@ class Settings(BaseSettings):
 
     # Default LLM settings
     default_provider: str = "groq"      # Free tier friendly default
+    # OpenAI-compatible LiteLLM gateway (provider "litellm"). The raw
+    # LITELLM_API_BASE / LITELLM_API_KEY env names (the owner's cross-repo
+    # convention) are honoured as fallbacks in the LLM client; these
+    # STUDY_-prefixed settings take precedence when set.
+    litellm_api_base: str = ""
+    litellm_api_key: str = ""
     default_model: str = "openai/gpt-oss-120b"
     default_temperature: float = 0.7
     llm_task_routing_enabled: bool = False

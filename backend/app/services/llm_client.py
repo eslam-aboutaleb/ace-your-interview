@@ -38,6 +38,9 @@ _PROVIDER_PREFIX: dict[str, str] = {
     "groq": "groq/",           # e.g. "groq/openai/gpt-oss-120b"
     "ollama": "ollama/",       # e.g. "ollama/llama3.2"
     "github": "github/",       # e.g. "github/gpt-4o-mini"
+    # OpenAI-compatible LiteLLM gateway: aliases resolve through the
+    # "openai/" path with api_base/api_key from the gateway settings.
+    "litellm": "openai/",      # e.g. "openai/<gateway-alias>"
 }
 
 _TASK_ROUTE_KEYS = {"planner", "retrieval", "eval", "final"}
@@ -47,7 +50,7 @@ _TASK_ROUTE_KEYS = {"planner", "retrieval", "eval", "final"}
 # ``response_format={"type": "json_object"}``. Anthropic has no
 # equivalent parameter and must fall back to the shared salvage parser.
 JSON_MODE_CAPABLE_PROVIDERS: frozenset[str] = frozenset(
-    {"openai", "groq", "ollama", "google", "github"}
+    {"openai", "groq", "ollama", "google", "github", "litellm"}
 )
 
 # Providers whose OpenAI-compatible surface accepts
@@ -160,6 +163,25 @@ def parse_json_object(raw: str) -> dict[str, Any]:
             pass
 
     return {}
+
+
+def _litellm_gateway_endpoint() -> tuple[str, str]:
+    """Return ``(api_base, api_key)`` for the OpenAI-compatible gateway.
+
+    STUDY_-prefixed settings win; the raw LITELLM_API_BASE /
+    LITELLM_API_KEY names (the owner's cross-repo convention) are the
+    fallback. Values are never logged.
+    """
+    import os
+
+    settings = get_settings()
+    api_base = str(getattr(settings, "litellm_api_base", "") or "").strip() or os.environ.get(
+        "LITELLM_API_BASE", ""
+    ).strip()
+    api_key = str(getattr(settings, "litellm_api_key", "") or "").strip() or os.environ.get(
+        "LITELLM_API_KEY", ""
+    ).strip()
+    return api_base, api_key
 
 
 def _resolve_model(provider: str, model: str) -> str:
@@ -606,6 +628,12 @@ class LLMClient:
             max_tokens=max_tokens,
             timeout=120,
         )
+        if actual_provider == "litellm":
+            gateway_base, gateway_key = _litellm_gateway_endpoint()
+            if gateway_base:
+                completion_kwargs["api_base"] = gateway_base
+            if gateway_key:
+                completion_kwargs["api_key"] = gateway_key
         if "gpt-oss" in resolved_model:
             # gpt-oss models spend part of the output budget on hidden
             # reasoning; "low" keeps structured JSON generation inside the
