@@ -212,14 +212,18 @@ describe("StudyReaderPage", () => {
   it("persists the checkpoint when the active question changes", async () => {
     renderPage("/journeys/j1/batches/b1/questions/q2");
     await screen.findByRole("heading", { level: 1, name: "Objective Two" });
-    await waitFor(() => {
-      expect(patchJourneyCheckpoint).toHaveBeenCalledWith("j1", {
-        expected_revision: 3,
-        mutation_id: expect.any(String),
-        last_batch_id: "b1",
-        last_question_id: "q2",
-      });
-    });
+    await waitFor(
+      () => {
+        expect(patchJourneyCheckpoint).toHaveBeenCalledWith("j1", {
+          expected_revision: 3,
+          mutation_id: expect.any(String),
+          last_batch_id: "b1",
+          last_question_id: "q2",
+          scroll_offset: 0,
+        });
+      },
+      { timeout: 3000 },
+    );
   });
 
   it("re-syncs from the server when the checkpoint patch conflicts", async () => {
@@ -229,9 +233,12 @@ describe("StudyReaderPage", () => {
     });
     renderPage("/journeys/j1/batches/b1/questions/q2");
     await screen.findByRole("heading", { level: 1, name: "Objective Two" });
-    await waitFor(() => {
-      expect(fetchReaderState).toHaveBeenCalledTimes(2);
-    });
+    await waitFor(
+      () => {
+        expect(fetchReaderState).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 3000 },
+    );
   });
 
   it("shows a not-found error and recovers on retry", async () => {
@@ -264,7 +271,7 @@ describe("StudyReaderPage", () => {
   it("turns pages with plain arrow keys and announces the change once", async () => {
     renderPage("/journeys/j1/batches/b1/questions/q1");
     await screen.findByRole("heading", { level: 1, name: "Objective One" });
-    expect(screen.getByRole("status")).toHaveTextContent("Question 1 of 2: Objective One");
+    expect(screen.getByRole("status", { name: "Current question" })).toHaveTextContent("Question 1 of 2: Objective One");
 
     fireEvent.keyDown(document.body, { key: "ArrowRight" });
     await waitFor(() => {
@@ -272,7 +279,7 @@ describe("StudyReaderPage", () => {
         "/journeys/j1/batches/b1/questions/q2",
       );
     });
-    expect(screen.getByRole("status")).toHaveTextContent("Question 2 of 2: Objective Two");
+    expect(screen.getByRole("status", { name: "Current question" })).toHaveTextContent("Question 2 of 2: Objective Two");
 
     fireEvent.keyDown(document.body, { key: "ArrowRight" });
     expect(screen.getByTestId("location")).toHaveTextContent(
@@ -388,6 +395,19 @@ describe("StudyReaderPage", () => {
     expect(prefs.contentWidth).toBe("wide");
     expect(screen.getByRole("article", { name: "Question overview" }).className).toContain(
       "max-w-5xl",
+    );
+  });
+
+  it("shows saving then saved status while the checkpoint autosaves", async () => {
+    renderPage("/journeys/j1/batches/b1/questions/q2");
+    await screen.findByRole("heading", { level: 1, name: "Objective Two" });
+    await waitFor(
+      () => {
+        expect(screen.getByRole("status", { name: "Save status" })).toHaveTextContent(
+          "Saved",
+        );
+      },
+      { timeout: 3000 },
     );
   });
 

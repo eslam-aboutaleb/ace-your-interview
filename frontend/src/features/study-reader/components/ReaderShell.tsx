@@ -1,6 +1,6 @@
 import { Menu, X } from "lucide-react";
 import { useEffect, useRef } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, UIEvent } from "react";
 
 interface ReaderShellProps {
   /** Curriculum rail content (objectives tree). */
@@ -17,6 +17,8 @@ interface ReaderShellProps {
   onToggleRail: () => void;
   mobileRailOpen: boolean;
   onToggleMobileRail: () => void;
+  /** Scroll handler for the center pane (checkpoint scroll offset). */
+  onScroll?: (event: UIEvent<HTMLDivElement>) => void;
 }
 
 const FOCUSABLE =
@@ -39,6 +41,7 @@ export default function ReaderShell({
   onToggleRail,
   mobileRailOpen,
   onToggleMobileRail,
+  onScroll,
 }: ReaderShellProps) {
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const mobileOpenButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -123,7 +126,9 @@ export default function ReaderShell({
           className="flex min-w-0 flex-1 flex-col bg-white"
         >
           {toolbar}
-          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto" onScroll={onScroll}>
+            {children}
+          </div>
         </main>
         {toc && (
           <aside
