@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     # Interview personalization: resume/JD parsing, hints, STAR bank,
     # company packs (rollout flag, default on).
     enable_interview_plus_v1: bool = True
+    # Durable generation job orchestration (issue #16), default off.
+    enable_generation_jobs_v1: bool = False
+
+
     # Contextual tutor explanations scoped to questions (issue #15),
     # default off until the explain flow lands end to end.
     enable_tutor_v1: bool = False
