@@ -17,28 +17,42 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.config import get_settings
 from app.dependencies import require_auth
 from app.schemas.journeys import (
+    AttemptCreateRequest,
     BatchCreateRequest,
     BatchCreateResponse,
     BatchListResponse,
     CheckpointResponse,
     CheckpointUpdateRequest,
+    CompletionUpdateRequest,
+    GenerateBatchRequest,
+    GenerateBatchResponse,
     JourneyCreateRequest,
     JourneyCreateResponse,
     JourneyDetail,
     JourneyListResponse,
+    JourneyProgressSummary,
     JourneyRefreshResponse,
     JourneySourceAttachRequest,
     JourneySourceIngestResponse,
     JourneySourceListResponse,
+    PlanPreviewRequest,
+    PlanPreviewResponse,
+    QuestionProgressResponse,
     ReaderStateResponse,
 )
 from app.services.doc_parser import DocParser
+from app.services.embedding_client import EmbeddingClient
 from app.services.journey_source_ingest import (
     GitHubApiFetcher,
     SourceFetcher,
     SourceIngestError,
     ingest_snapshot,
     refresh_source,
+)
+from app.services.journey_generation import (
+    JourneyGenerationError,
+    JourneyGenerationService,
+    build_question_generator_fn,
 )
 from app.services.journey_store import (
     JourneyNotFoundError,
@@ -48,10 +62,24 @@ from app.services.journey_store import (
     RevisionConflictError,
 )
 from app.services.learning_store import LearningStore
+from app.services.plan_preview import (
+    PlanValidationError,
+    mark_review_obligations,
+    plan_stats,
+    shape_plan_for_depth,
+    validate_edited_plan,
+)
+
+
+from app.services.llm_client import LLMClient
+from app.services.question_generator import QuestionGenerator
 
 router = APIRouter(prefix="/api/journeys", tags=["journeys"])
 
 _store: JourneyStore | None = None
+_question_generator: QuestionGenerator | None = None
+_llm_client: LLMClient | None = None
+_embedding_client: EmbeddingClient | None = None
 _learning_store: LearningStore | None = None
 _parser: DocParser | None = None
 _source_fetcher: SourceFetcher | None = None
@@ -69,12 +97,19 @@ def init(
     learning_store: LearningStore | None = None,
     parser: DocParser | None = None,
     source_fetcher: SourceFetcher | None = None,
+    question_generator: QuestionGenerator | None = None,
+    llm_client: LLMClient | None = None,
+    embedding_client: EmbeddingClient | None = None,
 ) -> None:
     global _store, _learning_store, _parser, _source_fetcher
+    global _question_generator, _llm_client, _embedding_client
     _store = store
     _learning_store = learning_store
     _parser = parser
     _source_fetcher = source_fetcher
+    _question_generator = question_generator
+    _llm_client = llm_client
+    _embedding_client = embedding_client
 
 
 def _ensure_enabled() -> None:
@@ -259,6 +294,20 @@ async def create_journey(
         source_topic_id=body.source_topic_id,
     )
     level = body.level or resolved["level"]
+    plan = resolved["plan"]
+    provenance = dict(resolved["provenance"])
+    if body.plan is not None:
+        try:
+            plan = validate_edited_plan(body.plan)
+        except PlanValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        provenance["edited_plan"] = True
+    if body.plan_provenance:
+        provenance["inputs"] = {
+            key: str(value)[:500]
+            for key, value in body.plan_provenance.items()
+            if isinstance(key, str) and isinstance(value, (str, int, float, bool))
+        }
     try:
         detail = await store.run_async(
             store.create_journey,
@@ -269,8 +318,8 @@ async def create_journey(
             source_topic_id=body.source_topic_id,
             track=resolved["track"],
             level=level,
-            plan=resolved["plan"],
-            provenance=resolved["provenance"],
+            plan=plan,
+            provenance=provenance,
         )
     except Exception as exc:
         raise _map_store_error(exc) from exc
@@ -344,6 +393,7 @@ async def create_batch(
             journey_id=journey_id,
             idempotency_key=body.idempotency_key,
             slot_count=body.slot_count,
+            perspectives=body.perspectives,
         )
     except Exception as exc:
         raise _map_store_error(exc) from exc
@@ -468,5 +518,181 @@ async def refresh_journey_source(
         return {"source": result["source"], "diff": result["diff"]}
     except SourceIngestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
+
+
+@router.post("/plan-preview", response_model=PlanPreviewResponse)
+async def plan_preview(body: PlanPreviewRequest, user: dict = Depends(require_auth)):
+    """Editable syllabus preview before commitment (issue #6).
+
+    Resolves the source, shapes the baseline plan by depth, marks review
+    obligations from the topic's active FSRS cards, estimates pacing from
+    weekly hours, and echoes the inputs as provenance for the eventual
+    ``POST /api/journeys`` commit. Persists nothing.
+    """
+    _ensure_enabled()
+    _ensure_store()
+    resolved = _resolve_source(
+        user=user,
+        source_type=body.source_type.value,
+        source_topic_id=body.source_topic_id,
+    )
+    try:
+        plan = shape_plan_for_depth(resolved["plan"], body.depth.value)
+    except PlanValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    has_active_cards = False
+    if _learning_store is not None and body.source_type.value == "static_topic":
+        try:
+            has_active_cards = await _ensure_store().run_async(
+                _learning_store.count_active_topic_cards,
+                user_id=str(user["user"]),
+                topic_id=body.source_topic_id,
+            ) > 0
+        except Exception:  # review hints are best-effort, never block a preview
+            has_active_cards = False
+    plan, review_count = mark_review_obligations(plan, has_active_cards=has_active_cards)
+
+    stats = plan_stats(plan, available_hours_per_week=body.available_hours_per_week)
+    stats["review_objective_count"] = review_count
+    level = body.target_level or resolved["level"]
+    provenance = {
+        **resolved["provenance"],
+        "inputs": {
+            "goal": body.goal,
+            "target_level": body.target_level,
+            "available_hours_per_week": body.available_hours_per_week,
+            "depth": body.depth.value,
+        },
+    }
+    return {
+        "title": resolved["title"],
+        "track": resolved["track"],
+        "level": level,
+        "plan": plan,
+        "provenance": provenance,
+        "stats": stats,
+    }
+
+
+@router.post("/{journey_id}/batches/{batch_id}/generate", response_model=GenerateBatchResponse)
+async def generate_batch(
+    journey_id: str, batch_id: str, body: GenerateBatchRequest, user: dict = Depends(require_auth)
+):
+    """Fill a batch's reserved slots with novelty-checked questions (#2).
+
+    Runs the exact-hash / near-duplicate / concept-equivalence /
+    embedding-similarity funnel per candidate, regenerating only rejected
+    slots (bounded rounds), and persists fingerprints plus a generation
+    job carrying prompt/model/schema versions and accepted/rejected
+    counts. Optional LLM adjudication of the embedding review band is
+    behind ``STUDY_ENABLE_JOURNEY_GENERATION_ADJUDICATION`` (default off).
+    """
+    _ensure_enabled()
+    store = _ensure_store()
+    if _question_generator is None:
+        raise HTTPException(status_code=503, detail="Question generator unavailable")
+    settings = get_settings()
+
+    generator_fn = build_question_generator_fn(
+        _question_generator, _parser, _learning_store, user_identity=user
+    )
+
+    embed_fn = None
+    if _embedding_client is not None:
+        async def embed_fn(text: str):  # type: ignore[no-redef]
+            vectors = await _embedding_client.embed([text], user_identity=user)
+            return vectors[0] if vectors else None
+
+    adjudicator_fn = None
+    if settings.enable_journey_generation_adjudication and _llm_client is not None:
+        async def adjudicator_fn(candidate: str, matched: str) -> bool:  # type: ignore[no-redef]
+            result = await _llm_client.completion(
+                (
+                    "Two interview questions follow. Answer with exactly YES if they "
+                    "ask for the same knowledge or skill (semantically equivalent), "
+                    "otherwise exactly NO.\n\n"
+                    f"Question A:\n{candidate}\n\nQuestion B:\n{matched}"
+                ),
+                user_identity=user,
+                max_tokens_cap=8,
+                flow="journey_generation_adjudication",
+                prompt_name="journey_novelty_adjudication",
+                prompt_version="v1",
+            )
+            answer = str(result.get("content") or "").strip().lower()
+            return answer.startswith("yes")
+
+    service = JourneyGenerationService(
+        store, embed_fn=embed_fn, adjudicator_fn=adjudicator_fn
+    )
+    try:
+        return await service.generate_batch(
+            user_id=str(user["user"]),
+            journey_id=journey_id,
+            batch_id=batch_id,
+            generator_fn=generator_fn,
+            prompt_version=body.prompt_version,
+            model_version=body.model_version,
+            schema_version=body.schema_version,
+        )
+    except JourneyGenerationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
+
+
+@router.get("/{journey_id}/progress", response_model=JourneyProgressSummary)
+async def get_journey_progress(journey_id: str, user: dict = Depends(require_auth)):
+    _ensure_enabled()
+    store = _ensure_store()
+    try:
+        return await store.run_async(
+            store.get_journey_progress, user_id=str(user["user"]), journey_id=journey_id
+        )
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
+
+
+@router.put("/{journey_id}/questions/{slot_id}/completion", response_model=QuestionProgressResponse)
+async def set_question_completion(
+    journey_id: str, slot_id: str, body: CompletionUpdateRequest, user: dict = Depends(require_auth)
+):
+    """Explicit complete/uncomplete; idempotent per mutation_id (issue #5)."""
+    _ensure_enabled()
+    store = _ensure_store()
+    try:
+        return await store.run_async(
+            store.set_question_completion,
+            user_id=str(user["user"]),
+            journey_id=journey_id,
+            slot_id=slot_id,
+            completed=body.completed,
+            mutation_id=body.mutation_id,
+        )
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
+
+
+@router.post("/{journey_id}/questions/{slot_id}/attempts", response_model=QuestionProgressResponse)
+async def record_question_attempt(
+    journey_id: str, slot_id: str, body: AttemptCreateRequest, user: dict = Depends(require_auth)
+):
+    """Record a practice attempt; idempotent per mutation_id (issue #5)."""
+    _ensure_enabled()
+    store = _ensure_store()
+    try:
+        return await store.run_async(
+            store.record_question_attempt,
+            user_id=str(user["user"]),
+            journey_id=journey_id,
+            slot_id=slot_id,
+            outcome=body.outcome.value,
+            confidence=body.confidence,
+            response_time_ms=body.response_time_ms,
+            mutation_id=body.mutation_id,
+        )
     except Exception as exc:
         raise _map_store_error(exc) from exc
