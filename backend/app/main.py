@@ -254,7 +254,12 @@ async def lifespan(application: FastAPI):
         learning_store=_learning_store,
     )
     learning.init(_learning_store, _learning_planner, parser, _llm_client)
-    journeys.init(_journey_store, _learning_store, parser)
+    journeys.init(
+        _journey_store, _learning_store, parser,
+        question_generator=question_generator,
+        llm_client=_llm_client,
+        embedding_client=embedding_client,
+    )
     placement.init(
         _learning_planner,
         parser,

@@ -220,19 +220,19 @@ class IdentityPartsTests(unittest.TestCase):
 class StaticHelpersTests(_StoreFixture):
     def test_providers_returns_a_copy_of_the_whitelist(self):
         providers = UserSettingsStore.providers()
-        self.assertEqual(set(providers), {"google", "openai", "anthropic", "groq"})
+        self.assertEqual(set(providers), {"google", "openai", "anthropic", "groq", "litellm"})
         providers.append("mutated")
         self.assertNotIn("mutated", UserSettingsStore.providers())
 
     def test_provider_models_lists_models_per_whitelisted_provider(self):
         models = self.store.provider_models()
-        self.assertEqual(set(models), {"google", "openai", "anthropic", "groq"})
+        self.assertEqual(set(models), {"google", "openai", "anthropic", "groq", "litellm"})
         self.assertIn("gpt-4o-mini", models["openai"])
 
     def test_default_preferences_follow_the_configured_provider(self):
         defaults = self.store.default_preferences()
         self.assertEqual(defaults["provider"], "groq")
-        self.assertEqual(defaults["model"], "llama-3.3-70b-versatile")
+        self.assertEqual(defaults["model"], "openai/gpt-oss-120b")
         self.assertEqual(defaults["auth_mode"], "api_key")
         self.assertEqual(defaults["llm_source"], "personal")
         self.assertEqual(defaults["max_tokens"], 0)

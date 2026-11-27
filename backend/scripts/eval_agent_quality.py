@@ -1326,8 +1326,18 @@ class LLMCallRecorder:
         self._sink = sink
         self._run_id = run_id
         self._groups: Counter[str] = Counter()
+        self._current_group = ""
 
-    def completion(
+    def set_group(self, group_id: str) -> None:
+        """Scope the following calls to one attempt cycle (one case).
+
+        An attempt cycle is one requested output. The live driver sets the
+        case id here so ``retry_distribution`` groups attempts per case
+        instead of counting every call in the run as one giant group.
+        """
+        self._current_group = str(group_id or "")
+
+    async def completion(
         self,
         prompt: str,
         llm_config: Any = None,
@@ -1341,8 +1351,11 @@ class LLMCallRecorder:
         tool_choice: Any = None,
         eval_group_id: str = "",
     ) -> Any:
-        group_id = str(eval_group_id or self._run_id)
-        result = self._client.completion(
+        group_id = str(eval_group_id or self._current_group or self._run_id)
+        # ``LLMClient.completion`` is a coroutine: it must be awaited BEFORE
+        # recording, otherwise the row captures the coroutine object and every
+        # field lands empty (which is exactly what the first live runs wrote).
+        result = await self._client.completion(
             prompt,
             llm_config,
             user_identity,
@@ -1490,6 +1503,7 @@ async def _live_regenerate(
         if case.flow not in flows:
             continue
         case_input = _case_input_for(fixture_dir, case)
+        recorder.set_group(case.case_id)
         try:
             if case.flow == "questions":
                 result = await questions.generate_v2(
