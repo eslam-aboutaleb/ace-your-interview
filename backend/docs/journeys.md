@@ -59,6 +59,7 @@ Base path `/api/journeys`, auth required (session cookie), JSON.
 | `POST /api/journeys/{id}/batches` | Reserve the next batch (`idempotency_key`, `slot_count` 1-50, default 10). Transactional numbering; replaying a key returns the original batch with `created=false`. 409 when no pending objectives remain. |
 | `GET /api/journeys/{id}/batches` | Batches in order. |
 | `GET /api/journeys/{id}/reader-state` | Checkpoint + latest batch with ordered slots. |
+| `POST /api/journeys/{id}/batches/{batch_id}/generate` | Fill the batch's reserved slots with novelty-checked questions (#2). Runs the dedup funnel per candidate, regenerates only rejected slots (bounded rounds), persists fingerprints + a generation job with prompt/model/schema versions and accepted/rejected counts. 409 when the batch has no reserved slots left. |
 | `PATCH /api/journeys/{id}/checkpoints` | Optimistic write: `expected_revision` + `mutation_id`; omitted fields keep their values. 409 with `{message, current}` on a stale revision; replaying a `mutation_id` returns current state unchanged. Referenced batch/question IDs must belong to the journey (422). |
 | `PUT /api/journeys/{id}/questions/{slot_id}/completion` | Explicit complete/uncomplete (#5). `mutation_id` makes retries and double-taps safe: a replay returns the recorded state unchanged. |
 | `POST /api/journeys/{id}/questions/{slot_id}/attempts` | Record one practice attempt (`outcome` correct/incorrect/skipped, optional `confidence` 0-5 and `response_time_ms`, `mutation_id`). |
@@ -80,6 +81,38 @@ Journey writes reuse the standard request logging. Batch creation returns
 `accepted_count`/`rejected_count` columns (0 until generation lands) so the
 generation stages can report reservation outcomes per batch without schema
 changes.
+
+## Novelty-aware generation (#2)
+
+`POST .../batches/{id}/generate` fills reserved slots through a four-stage
+dedup funnel (`app/services/novelty.py`), strictest first:
+
+1. exact normalized hash (sha1 over the shared question normaliser);
+2. character near-duplicate (containment + sequence ratio 0.87, mirroring
+   the in-session dedup the generator already ships);
+3. concept equivalence (content-token Jaccard 0.65) - skipped when the
+   candidate and the seen question carry intentionally distinct
+   `perspective` values, so legitimate deepening survives;
+4. calibrated embedding similarity (cosine, default reject >= 0.92) with a
+   review band [0.85, 0.92) for optional LLM adjudication
+   (`STUDY_ENABLE_JOURNEY_GENERATION_ADJUDICATION`, default off; without an
+   adjudicator the band rejects conservatively). Embeddings are
+   best-effort: a provider failure degrades to no-embedding, never fails
+   the batch.
+
+Every accepted question persists a fingerprint row (hash, concept
+signature, optional embedding, perspective, text) in
+`journey_question_fingerprints`, so dedup survives restarts and spans
+batches. Only rejected slots are regenerated (bounded at 3 rounds per
+slot); accepted slots are never re-generated, and re-calling generate on
+a finished batch returns 409. Each run is a `journey_generation_jobs` row
+with prompt/model/schema versions and accepted/rejected counts that roll
+up onto the batch (`completed` when nothing was rejected, else `partial`).
+
+Batches accept an optional `perspectives` list; slots cycle through it and
+the perspective is recorded on the slot, passed to the generator (as a
+section-title suffix) and honored by the funnel.
+
 
 ## Progress semantics (#5)
 
@@ -116,6 +149,9 @@ was.
 ```
 cd backend
 python -m pytest tests/test_journey_store.py tests/test_journeys_router.py -q
+python -m pytest tests/test_novelty.py tests/test_journey_generation.py tests/test_journey_generation_router.py -q
+
+
 python -m pytest tests/test_journey_progress.py tests/test_journey_progress_router.py -q
 python -m pytest tests/ --cov   # full suite, coverage gate 90%
 python -m ruff check .
