@@ -658,6 +658,57 @@ def _normalise_content_fragment(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip().lower()
 
 
+#: Minimum distinct-token containment for snapping a paraphrased quote to its
+#: verbatim source span. Below this the intended span is not unambiguous and
+#: the item must fail validation as before.
+_SNAP_QUOTE_MIN_OVERLAP = 0.8
+
+
+def _snap_quote_to_content(quote: str, content: str) -> Optional[str]:
+    """Rescue a paraphrased ``source_quote`` by snapping it to the verbatim span.
+
+    Weaker models paraphrase instead of copying verbatim; the grounding
+    validator then rejects the item and the generator burns a whole retry on
+    rewording one field (gpt-oss-20b looped 8-9 times on single cases in the
+    live eval). When the token overlap is unambiguous the intended span is
+    clear, so use the content's own words - grounding stays verbatim - and
+    skip the retry. Anything below the threshold fails exactly as before.
+    """
+    quote_norm = _normalise_content_fragment(quote)
+    if not quote_norm:
+        return None
+    quote_tokens = set(quote_norm.split(" "))
+    if len(quote_tokens) < 4:
+        return None
+    sentences = [
+        part.strip()
+        for part in re.split(r"(?<=[.!?])\s+|\n+", content or "")
+        if part.strip()
+    ]
+    best_span: Optional[str] = None
+    best_score = 0.0
+    for index in range(len(sentences)):
+        for span in (
+            sentences[index],
+            " ".join(sentences[index : index + 2]),
+        ):
+            span_norm = _normalise_content_fragment(span)
+            # Tightness guard: the span must be about the quote's own size,
+            # otherwise the widest high-overlap blob (up to the whole
+            # content) would always win over the precise sentence.
+            if len(span_norm) < 8 or len(span_norm) > 1.25 * len(quote_norm):
+                continue
+            span_tokens = set(span_norm.split(" "))
+            if not span_tokens:
+                continue
+            overlap = len(quote_tokens & span_tokens) / len(quote_tokens)
+            if overlap > best_score:
+                best_span, best_score = span, overlap
+    if best_span is not None and best_score >= _SNAP_QUOTE_MIN_OVERLAP:
+        return best_span
+    return None
+
+
 def _question_is_grounded_to_anchors(
     question: str,
     *,
@@ -3133,7 +3184,10 @@ def _validate_question_item(
             or _normalise_content_fragment(source_quote)
             not in _normalise_content_fragment(topic_content)
         ):
-            return False, "source_quote_not_in_content"
+            snapped = _snap_quote_to_content(source_quote, topic_content)
+            if snapped is None:
+                return False, "source_quote_not_in_content"
+            source_quote = snapped
         item["source_quote"] = source_quote
     else:
         item["source_quote"] = source_quote or "Generated from the current topic content."
@@ -3218,7 +3272,10 @@ def _validate_quiz_item(
         if _normalise_content_fragment(source_quote) not in _normalise_content_fragment(
             topic_content
         ):
-            return False, "source_quote_not_in_content"
+            snapped = _snap_quote_to_content(source_quote, topic_content)
+            if snapped is None:
+                return False, "source_quote_not_in_content"
+            item["source_quote"] = snapped
     if not isinstance(reasoning_summary, str) or len(reasoning_summary.strip()) < 8:
         return False, "invalid_reasoning_summary"
     if target_level not in _VALID_LEVELS:
