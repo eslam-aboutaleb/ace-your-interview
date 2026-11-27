@@ -996,6 +996,19 @@ class LearningStore:
             "leech": fsrs_scheduler.is_leech(new_card),
         }
 
+    def count_active_topic_cards(self, *, user_id: str, topic_id: str) -> int:
+        """Non-suspended FSRS cards for one topic.
+
+        Used by journey plan previews (#6): any active card means the
+        learner has studied this material before and owes retention work,
+        so the plan marks its objectives as review obligations.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS c FROM fsrs_cards WHERE user_id = ? AND topic_id = ? AND suspended = 0",
+            (user_id, topic_id),
+        ).fetchone()
+        return int(row["c"])
+
     def get_due_cards(
         self, *, user_id: str, limit: int = 50
     ) -> list[dict]:

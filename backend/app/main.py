@@ -24,6 +24,7 @@ from app.routers import (
     hints,
     tutor,
     interview_sessions,
+    journeys,
     learning,
     llm_settings,
     placement,
@@ -37,6 +38,7 @@ from app.routers import (
 from app.services.doc_parser import DocParser
 from app.services.document_pipeline import DocumentPipeline
 from app.services.document_store import DocumentStore
+from app.services.journey_store import JourneyStore
 from app.services.embedding_client import EmbeddingClient
 from app.services.llm_assignments_store import LLMAssignmentsStore
 from app.services.http_clients import close_http_clients
@@ -197,6 +199,7 @@ async def lifespan(application: FastAPI):
     _llm_client = LLMClient(user_settings_store=_user_settings_store)
     _mcp_gateway = MCPGateway(settings)
     _learning_store = LearningStore(settings.learning_db_path)
+    _journey_store = JourneyStore(settings.learning_db_path)
     _learning_planner = LearningPlannerStore(settings.learning_db_path)
     _progress_store = ProgressStore(settings.learning_db_path)
     _progress_summarizer = ProgressSummarizer(_llm_client)
@@ -253,6 +256,12 @@ async def lifespan(application: FastAPI):
         learning_store=_learning_store,
     )
     learning.init(_learning_store, _learning_planner, parser, _llm_client)
+    journeys.init(
+        _journey_store, _learning_store, parser,
+        question_generator=question_generator,
+        llm_client=_llm_client,
+        embedding_client=embedding_client,
+    )
     placement.init(
         _learning_planner,
         parser,
@@ -382,6 +391,7 @@ def create_app() -> FastAPI:
     application.include_router(chat.router, dependencies=auth_dep)
     application.include_router(documents.router, dependencies=auth_dep)
     application.include_router(learning.router)
+    application.include_router(journeys.router)
     application.include_router(placement.router)
     application.include_router(cards.decks_router)
     application.include_router(cards.cards_router)
