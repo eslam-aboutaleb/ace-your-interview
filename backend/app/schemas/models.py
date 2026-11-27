@@ -17,6 +17,7 @@ class LLMProviderEnum(str, Enum):
     GROQ = "groq"
     OLLAMA = "ollama"
     GITHUB = "github"
+    LITELLM = "litellm"
 
 
 class TrackEnum(str, Enum):
@@ -74,6 +75,7 @@ PROVIDER_TO_PROTO: dict[str, int] = {
     "groq": 4,
     "ollama": 5,
     "github": 6,
+    "litellm": 7,
 }
 
 MODEL_SUGGESTIONS: dict[str, list[str]] = {
@@ -92,11 +94,14 @@ MODEL_SUGGESTIONS: dict[str, list[str]] = {
         "gemini-1.5-flash",
         "gemini-pro",
     ],
-    "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+    "groq": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "ollama": ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
+    # Gateway aliases are deployment-specific, so there are no suggestions:
+    # the user types the alias their gateway exposes.
+    "litellm": [],
     "github": ["gpt-4o-mini", "gpt-4o"],
 }
-USER_SETTINGS_PROVIDER_WHITELIST = ["google", "openai", "anthropic", "groq"]
+USER_SETTINGS_PROVIDER_WHITELIST = ["google", "openai", "anthropic", "groq", "litellm"]
 
 
 # ── Request / Response Models ───────────────────────────────
