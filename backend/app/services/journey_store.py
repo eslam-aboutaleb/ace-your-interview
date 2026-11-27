@@ -250,6 +250,38 @@ class JourneyStore:
             )
             self._conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS journey_sources (
+                    id TEXT PRIMARY KEY,
+                    journey_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    locator TEXT NOT NULL,
+                    revision_hash TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'indexed',
+                    file_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (journey_id, kind, locator)
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS journey_source_files (
+                    source_id TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    section TEXT NOT NULL DEFAULT '',
+                    sha TEXT NOT NULL DEFAULT '',
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    content TEXT NOT NULL DEFAULT '',
+                    indexed_at TEXT NOT NULL,
+                    PRIMARY KEY (source_id, path)
+                )
+                """
+            )
+
+            self._conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS journey_question_fingerprints (
                     user_id TEXT NOT NULL,
                     journey_id TEXT NOT NULL,
@@ -1090,6 +1122,189 @@ class JourneyStore:
                 "revision": new_revision,
                 "updated_at": now_iso,
             }
+
+    # ------------------------------------------------------------------
+    # journey sources (issue #14)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _source_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "journey_id": row["journey_id"],
+            "kind": row["kind"],
+            "locator": row["locator"],
+            "revision_hash": row["revision_hash"],
+            "status": row["status"],
+            "file_count": row["file_count"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def upsert_journey_source(
+        self,
+        *,
+        user_id: str,
+        journey_id: str,
+        kind: str,
+        locator: str,
+        revision_hash: str = "",
+        status: str = "indexed",
+    ) -> dict[str, Any]:
+        """Attach a source to a journey; idempotent per (journey, kind, locator)."""
+        self.get_journey(user_id=user_id, journey_id=journey_id)
+        with self._lock, self._conn:
+            now_iso = _to_iso(_utc_now())
+            existing = self._conn.execute(
+                """
+                SELECT * FROM journey_sources
+                WHERE journey_id = ? AND kind = ? AND locator = ?
+                """,
+                (journey_id, kind, locator),
+            ).fetchone()
+            if existing is not None:
+                return self._source_row_to_dict(existing)
+            source_id = f"src_{uuid.uuid4().hex[:24]}"
+            self._conn.execute(
+                """
+                INSERT INTO journey_sources
+                    (id, journey_id, user_id, kind, locator, revision_hash, status,
+                     file_count, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,0,?,?)
+                """,
+                (
+                    source_id,
+                    journey_id,
+                    user_id,
+                    kind,
+                    locator,
+                    revision_hash,
+                    status,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+            row = self._conn.execute(
+                "SELECT * FROM journey_sources WHERE id = ?", (source_id,)
+            ).fetchone()
+            return self._source_row_to_dict(row)
+
+    def list_journey_sources(self, *, user_id: str, journey_id: str) -> list[dict[str, Any]]:
+        self.get_journey(user_id=user_id, journey_id=journey_id)
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM journey_sources
+                WHERE journey_id = ? AND user_id = ?
+                ORDER BY created_at ASC
+                """,
+                (journey_id, user_id),
+            ).fetchall()
+            return [self._source_row_to_dict(row) for row in rows]
+
+    def get_journey_source(
+        self, *, user_id: str, journey_id: str, source_id: str
+    ) -> dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT * FROM journey_sources
+                WHERE id = ? AND journey_id = ? AND user_id = ?
+                """,
+                (source_id, journey_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise JourneyNotFoundError(f"journey source {source_id} not found")
+            return self._source_row_to_dict(row)
+
+    def list_source_files(
+        self, *, user_id: str, journey_id: str, source_id: str
+    ) -> list[dict[str, Any]]:
+        self.get_journey_source(user_id=user_id, journey_id=journey_id, source_id=source_id)
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT path, section, sha, byte_size, content, indexed_at
+                FROM journey_source_files WHERE source_id = ? ORDER BY path ASC
+                """,
+                (source_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def apply_source_snapshot(
+        self,
+        *,
+        user_id: str,
+        journey_id: str,
+        source_id: str,
+        revision_hash: str,
+        files: list[dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        """Replace the indexed file set with a fresh snapshot (targeted refresh).
+
+        Only changed/added paths are written; removed paths are dropped.
+        Returns the diff that was applied. Progress tables are never touched:
+        journey content is addressed by content hashes, so re-indexing a
+        source cannot erase completion state.
+        """
+        self.get_journey_source(user_id=user_id, journey_id=journey_id, source_id=source_id)
+        with self._lock, self._conn:
+            existing = {
+                row["path"]: row["sha"]
+                for row in self._conn.execute(
+                    "SELECT path, sha FROM journey_source_files WHERE source_id = ?",
+                    (source_id,),
+                ).fetchall()
+            }
+            incoming = {f["path"]: f.get("sha", "") for f in files}
+            changed = sorted(
+                path for path, sha in incoming.items() if path in existing and existing[path] != sha
+            )
+            added = sorted(path for path in incoming if path not in existing)
+            removed = sorted(path for path in existing if path not in incoming)
+
+            now_iso = _to_iso(_utc_now())
+            write_paths = set(changed) | set(added)
+            for file in files:
+                if file["path"] not in write_paths:
+                    continue
+                self._conn.execute(
+                    """
+                    INSERT INTO journey_source_files
+                        (source_id, path, section, sha, byte_size, content, indexed_at)
+                    VALUES (?,?,?,?,?,?,?)
+                    ON CONFLICT (source_id, path) DO UPDATE SET
+                        section = excluded.section,
+                        sha = excluded.sha,
+                        byte_size = excluded.byte_size,
+                        content = excluded.content,
+                        indexed_at = excluded.indexed_at
+                    """,
+                    (
+                        source_id,
+                        file["path"],
+                        file.get("section", ""),
+                        file.get("sha", ""),
+                        int(file.get("byte_size", 0)),
+                        file.get("content", ""),
+                        now_iso,
+                    ),
+                )
+            for path in removed:
+                self._conn.execute(
+                    "DELETE FROM journey_source_files WHERE source_id = ? AND path = ?",
+                    (source_id, path),
+                )
+            self._conn.execute(
+                """
+                UPDATE journey_sources
+                SET revision_hash = ?, file_count = ?, status = 'indexed', updated_at = ?
+                WHERE id = ?
+                """,
+                (revision_hash, len(files), now_iso, source_id),
+            )
+            return {"changed": changed, "added": added, "removed": removed}
+
 
     # ------------------------------------------------------------------
     # novelty fingerprints and generation jobs (issue #2)

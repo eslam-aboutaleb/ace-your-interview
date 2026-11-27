@@ -19,28 +19,36 @@ from app.dependencies import require_auth
 from app.schemas.journeys import (
     AttemptCreateRequest,
     BatchCreateRequest,
-    PlanPreviewRequest,
-    PlanPreviewResponse,
-
-
-    GenerateBatchRequest,
-    GenerateBatchResponse,
     BatchCreateResponse,
     BatchListResponse,
     CheckpointResponse,
     CheckpointUpdateRequest,
     CompletionUpdateRequest,
+    GenerateBatchRequest,
+    GenerateBatchResponse,
     JourneyCreateRequest,
     JourneyCreateResponse,
     JourneyDetail,
     JourneyListResponse,
     JourneyProgressSummary,
     JourneyRefreshResponse,
+    JourneySourceAttachRequest,
+    JourneySourceIngestResponse,
+    JourneySourceListResponse,
+    PlanPreviewRequest,
+    PlanPreviewResponse,
     QuestionProgressResponse,
     ReaderStateResponse,
 )
 from app.services.doc_parser import DocParser
 from app.services.embedding_client import EmbeddingClient
+from app.services.journey_source_ingest import (
+    GitHubApiFetcher,
+    SourceFetcher,
+    SourceIngestError,
+    ingest_snapshot,
+    refresh_source,
+)
 from app.services.journey_generation import (
     JourneyGenerationError,
     JourneyGenerationService,
@@ -74,6 +82,7 @@ _llm_client: LLMClient | None = None
 _embedding_client: EmbeddingClient | None = None
 _learning_store: LearningStore | None = None
 _parser: DocParser | None = None
+_source_fetcher: SourceFetcher | None = None
 
 # Objective extraction is deterministic: each bullet in a curriculum section
 # becomes one objective, capped so a pathological section cannot create an
@@ -87,15 +96,17 @@ def init(
     store: JourneyStore,
     learning_store: LearningStore | None = None,
     parser: DocParser | None = None,
+    source_fetcher: SourceFetcher | None = None,
     question_generator: QuestionGenerator | None = None,
     llm_client: LLMClient | None = None,
     embedding_client: EmbeddingClient | None = None,
 ) -> None:
-    global _store, _learning_store, _parser
+    global _store, _learning_store, _parser, _source_fetcher
     global _question_generator, _llm_client, _embedding_client
     _store = store
     _learning_store = learning_store
     _parser = parser
+    _source_fetcher = source_fetcher
     _question_generator = question_generator
     _llm_client = llm_client
     _embedding_client = embedding_client
@@ -104,6 +115,16 @@ def init(
 def _ensure_enabled() -> None:
     if not getattr(get_settings(), "enable_journeys_v1", False):
         raise HTTPException(status_code=404, detail="Journeys API disabled")
+
+
+def _ensure_sources_enabled() -> None:
+    _ensure_enabled()
+    if not getattr(get_settings(), "enable_journey_sources_v1", False):
+        raise HTTPException(status_code=404, detail="Journey sources API disabled")
+
+
+def _ensure_fetcher() -> SourceFetcher:
+    return _source_fetcher or GitHubApiFetcher()
 
 
 def _ensure_store() -> JourneyStore:
@@ -425,6 +446,80 @@ async def update_checkpoint(
     except Exception as exc:
         raise _map_store_error(exc) from exc
     return {"checkpoint": checkpoint}
+
+
+@router.post(
+    "/{journey_id}/sources", status_code=201, response_model=JourneySourceIngestResponse
+)
+async def attach_journey_source(
+    journey_id: str,
+    body: JourneySourceAttachRequest,
+    user: dict = Depends(require_auth),
+):
+    """Attach and index a GitHub repo or uploaded doc as a journey source
+    (issue #14). Idempotent per (journey, kind, locator)."""
+    _ensure_sources_enabled()
+    store = _ensure_store()
+    try:
+        result = await store.run_async(
+            lambda: ingest_snapshot(
+                store,
+                user_id=str(user["user"]),
+                journey_id=journey_id,
+                kind=body.kind.value,
+                locator=body.locator,
+                fetcher=_ensure_fetcher(),
+            )
+        )
+        return {
+            "source": result["source"],
+            "diff": result["diff"],
+        }
+    except SourceIngestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
+
+
+@router.get("/{journey_id}/sources", response_model=JourneySourceListResponse)
+async def list_journey_sources(journey_id: str, user: dict = Depends(require_auth)):
+    _ensure_sources_enabled()
+    store = _ensure_store()
+    try:
+        sources = await store.run_async(
+            store.list_journey_sources, user_id=str(user["user"]), journey_id=journey_id
+        )
+        return {"sources": sources}
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
+
+
+@router.post(
+    "/{journey_id}/sources/{source_id}/refresh",
+    response_model=JourneySourceIngestResponse,
+)
+async def refresh_journey_source(
+    journey_id: str, source_id: str, user: dict = Depends(require_auth)
+):
+    """Re-fetch the source and re-index only changed files (issue #14).
+    Journey progress is never touched: content is hash-addressed."""
+    _ensure_sources_enabled()
+    store = _ensure_store()
+    try:
+        result = await store.run_async(
+            lambda: refresh_source(
+                store,
+                user_id=str(user["user"]),
+                journey_id=journey_id,
+                source_id=source_id,
+                fetcher=_ensure_fetcher(),
+            )
+        )
+        return {"source": result["source"], "diff": result["diff"]}
+    except SourceIngestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _map_store_error(exc) from exc
 
 
 @router.post("/plan-preview", response_model=PlanPreviewResponse)

@@ -238,6 +238,51 @@ class CheckpointResponse(BaseModel):
     checkpoint: CheckpointState
 
 
+# ---------------------------------------------------------------------------
+# Journey sources (issue #14)
+# ---------------------------------------------------------------------------
+
+
+class JourneySourceKind(str, Enum):
+    GITHUB_REPO = "github_repo"
+    UPLOADED_DOC = "uploaded_doc"
+
+
+class JourneySourceAttachRequest(BaseModel):
+    kind: JourneySourceKind
+    locator: str = Field(min_length=1, max_length=1000)
+
+
+class JourneySourceResponse(BaseModel):
+    id: str
+    journey_id: str
+    kind: str
+    locator: str
+    revision_hash: str = ""
+    status: str = "indexed"
+    file_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class JourneySourceDiff(BaseModel):
+    changed: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+
+
+class JourneySourceIngestResponse(BaseModel):
+    api_version: str = JOURNEY_API_VERSION
+    source: JourneySourceResponse
+    diff: JourneySourceDiff
+
+
+class JourneySourceListResponse(BaseModel):
+    api_version: str = JOURNEY_API_VERSION
+    sources: list[JourneySourceResponse] = Field(default_factory=list)
+
+
+
 class GenerateBatchRequest(BaseModel):
     prompt_version: str = Field(default="", max_length=128)
     model_version: str = Field(default="", max_length=128)

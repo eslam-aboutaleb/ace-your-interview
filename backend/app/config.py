@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # question batches and reader checkpoints (rollout flag, default off
     # while the remaining learning-journey stages land).
     enable_journeys_v1: bool = False
+    # Repository- and document-grounded journey sources (issue #14),
+    # default off until ingestion lands end to end.
+    enable_journey_sources_v1: bool = False
+
     #: Optional LLM adjudication for the journey-generation embedding
     #: review band (issue #2). Default off: the band rejects conservatively.
     enable_journey_generation_adjudication: bool = False
