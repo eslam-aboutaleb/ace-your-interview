@@ -21,7 +21,13 @@ class Settings(BaseSettings):
 
     # Default LLM settings
     default_provider: str = "groq"      # Free tier friendly default
-    default_model: str = "llama-3.3-70b-versatile"
+    # OpenAI-compatible LiteLLM gateway (provider "litellm"). The raw
+    # LITELLM_API_BASE / LITELLM_API_KEY env names (the owner's cross-repo
+    # convention) are honoured as fallbacks in the LLM client; these
+    # STUDY_-prefixed settings take precedence when set.
+    litellm_api_base: str = ""
+    litellm_api_key: str = ""
+    default_model: str = "openai/gpt-oss-120b"
     default_temperature: float = 0.7
     llm_task_routing_enabled: bool = False
     llm_task_route_map_json: str = ""
@@ -91,6 +97,11 @@ class Settings(BaseSettings):
     llm_user_call_budget: int = 120
     llm_user_call_budget_window_seconds: int = 60
     llm_user_max_concurrency: int = 4
+    # Cap on how long a 429 retry waits for the provider's retry-after hint.
+    # 30s keeps interactive use snappy; the weekly live eval raises it past
+    # Groq's 60s per-minute window so free-tier TPM saturation resolves
+    # instead of failing the call.
+    llm_rate_limit_max_wait_seconds: float = 30.0
     # Trust X-Forwarded-For only when running behind a known proxy.
     trusted_proxy_enabled: bool = False
 
