@@ -439,9 +439,14 @@ describe("ReadinessPage", () => {
     vi.mocked(fetchReadiness).mockResolvedValue(readiness());
     renderPage();
 
-    await screen.findByText("Role Readiness");
-    const button = screen.getByRole("button", { name: /Refresh/i });
+    // The page title renders while the first request is still in flight, so
+    // wait for the loaded card (data present) before touching Refresh.
+    // Capturing the button earlier races the initial load: it is disabled
+    // until useApi settles.
+    await screen.findByTestId("target-role");
+    const button = await screen.findByRole("button", { name: /Refresh/i });
     await waitFor(() => expect(button).toBeEnabled());
+    expect(fetchReadiness).toHaveBeenCalledTimes(1);
 
     const second = readiness({
       generated_at: "2026-10-11T10:00:00Z",
