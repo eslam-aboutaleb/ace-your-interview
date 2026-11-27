@@ -1,0 +1,8 @@
+{"pair_id": "dup.exact-casefold", "a": "What is the time complexity of binary search?", "b": "What is the time complexity of binary search", "label": "duplicate", "rationale": "punctuation-only difference"}
+{"pair_id": "dup.substring", "a": "Explain how HTTP keep-alive improves latency.", "b": "Explain how HTTP keep-alive improves latency. Give an example.", "label": "duplicate", "rationale": "one prompt contains the other verbatim"}
+{"pair_id": "dup.token-overlap", "a": "Why does a hash map give constant time lookup on average?", "b": "Why does a hash map provide constant time lookup on average?", "label": "duplicate", "rationale": "same question, one synonym swapped"}
+{"pair_id": "ndp.same-topic-different-concept", "a": "What is the time complexity of binary search?", "b": "How does binary search handle duplicate keys in the array?", "label": "not_duplicate", "rationale": "same topic, different concept"}
+{"pair_id": "ndp.shared-stopwords", "a": "When should you choose a queue over a stack?", "b": "How does TCP recover from packet loss?", "label": "not_duplicate", "rationale": "unrelated questions"}
+{"pair_id": "ndp.similar-shape", "a": "What is the time complexity of merge sort?", "b": "What is the space complexity of merge sort?", "label": "not_duplicate", "rationale": "different property asked"}
+{"pair_id": "dup.reworded-definition", "a": "Define idempotency in the context of HTTP APIs.", "b": "Define idempotency in the context of HTTP APIs", "label": "duplicate", "rationale": "punctuation-only difference"}
+{"pair_id": "ndp.contrast-pair", "a": "How does optimistic locking differ from pessimistic locking?", "b": "When is pessimistic locking the better choice?", "label": "not_duplicate", "rationale": "related but distinct questions"}

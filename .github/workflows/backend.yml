@@ -117,6 +117,16 @@ jobs:
       - name: Production-validator binding and prompt-contract tests
         run: python -m pytest tests/test_eval_agent_quality.py -v
 
+      # Learning-quality release gate (issue #17): schema validity of
+      # published answers, duplicate safety against human-labeled pairs,
+      # and golden multi-session progress replays through the production
+      # LearningStore. Deterministic: no model, no key, exits 1 on breach.
+      - name: Learning-quality release gate
+        run: python scripts/eval_learning_quality.py --json | tee learning-quality-report.json
+
+      - name: Learning-quality harness tests
+        run: python -m pytest tests/test_eval_learning_quality.py -v
+
       - name: Upload eval report
         if: always()
         uses: actions/upload-artifact@v4
