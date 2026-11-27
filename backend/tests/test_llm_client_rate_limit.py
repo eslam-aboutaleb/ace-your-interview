@@ -127,6 +127,12 @@ class RateLimitRetryTests(_ClientTest):
         result = self._run(transport, [])
         self.assertEqual(transport.calls, RATE_LIMIT_MAX_ATTEMPTS)
         self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "llm_rate_limited")
+
+    def test_exhausted_rate_limit_is_terminal_for_caller_retry_loops(self):
+        from app.services.llm_client import RATE_LIMITED_CODE, TERMINAL_ERROR_CODES
+
+        self.assertIn(RATE_LIMITED_CODE, TERMINAL_ERROR_CODES)
 
 
 class GptOssKwargsTests(_ClientTest):

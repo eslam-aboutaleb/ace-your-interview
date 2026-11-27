@@ -112,8 +112,16 @@ def _rate_limit_wait_seconds(
     return RATE_LIMIT_DEFAULT_WAIT_SECONDS
 TRUNCATED_CODE = "llm_truncated"
 CALL_FAILED_CODE = "llm_call_failed"
+RATE_LIMITED_CODE = "llm_rate_limited"
 #: Codes a retry loop must not spin on: retrying cannot change the outcome.
-TERMINAL_ERROR_CODES: frozenset[str] = frozenset({BUDGET_EXCEEDED_CODE, TRUNCATED_CODE})
+#: Rate limiting is terminal at the CALLER level once the client's own
+#: patient retries are exhausted: the provider asked for minutes, and a
+#: generator that re-sends the same prompt anyway storms the daily quota
+#: (an eval case burned 326 retried calls on an exhausted 200K TPD budget
+#: before this code existed).
+TERMINAL_ERROR_CODES: frozenset[str] = frozenset(
+    {BUDGET_EXCEEDED_CODE, TRUNCATED_CODE, RATE_LIMITED_CODE}
+)
 
 _FENCED_JSON = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", flags=re.DOTALL)
 
@@ -704,6 +712,8 @@ class LLMClient:
                 error_code = (
                     TRUNCATED_CODE
                     if "json_validate_failed" in str(e)
+                    else RATE_LIMITED_CODE
+                    if _is_rate_limit_error(e)
                     else CALL_FAILED_CODE
                 )
                 return {
